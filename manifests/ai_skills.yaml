@@ -1,0 +1,39 @@
+schema_version: 1
+last_verified: "2026-08-03T20:35:00+08:00"
+
+policy:
+  installation_authorization: project_owner_approved_for_missing_skills
+  allowed_repositories_only: true
+  prefer_verified_commit: true
+  moving_branch_requires_review: true
+  repository_fallback: docs/development/ai_collaboration_workflow.md
+  secrets_allowed: false
+  project_memory_checkpoint: automatic_after_each_project_task_or_pause
+  handoff_creation: event_triggered_not_per_task
+  handoff_ai_initiated_events:
+    - cross_person_machine_or_stage_transfer
+    - long_pause_or_context_loss_risk
+    - unfinished_high_risk_transfer
+  handoff_ordinary_task_completion: forbidden
+
+skills:
+  - name: project-memory
+    requirement: required_for_non_trivial_project_work
+    repository: https://github.com/Makoto20S/project-memory
+    default_branch: main
+    verified_commit: ab9d08cf9841f22feab278caeda115e4744b8635
+    tags_observed: false
+    use: restore_reconcile_auto_update_checkpoint_and_validate_project_memory_for_each_project_task
+
+  - name: write-codex-handoff
+    requirement: required_only_for_handoff_create_resume_check_or_list
+    repository: https://github.com/Makoto20S/codex-handoff-skill
+    default_branch: main
+    verified_commit: 6992a973b210c636e6a068a1aacc45dcadf0132e
+    tags_observed: false
+    use: create_validate_list_and_resume_event_triggered_handoffs_only
+
+verification:
+  method: git_ls_remote_symref_head_and_tags
+  result: both_repositories_resolved_main_and_no_tags_were_observed
+  installed_copy_match: not_asserted

@@ -1,0 +1,16 @@
+# Keep repository text deterministic across Windows editing and Linux/ARM64 CI.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets are excluded by policy, but declare common formats defensively.
+*.pdf binary
+*.zip binary
+*.rar binary
+*.7z binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary

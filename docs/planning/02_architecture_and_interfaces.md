@@ -1,0 +1,439 @@
+# 总体架构与接口设计
+
+## 1. 设计原则
+
+| 原则 | 具体约束 | 性质 |
+|---|---|---|
+| 协议事实优先 | 型号、固件、模式、缩放、ID、位速率和力矩语义没有确认就不能给默认值 | 有依据的推断 |
+| 确定性路径最小化 | 控制路径只含预分配 C++、最新状态快照、边界检查和非阻塞命令提交 | 有依据的推断 |
+| 总线单写者 | 每条物理 CAN 由一个运行时发送控制命令并维护队列、时间和错误状态 | 有依据的推断 |
+| 物理量诚实 | 只有经设备证据和校准成立的接口才使用 SI 物理量名称 | 有依据的推断 |
+| 时间语义显式 | 采样时刻、内核接收时刻、主机单调到达时刻和控制时刻不互相替代 | 有依据的推断 |
+| 生命周期可失败 | 配置、激活、切换和恢复都允许拒绝；失败时优先进入可解释的无命令/锁存状态 | 有依据的推断 |
+| 无硬件也可测 | codec、路由、状态机和控制器必须可在单元测试、vcan 和模拟器上运行 | 有依据的推断 |
+| 单发行版前进 | MVP 只支持 Humble；纯 C++ 核心避免 ROS API，以后迁移适配层，不维护多个长期分支 | 有依据的推断 |
+
+## 2. 备选架构比较
+
+### 2.1 方案 A：ros2_control 中心化、协议直接写在硬件插件内
+
+**有依据的推断**：方案 A 让一个或多个 `SystemInterface`/`SensorInterface` 直接打开 SocketCAN、编解码并导出接口。它最接近常见 demo，首个设备上线较快；但总线共享、跨设备路由、脱离 ROS 的协议测试、CANopen 事件循环和未来 STM32 会逐步侵入插件生命周期。
+
+### 2.2 方案 B：纯 C++ 核心 + ros2_control 薄适配层
+
+**有依据的推断**：方案 B 把 SocketCAN、路由、codec、设备会话、时间、新鲜度、命令租约、限幅和诊断放入不依赖 ROS 的库；一个复合 ros2_control 硬件插件仅做生命周期、接口 claim 和 SI 值映射。额外边界增加首周工作，但长期可测试性、总线协调和版本迁移更强。
+
+| 评价项 | 权重 | 方案 A（1~5） | 方案 B（1~5） | 评价依据 | 性质 |
+|---|---:|---:|---:|---|---|
+| 确定性路径与总线所有权 | 25 | 3 | 5 | A 易形成多插件/多写者；B 在核心统一 | 有依据的推断 |
+| 脱离 ROS 的可测试性 | 20 | 2 | 5 | B 的 codec/路由/状态机可直接单测与 fuzz | 有依据的推断 |
+| ros2_control 生命周期/切换 | 20 | 5 | 4 | A 更直接；B 需要薄适配但仍完整使用标准 API | 有依据的推断 |
+| 多设备/协议扩展 | 15 | 3 | 5 | B 以 capability 和设备会话扩展 | 有依据的推断 |
+| 故障隔离和诊断一致性 | 10 | 3 | 4 | B 有单一总线错误与命令租约事实源 | 有依据的推断 |
+| 一个月初始成本 | 10 | 5 | 3 | A 起步更快，B 需要先建核心边界 | 有依据的推断 |
+| 加权总分 | 100 | 340/500 | 450/500 | 分数用于显式比较，不是客观测量 | 有依据的推断 |
+
+**有依据的推断**：选择方案 B。方案 A 只保留为回退：若纯核心边界在 Week 1 无法通过 vcan 验证，可临时缩小功能，而不是把协议复制回多个插件。
+
+**有依据的推断**：不选择“独立 CAN 网关进程 + ROS topic 连接控制器”作为第三种命令架构，因为它会把 DDS、序列化、执行器调度和跨进程失效处理放进闭环。独立网关只允许作为只读诊断/录制旁路。
+
+## 3. 总体组件图
+
+**有依据的推断**：选定架构如下；`ControlCore` 与 ros2_control 处于同一进程，Python 和记录工具在非实时进程。
+
+```mermaid
+flowchart TB
+    subgraph J[Jetson host]
+        subgraph CP[control process]
+            CM[controller_manager]
+            CTRL[C++ controller plugins]
+            HW[thin composite SystemInterface]
+            CORE[ControlCore]
+            ROUTER[FrameRouter and device sessions]
+            B0[BusRuntime motor_bus]
+            B1[BusRuntime sensor_bus]
+            CM --> CTRL
+            CM --> HW
+            HW <--> CORE
+            CORE <--> ROUTER
+            ROUTER <--> B0
+            ROUTER <--> B1
+        end
+        subgraph NR[non-real-time processes]
+            PY[Python inference or policy]
+            DIAG[diagnostics and UI]
+            BAG[rosbag2 and experiment recorder]
+            TOOLS[can-utils read-only tools]
+        end
+        PY -->|versioned target with sequence and TTL| CTRL
+        CORE -->|bounded snapshots| DIAG
+        CM --> BAG
+        DIAG --> BAG
+    end
+    B0 <--> CAN0[(physical CAN bus A)]
+    B1 <--> CAN1[(physical CAN bus B)]
+    CAN0 <--> MOTORS[1 to 6 CubeMars devices]
+    CAN1 <--> IMUS[2 HI12 devices]
+    CAN1 <--> STM[future STM32 node in Classical CAN mode]
+    TOOLS -. read-only observation .-> CAN0
+    TOOLS -. read-only observation .-> CAN1
+```
+
+**规划决定**：图中的第二物理接口是未来扩展边界，当前硬件只有 `can0`。首个两电机、两 HI12 profile 先以一个 `BusRuntime` 映射到 `can0`，但只有四台设备位速率一致、ID 无冲突且负载/故障测试通过后才激活；不通过时必须增加第二接口或降低/调整 profile，不能在软件中假装存在 `can1`。
+
+## 4. 分层与所有权
+
+| 层 | 核心职责 | 明确不负责 | 所有者 | 性质 |
+|---|---|---|---|---|
+| `SocketCanTransport` | 非阻塞 RAW socket、过滤、`recvmsg` 时间戳、错误帧、接口统计、发送结果 | 设备缩放、ROS 消息 | 每条 BusRuntime | 有依据的推断 |
+| `BusRuntime` | 一个 RX 线程、一个定相 TX 调度、最新命令槽、总线状态、计数器 | 控制算法、DDS | ControlCore | 有依据的推断 |
+| `FrameRouter` | 按 bus、帧格式、ID/mask、方向、设备实例路由；启动时检查重叠 | 靠标准/扩展标志猜设备 | ControlCore | 有依据的推断 |
+| Protocol codec | 字节序、位域、缩放、范围、错误码；纯函数和 golden frame | socket、线程、生命周期 | 协议包 | 有依据的推断 |
+| Device session | 固件 capability、样本聚合、新鲜度、命令模式、设备状态机 | ROS 参数和发布 | 设备包 | 有依据的推断 |
+| Canonical state/command | 定长 SI 值、原始值、时间、质量、序号、租约 | 动态容器和日志字符串 | ControlCore | 有依据的推断 |
+| ros2_control adapter | 配置/激活/停用、导出接口、`read/write`、mode switch | 直接编解码和阻塞 I/O | ROS 包 | 有依据的推断 |
+| C++ controllers | PID/阻抗/滑模/有界测试控制，写本周期命令 | SocketCAN、设备型号分支 | ROS controller 包 | 有依据的推断 |
+| 普通 ROS 节点 | 配置工具、诊断、状态发布、实验编排、记录 | 电机确定性更新 | 非 RT 包 | 有依据的推断 |
+| Python | 训练、推理、数据处理、低频策略 | 硬实时闭环、设备驱动 | Python 包/进程 | 已确认事实 |
+
+### 4.1 每条总线的单一协调者
+
+**已确认事实**：SocketCAN 支持多个匹配监听 socket，多个接收者不会互相消费同一帧。[O01]
+
+**有依据的推断**：控制进程内仍只允许一个可写 `BusRuntime`。它使用一个经过精确过滤的接收 socket，显式订阅错误帧，并维护唯一的 TX 调度。`candump` 等工具可只读并行；任何第二写者必须在配置期被禁止。
+
+**有依据的推断**：TX 不保存周期命令历史，而是每设备一个“最新有效命令”槽。过时周期命令直接覆盖/丢弃，配置和诊断请求走有界低频队列；这样拥塞后不会补发一串已经失效的力矩命令。
+
+**有依据的推断**：发送优先级按“停用/故障中和、命令租约处理、周期电机命令、同步触发、配置/诊断”排序；线上最终仲裁仍由数值更小的 CAN ID 决定，因此 ID 规划和响应时间必须另行分析，不能只依赖进程队列优先级。
+
+### 4.2 进程边界
+
+**有依据的推断**：MVP 中 `controller_manager`、硬件适配器和核心库在同一进程，以内存快照连接。Python、rosbag2、诊断聚合、Web/UI 和磁盘写入均为独立 SCHED_OTHER 进程；它们崩溃或阻塞不得阻止总线线程执行命令过期策略。
+
+## 5. 控制数据流图
+
+**有依据的推断**：状态和命令在确定性路径中的流向如下。所有箭头都携带质量/新鲜度或租约信息，不只携带数值。
+
+```mermaid
+flowchart LR
+    DEV[CAN devices] -->|CAN frame| RX[non-blocking RX]
+    RX -->|kernel timestamp plus monotonic arrival| RT[frame routing]
+    RT --> CODEC[protocol codec]
+    CODEC --> SESSION[device session and sample quality]
+    SESSION --> SNAP[preallocated latest-state snapshot]
+    SNAP --> READ[SystemInterface read]
+    READ --> UPDATE[controller update]
+    POLICY[Python target] -->|sequence, validity, limits| GUARD[RT policy buffer]
+    GUARD --> UPDATE
+    UPDATE --> WRITE[SystemInterface write]
+    WRITE --> VALIDATE[finite, capability, limits, slew, mode, freshness]
+    VALIDATE --> LEASE[latest command plus deadline and generation]
+    LEASE --> TX[per-bus TX scheduler]
+    TX -->|CAN command| DEV
+    RX --> ERR[error and bus counters]
+    ERR --> FAULT[fault supervisor]
+    FAULT --> VALIDATE
+    SNAP -. decimated copy .-> OBS[diagnostics and recording]
+```
+
+**有依据的推断**：`read()` 只读取完整发布的最新快照，不等待帧；`write()` 只提交经过最终验证的定长命令，不等待 socket。RX/TX 线程与 controller_manager 之间使用预分配双缓冲、SPSC 环或经基准验证的 `realtime_tools` 容器；禁止在 ACTIVE 路径分配内存。
+
+## 6. 配置、路由和冲突检查
+
+### 6.1 配置事实源
+
+| 配置对象 | 必填字段 | 校验 | 性质 |
+|---|---|---|---|
+| Bus | 逻辑名、部署接口映射、Classic/FD、nominal/data bitrate、预期负载、发送相位 | 接口存在；模式一致；总负载预算 | 有依据的推断 |
+| Device | 实例名、类型、bus、协议、节点 ID、帧过滤、固件兼容范围、关键性 | 路由无未授权重叠；协议与帧格式匹配 | 有依据的推断 |
+| Motor | 基础机型、定制件号、驱动板/固件、command profile、编码器来源、方向、零位、减速比、状态/命令缩放、软限位、速率、超时策略 | 未确认项不得用猜测默认；effort 需匹配实机参数证据 | 有依据的推断 |
+| IMU | PNAME/APP_VER、J1939/CANopen、ID、输出 profile、坐标系、安装变换、时间域、freshness | 两台 ID 唯一；缩放按协议；输出帧可达 | 有依据的推断 |
+| STM32 | 协议版本、节点、消息 profile、时钟域、通道/标定版本、速率 | schema 和 DBC 版本一致 | 有依据的推断 |
+| Safety policy | 状态超时、命令 TTL、slew、neutral 定义、故障锁存、恢复权限 | 与 capability/台架边界一致 | 有依据的推断 |
+
+**有依据的推断**：配置使用版本化 schema。任何缺少关键电机参数、重复节点、重叠路由、未知协议或超过带宽预算的配置在 `on_configure` 阶段失败；错误信息进入非 RT 诊断，不以隐式回退继续运行。
+
+**有依据的推断**：代码只使用逻辑总线名。部署清单把 `motor_bus`/`sensor_bus` 映射到 `can0` 或经 USB 序列号稳定命名的接口；未来 Jetson 的接口数量和名称不写死在协议或控制器中。
+
+### 6.2 路由键
+
+**有依据的推断**：接收路由键至少由 `(logical_bus, Classic/FD, standard/extended, can_id & mask, direction, device_instance)` 组成。J1939 PGN/SA、CANopen COB-ID 和 CubeMars 功能 ID 在协议层进一步解码；禁止仅以“标准帧=电机、扩展帧=IMU”分类。
+
+**有依据的推断**：配置期生成最窄 SocketCAN filter 并做两两交集检查。允许同一帧同时进入设备会话与只读诊断观察者，但这个 fan-out 必须显式声明；任何两个可写设备对相同命令 ID 的所有权冲突都拒绝激活。
+
+## 7. 协议选择与设备能力模型
+
+### 7.1 配置期固定协议
+
+**资料事实**：AK3.0 V3.2 称 servo 与力控/MIT-like 可由同代固件使用且无需模式切换，但两个命令族仍有不同的功能 ID、payload 位序和 command capability。旧标准帧 MIT 又属于不同协议代际。HI12 J1939/CANopen 则仍取决于交付固件。这些 profile 都不能只看第一帧后自动猜测。[L07][L04]
+
+**有依据的推断**：每个设备配置一个不可变 `protocol_profile`。配置时验证准确固件、允许的帧格式、codec 版本、反馈集合和命令集合；ACTIVE 期间不改变 profile。需要上电/刷固件的变化必须先停用硬件、断能并走独立 bring-up 流程。
+
+**规划决定（2026-08-03 修订）**：CubeMars 适配包至少区分三个 codec：`AK V3 servo extended`、`AK V3 force-control extended` 和 `legacy MIT standard-frame`。前两个是当前 AKE60-8 的候选并分别提供 golden frame、模拟器和 lifecycle/claim 测试；legacy 只用于明确匹配的旧固件。设备在 `on_configure` 绑定协议代际和 active command profile，ACTIVE 期间不自动识别、改变 claim 或混发命令族。
+
+### 7.2 capability 描述
+
+| capability 类别 | 示例 | 暴露条件 | 性质 |
+|---|---|---|---|
+| 原始状态 | `electrical_velocity`, `motor_current`, `fault_code` | 手册字段与抓包一致 | 有依据的推断 |
+| 标准状态 | `position [rad]`, `velocity [rad/s]`, `effort [N*m]` | 机械侧语义、方向、减速比和字段映射均有资料证据；物理精度单独标记 | 有依据的推断 |
+| 标准命令 | position/velocity/effort | 当前固件/模式真实支持，SI 映射、限制和 neutral 已定义 | 有依据的推断 |
+| 设备特有命令 | current、brake、origin、MIT gains | 仅由专用 gated 控制器/profile 使用；不能冒充标准接口 | 有依据的推断 |
+| IMU 状态 | accel、gyro、orientation、temperature、quality | 对应 PGN/TPDO 已启用且坐标/缩放确认 | 有依据的推断 |
+| 同步能力 | trigger、device timestamp、sequence | 现场固件与测量证明，不由协议名推断 | 有依据的推断 |
+
+**有依据的推断**：capability 包含来源文档版本和支持固件范围。现场固件超出范围时，组件保持 INACTIVE 并报告不兼容，而不是按“最接近型号”运行。
+
+### 7.3 双编码器语义
+
+**用户确认事实**：当前两台电机基于 AKE60-8、驱控一体，并加装 CubeMars 双编码器；定制结构不属于本软件任务。
+
+**资料事实**：AK V3.2 的通用参数表给出 21-bit 单圈绝对值内环编码器，以及双编码器型号可选的 15-bit 单圈绝对值外环编码器；UART 参数响应能区分外环位置、编码器角度和外编码器角度。手册没有说明 CAN `0x29/0x2A` 的位置来自哪一个编码器，也没有给出通过 CAN 同时读取两者的明确帧。[L07]
+
+**规划决定**：标准 `joint/position` 由实机固件实际提供且语义已确认的关节/输出侧位置产生；在 CAN 字段来源确认前不预选内环或外环。若 CAN 最终只能提供一个融合/选定位置，则另一编码器不伪装成可用 ros2_control 状态。必须保存编码器来源、分辨率、零位和持久化语义；双编码器角差不能在未获得刚度、回差和算法证据时直接当作力矩传感器。
+
+### 7.4 STM32 消息语义
+
+**有依据的推断**：首期只冻结语义要求，不冻结位布局。未来节点至少提供：协议版本、boot ID、采样序号、采样时刻/计数、通道有效位、标定版本、节点状态、丢样/队列计数和诊断；时间戳应在采集处产生，不能在 CAN 发送时生成。
+
+**有依据的推断**：多帧样本需要可检测的序号/分片索引与端到端完整性；CAN 自身 CRC 不解决“帧属于哪次样本”和应用层分片遗漏。最终用 DBC 或同等机器可读 schema 定义并生成/验证 C 与 C++ 编解码，待传感器数量和信号形式确认后再选择 Classic CAN、CAN FD、CANopen 或 Cyphal。
+
+## 8. 时间、新鲜度和多速率数据
+
+### 8.1 时间字段
+
+| 字段 | 含义 | 用途 | 不能替代 | 性质 |
+|---|---|---|---|---|
+| `device_sample_time` | 设备在采集处产生的时间/计数 | 跨传感器对齐、延迟估计 | 无该字段时不能伪造 | 有依据的推断 |
+| `kernel_rx_time` | SocketCAN 内核时间戳 | 到达链路分析 | 不必等于采样时刻 | 有依据的推断 |
+| `host_rx_mono` | RX 线程收到帧时的 `CLOCK_MONOTONIC` | 新鲜度、超时、处理延迟 | 不用于绝对 UTC | 有依据的推断 |
+| `control_time_mono` | controller_manager 本周期时刻 | `dt`、命令租约、抖动 | 不覆盖源时间 | 有依据的推断 |
+| `ros_stamp` | 映射后的 ROS 时间 | 记录和跨节点关联 | 时钟域未知时需附质量标志 | 有依据的推断 |
+
+**有依据的推断**：所有 freshness/TTL 使用单调时钟，避免 NTP/人工改时破坏超时。若设备时钟可用，维护显式的 offset/drift/uncertainty 映射；若不可用，发布主机到达时间并把 `sample_time_valid=false`。
+
+### 8.2 多帧和多速率规则
+
+**有依据的推断**：每个信号组独立保存 `value, source_time, rx_time, sequence, age, valid, quality`。只有协议提供公共序号/触发证据时才组成 `coherent_sample=true`；HI12 J1939 公开 PGN 缺少公共序号，因此默认按字段新鲜度发布，不宣称严格同采样。
+
+**规划决定（2026-07-30）**：当前两电机 profile 的控制循环以 500 Hz 读取 100 Hz（必要时 200 Hz）IMU 最新值；若后续控制循环升至 1 kHz，同样允许重复读取完整快照。值的源时间保持不变，age 递增；状态估计器明确选择零阶保持、插值或拒绝。不得每个控制周期把时间戳改成 `now()` 伪造高频传感器。
+
+**有依据的推断**：freshness 阈值按设备/信号配置。初始建议 warning 为 2 个期望周期、active-critical fault 为 3 个周期；这个阈值在 Week 4 通过到达间隔分布验证，不能替代机械安全机制。
+
+**待确认项**：两台 HI12 是否支持并接的 SYNC_IN、触发到内部采样的时延和抖动、J1939 触发多个 PGN 的具体顺序由成员 B 在 Week 2 用逻辑分析仪确认。
+
+## 9. ros2_control 边界与接口
+
+### 9.1 MVP 硬件组件
+
+**有依据的推断**：MVP 使用一个配置驱动的复合 `SystemInterface`，拥有全部 `BusRuntime`，同时导出电机关节和 HI12 sensor state interfaces。这样避免 `SystemInterface` 与多个 `SensorInterface` 各自打开同一总线；纯核心仍不依赖 ROS，未来有真实生命周期独立需求时再拆分。
+
+| 生命周期回调 | 允许动作 | 失败条件 | 性质 |
+|---|---|---|---|
+| `on_init` | 读取 schema、声明接口，不打开硬件 | schema/必填字段错误 | 有依据的推断 |
+| `on_configure` | 建立 BusRuntime、filter、codec/session；保持无命令 | 接口不存在、ID 冲突、固件/capability 不匹配、负载超预算 | 有依据的推断 |
+| `on_activate` | 要求总线健康、关键反馈新鲜、命令为 neutral/无效；启动租约 | 反馈陈旧、故障锁存、台架闸门未满足 | 有依据的推断 |
+| `read` | 非阻塞复制最新完整快照，更新 age/quality | 持续关键超时后返回 ERROR | 有依据的推断 |
+| `write` | 有限/有界/模式检查后提交带 generation/deadline 命令 | NaN、越界、错误 mode、状态陈旧 | 有依据的推断 |
+| `on_deactivate` | 停止刷新命令，按策略斜坡到 neutral，继续只读诊断 | neutral 发送确认失败则锁存 fault | 有依据的推断 |
+| `on_error` | 禁止新命令、锁存原因、要求显式恢复 | 不自动无限重启 | 有依据的推断 |
+
+**已确认事实**：Humble 中硬件 `read/write` 返回 ERROR 会进入生命周期错误处理，但硬件重启后的控制器自动恢复能力不完整。[O03]
+
+**有依据的推断**：MVP 采用显式恢复：停用控制器、确认 neutral/断能、cleanup、configure、再激活。不得把自动 bus-off restart 或无限生命周期重试作为默认行为。
+
+### 9.2 控制器接口
+
+**有依据的推断**：自研 PID、阻抗、滑模和有界 effort 测试控制器只依赖标准 SI interface 与独立的状态质量/命令租约契约，不包含 CAN ID 或型号分支。标准 `joint_state_broadcaster` 和合适的 IMU broadcaster 可选择性复用。
+
+**规划决定（2026-08-03 修订）**：最小框架 demo 由专用 C++ ros2_control 控制器实现。其 `update()` 每周期持续写入一个可配置、有界、从零斜坡进入的 commanded effort；示例数值不进入默认配置或固定验收。控制器不打开 SocketCAN 或构造 CubeMars 帧；`SystemInterface::write()` 和 device session 负责最终校验，并按配置映射为 AK V3 servo Iq 或 AK V3 force-control torque 字段，再执行命令租约及 CAN 提交。
+
+**规划决定（2026-07-30）**：该 demo 只验证 controller -> hardware -> protocol -> CAN -> state/diagnostics 的最小纵向链路，不是最终控制算法。commanded-effort 链路与物理输出力矩精度分开验收；若只有 Iq 语义，则使用专用 `motor_current` 接口，直到 Kt、减速比和机械侧映射成立。
+
+## 10. 控制器切换、claim、连续性和回滚
+
+**已确认事实**：ros2_control 使用 `prepare_command_mode_switch()` 做非实时验证/准备，`perform_command_mode_switch()` 执行切换；Controller Manager 的 SwitchController 支持 STRICT/BEST_EFFORT、成组激活和 timeout。[O03]
+
+**有依据的推断**：MVP 的所有自动切换使用 STRICT，并在切换前记录活动控制器集合、硬件 generation、当前状态和最后安全命令。BEST_EFFORT 只允许人工诊断，不用于有电机输出的实验。
+
+### 10.1 切换事务
+
+1. **有依据的推断**：预检新控制器所需接口、设备 capability、状态新鲜度、协议 profile、限值和台架许可；任何一项失败时保持旧控制器不变。
+2. **有依据的推断**：旧控制器在停用前输出有界 handover 值；新控制器 `on_activate` 从当前测量状态初始化积分器/轨迹，不从零或陈旧目标跳变。
+3. **有依据的推断**：`perform_command_mode_switch` 在周期边界提升 command generation，旧 generation 命令立即不能续租；新控制器必须在限定周期内提交有限值。
+4. **有依据的推断**：硬件层对任何命令统一做最终限幅、slew、mode 和 freshness 检查，因此即使控制器初始化错误也不能绕开边界。
+5. **有依据的推断**：若新控制器激活失败，应用层尝试恢复旧控制器仅限硬件仍 ACTIVE、反馈新鲜、旧控制器可重新初始化的情况；否则进入 neutral/INACTIVE/FAULT_LATCHED，禁止“为了连续”继续旧命令。
+
+**有依据的推断**：命令连续性验收以“输出变化不超过配置 slew × 实际 dt、无超过 2 个周期的无效窗口、失败后不晚于命令 TTL 进入 neutral”为准，而不是要求数值绝对不变。
+
+**有依据的推断**：标准 ros2_control double command interface 本身没有序号。项目自研控制器需要共享一个定长命令元数据契约（generation、valid、producer sequence）；对不能提供该契约的第三方控制器，只能使用较弱的 manager-loop heartbeat 模式并在风险清单中标明。
+
+## 11. C++ 实时层与 Python 学习层
+
+| 项目 | C++ 确定性层 | Python 非实时层 | 性质 |
+|---|---|---|---|
+| 设备 I/O | SocketCAN、codec、状态快照 | 禁止 | 已确认事实 |
+| 控制 | PID、阻抗、滑模、限幅、slew、fallback | 神经网络、规划、低频策略 | 已确认事实 |
+| 时间 | monotonic age/TTL、控制 dt | 源时间、模型推理时间记录 | 有依据的推断 |
+| 数据交换 | 固定上限、预分配、最新值 | ROS topic/service/action | 有依据的推断 |
+| 失败 | 过期即失效，转本地 fallback/neutral | 可重启，不拥有设备 | 有依据的推断 |
+
+**有依据的推断**：Python 到 C++ 的目标至少带 producer sequence、source stamp/clock domain、`valid_for`、模型/策略版本、目标值和上界。C++ 回调记录单调到达时刻，将定长对象写入经过基准的 RT buffer；控制器只接受序号前进、未过期、有限且在边界内的目标。
+
+**有依据的推断**：高频观测/目标 topic 默认候选 QoS 为 `KEEP_LAST(1)`、best-effort，理由是陈旧值比丢一帧更危险；模式切换、实验控制和配置使用 reliable service/action。最终 QoS 在同机 GPU 压力测试中比较 best-effort 与 reliable 后锁定。
+
+**有依据的推断**：Python 目标初始 20~50 Hz，C++ 在当前 500 Hz 控制循环中做有界保持/插值并独立维护 TTL；未来 1 kHz profile 沿用相同契约。GPU 和 Python 使用 SCHED_OTHER；CPU affinity 只按具体 Jetson 测量配置，不硬编码核号。
+
+## 12. 线程与时序图
+
+**有依据的推断**：推荐每条总线一对 RX/TX 线程；controller_manager 保持官方尝试的优先级 50，线程相对优先级和 CPU 隔离在实测后配置。下图表达顺序，不承诺固定微秒数。
+
+```mermaid
+sequenceDiagram
+    participant D as CAN devices
+    participant RX as Bus RX thread
+    participant S as State snapshots
+    participant CM as controller_manager RT loop
+    participant C as C++ controller
+    participant Q as Command lease slot
+    participant TX as Bus TX thread
+    participant N as Non-RT diagnostics
+
+    D->>RX: feedback frame
+    RX->>RX: timestamp, filter, decode, validate
+    RX->>S: publish complete generation
+    Note over CM: absolute-period wakeup
+    CM->>S: read latest without blocking
+    CM->>C: update(time, actual_dt)
+    C-->>CM: finite bounded command and generation
+    CM->>Q: write latest command plus deadline
+    TX->>Q: read at configured bus phase
+    alt command valid and state fresh
+        TX->>D: send newest CAN command
+    else expired, stale, or faulted
+        TX->>D: configured neutral if transmission is permitted
+        TX-->>N: latch timeout/fault counter
+    end
+    S-->>N: decimated immutable snapshot
+```
+
+**有依据的推断**：TX 相位应位于正常 `write()` 完成之后，更新超时则使用仍在租约内的上一命令至多有限周期；租约到期后 neutral。总线发送采用 non-blocking socket，队列满时丢弃旧周期命令并报告，不在实时线程重试无界循环。
+
+**待确认项**：RX、controller_manager、TX 的最优相对优先级、相位和 CPU affinity 由项目负责人在 Week 3 使用周期、调度延迟和 command-to-wire 时间戳联合测量后决定。
+
+## 13. 故障、超时和诊断状态
+
+### 13.1 状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unconfigured
+    Unconfigured --> Inactive: schema and buses configured
+    Inactive --> Active: fresh state, neutral command, gates passed
+    Active --> Degraded: non-critical sensor stale or warning
+    Degraded --> Active: freshness restored and policy permits
+    Active --> FaultLatched: critical timeout, bus-off, device fault, invalid command
+    Degraded --> FaultLatched: threshold exceeded
+    Active --> Inactive: controlled deactivate
+    FaultLatched --> Inactive: explicit neutral or physical disable confirmed
+    Inactive --> Unconfigured: cleanup
+```
+
+**有依据的推断**：状态机只描述软件控制许可，不等价于功能安全状态。急停、断能、机械限位和限流必须独立存在。
+
+### 13.2 故障策略
+
+| 事件 | RT 路径动作 | 生命周期/诊断 | 恢复 | 性质 |
+|---|---|---|---|---|
+| 单帧迟到 | 保留上一值并增加 age，不伪造更新 | 计数/直方图 | 自动 | 有依据的推断 |
+| 关键状态超过 fault threshold | 拒绝新运动命令，按策略 neutral | hardware ERROR/锁存原因 | 显式 | 有依据的推断 |
+| Python 目标过期 | 本地 fallback 或 neutral | 目标超时诊断 | 新序号且策略允许 | 有依据的推断 |
+| controller_manager 未刷新租约 | 独立 TX 线程在 TTL 后 neutral | watchdog 计数 | 显式复核 | 有依据的推断 |
+| 进程崩溃 | 软件线程无法保证发送 neutral | 依赖已确认的驱动器 watchdog 或物理断能 | B 与项目负责人在 G3 前用固件资料和低能量断包试验确认；人工恢复 | 待确认项 |
+| bus-off/error-passive | 停止命令、保存错误帧与接口统计 | FAULT_LATCHED | 不默认自动 restart | 有依据的推断 |
+| 设备故障码 | 不覆盖/清除；按映射停用 | 保留原始码、解释和首发时间 | 按手册和台架流程 | 有依据的推断 |
+| TX queue full | 丢旧周期命令，保留最新；不能无界阻塞 | counter + fault threshold | 负载整改 | 有依据的推断 |
+
+**有依据的推断**：诊断快照包含总线状态、RX/TX/parse/filter/drop/overflow/error 计数、各设备 age/sequence/quality、命令 generation/deadline、控制循环周期、切换结果和磁盘记录状态。字符串格式化、ROS 发布和文件写入只在非 RT 线程。
+
+## 14. 部署图与版本兼容
+
+**有依据的推断**：目标运行采用主机原生进程，开发/CI 可用容器；硬件访问默认不授予普通 CI 容器。
+
+```mermaid
+flowchart TB
+    subgraph GH[Private GitHub]
+        SRC[source and tests]
+        CI[amd64 CI and ARM64 build]
+        REL[versioned release manifest]
+    end
+    subgraph DEV[Developer workstations or dev containers]
+        VCAN[vcan and simulator tests]
+    end
+    subgraph JET[Jetson native runtime]
+        INSTALL[versioned install tree]
+        CONF[validated deployment config]
+        PROC[control process]
+        NP[Python and recorder processes]
+        HOST[host ROS, kernel, SocketCAN permissions]
+        HOST --> PROC
+        INSTALL --> PROC
+        CONF --> PROC
+        PROC <--> NP
+    end
+    subgraph LAB[Lab hardware]
+        ADP[isolated SocketCAN adapters]
+        BUS[CAN buses and termination]
+        RIG[motor fixture, E-stop, torque measurement]
+        SENS[HI12 and future STM32]
+        ADP <--> BUS
+        BUS <--> RIG
+        BUS <--> SENS
+    end
+    subgraph NAS[NAS or object storage]
+        MIRROR[read-only Git mirror]
+        DATA[rosbag, candump, models, reports]
+    end
+    SRC --> CI
+    SRC --> VCAN
+    CI --> REL
+    REL --> INSTALL
+    JET <--> ADP
+    GH --> MIRROR
+    NP --> DATA
+```
+
+**有依据的推断**：Humble/Ubuntu 22.04 是当前部署组合。核心代码使用 Humble 可接受的 C++17 和标准 Linux API；ROS 类型、pluginlib、参数和生命周期限制在适配包。未来迁移新 JetPack/ROS 时先新增 CI 目标并迁移适配层，通过同一 golden frame 和核心单测，不在 MVP 同时维护 Humble/Jazzy 分支。
+
+**有依据的推断**：主机原生运行时不等于手工不可复现。release manifest 固定 Git commit/tag、依赖版本、构建选项、配置哈希、Jetson OS/内核/ROS 清单和设备固件身份；安装、权限、RT 内核或 systemd 变更都需要独立评审和回滚记录。
+
+## 15. 关键 ADR 建议
+
+| ADR | 决策 | 被否决替代 | 后果/重审触发 | 性质 |
+|---|---|---|---|---|
+| ADR-001 | 纯 C++ 核心 + ros2_control 薄适配 | 协议直接散落硬件插件 | 多一个边界；若核心不能脱 ROS 单测则重审 | 有依据的推断 |
+| ADR-002 | 每条物理总线一个进程内 BusRuntime 和单写者 | 每设备独立 socket 写者；DDS 网关命令路径 | 集中调度；若 CANopen 库无法嵌入则给其专用总线/后端 | 有依据的推断 |
+| ADR-003 | MVP 一个复合 SystemInterface | 每设备一个 hardware component | 生命周期耦合但所有权明确；确有独立恢复需求时拆分 | 有依据的推断 |
+| ADR-004 | 协议代际与 active command profile 在 ACTIVE 期间不可变 | 按收到帧自动猜 AK V3/legacy MIT/J1939/CANopen，或混发 servo/force 命令 | claim 与命令映射确定；若将来确需在线 mode switch，则走显式 controller/hardware mode-switch 设计 | 有依据的推断 |
+| ADR-005 | 单调时钟管理 freshness，源时间独立保存 | 全部用 ROS `now()` | 时间字段更多；获得可靠设备时钟后增加映射 | 有依据的推断 |
+| ADR-006 | 当前两电机、两 HI12 以条件式单 `can0` profile 验证，架构保留双总线 | 假装已有 `can1`；无证据强行共总线 | 同速/ID/负载不通过即增加接口或修改 profile | 规划决定 |
+| ADR-007 | 目标原生运行、开发与 CI 容器化 | 所有运行都容器；所有开发都污染主机 | 两套清单需维护；容器 RT 测量证明充分时重审 | 有依据的推断 |
+| ADR-008 | Python 只交付有序号和 TTL 的低频目标 | Python 直接写 effort 或设备命令 | 需要 C++ fallback；推理进入安全认证范围时另立设计 | 有依据的推断 |
+| ADR-009 | effort 接口由型号、协议语义和机械侧映射闸门控制；最小恒定命令 demo 与物理精度分开验收 | 电流直接命名为力矩 | 允许先验证框架纵向链路，同时避免把 demo 当作最终控制目标 | 有依据的推断 |
+| ADR-010 | 大数据不进入普通 Git | rosbag/日志/权重直接 commit | 需要外部资产清单和保留策略 | 有依据的推断 |
+| ADR-011 | 一次只支持一个 ROS 发行版 | MVP 同时维护多发行版 | 迁移需专门里程碑；Humble 生命周期临近时触发 | 有依据的推断 |
+
+**有依据的推断**：每个 ADR 文件后续至少包含状态、日期、上下文、决策、替代项、正负后果、验证指标、重审触发和批准者。上述表是建议清单，不替代后续仓库中的独立 ADR 文件。
+
+## 16. 扩展到 6 电机、2 CAN 的规则
+
+**有依据的推断**：长期两总线设计包络是一条经确认位速率的 actuator bus 承载最多 6 台电机，另一条 sensor bus 承载两台 HI12 和 Classic CAN 模式 STM32。AK V3 8 字节扩展命令加 8 字节扩展反馈按 1 Mbit/s、200 Hz 估算为 38.4%，仍需保留错误/诊断/仲裁余量；传感器总线加入 STM32 前必须重算。
+
+**规划决定（2026-07-30）**：当前两电机单 `can0` profile 以 500 Hz 为正常目标；上段 200~250 Hz 只描述六电机单总线扩展预算。若两电机需要 1 kHz 电机收发、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
+
+**有依据的推断**：新增设备只增加配置、codec/device session 和 capability 映射；上层控制器继续使用标准物理量与质量接口。新增 Jetson 只更换部署映射和经过验证的 host manifest，不修改协议常量。
+
+[L07]: ../../manifests/assets.yaml
+[L04]: ../../manifests/assets.yaml
+[O01]: https://www.kernel.org/doc/html/latest/networking/can.html
+[O03]: https://control.ros.org/humble/doc/ros2_control/controller_manager/doc/userdoc.html

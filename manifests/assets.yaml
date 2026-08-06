@@ -1,0 +1,139 @@
+schema_version: 1
+last_reviewed: "2026-08-06"
+
+# This manifest records excluded or externally controlled material without
+# copying it into the main repository. Hashes are supplied only for files
+# actually observed during the FND-000 inventory; URIs must not contain secrets.
+policy:
+  supplier_repository: "CubeMars/"
+  supplier_repository_tracking: excluded_nested_repository
+  default_binary_and_large_data_tracking: excluded
+  approved_small_vectors_require: source_license_and_redistribution_review
+  secret_values_allowed: false
+
+excluded_paths:
+  - path: "CubeMars/"
+    category: supplier_repository
+    reason: independent supplier materials repository; keep outside the main repository
+    observed: true
+  - path: ".codex/"
+    category: local_session_state
+    reason: machine- and session-specific context
+    observed: true
+  - path: ".agents/"
+    category: local_agent_state
+    reason: machine- and session-specific context
+    observed: true
+  - path: "tmp/"
+    category: temporary_workspace
+    reason: transient extraction and working files
+    observed: true
+  - path: "presentation/"
+    category: legacy_presentation_bundle
+    reason: pre-FND-000 claims and excluded local attachments require factual review before tracking
+    observed: true
+
+observed_external_or_excluded_files:
+  - path: "CubeMars/CubeMars-logo.rar"
+    category: supplier_archive
+    source_version: unknown
+    source_uri: null
+    sha256: "B793B298A334755B46F821AFF52E13CEB85F73A30FF76EF90DB2F89BEB425E44"
+    bytes: 1334196
+    tracking: excluded
+  - path: "docs/ak-series-driver-manual-v1-0-18-for-ak-2-0-robotic-actuator-cn.pdf"
+    category: supplier_document
+    source_version: "AK2.0 V1.0.18"
+    source_uri: null
+    sha256: "E091DD4748F9B0E33E8495F7340399B820E863C46276CDBE0C860C2147DFDE4E"
+    bytes: 2310053
+    tracking: excluded_by_default
+  - path: "docs/hi12_datasheet_cn.pdf"
+    category: supplier_document
+    source_version: unknown
+    source_uri: null
+    sha256: "94563A0A9939C9B870C0820DB405BC8B6FA77316628E2B98FE79729553ED14B9"
+    bytes: 2164401
+    tracking: excluded_by_default
+  - path: "docs/imu_cum_cn.pdf"
+    category: supplier_document
+    source_version: unknown
+    source_uri: null
+    sha256: "1028C02E4C6C7AD21198D6ED2714B9BDD14C5D8A048F0A5B13D8EF43297FA51E"
+    bytes: 12773156
+    tracking: excluded_by_default
+  - path: "docs/stm32.pdf"
+    category: reference_document
+    source_version: unknown
+    source_uri: null
+    sha256: "9FBC4CC2175301632C3BDF74800B26490480DA93FE2210EBBC49769A9BC1EAB2"
+    bytes: 2697008
+    tracking: excluded_by_default
+  - path: "presentation/first/hi12_datasheet_cn.pdf"
+    category: duplicate_supplier_document
+    source_version: unknown
+    source_uri: null
+    sha256: "94563A0A9939C9B870C0820DB405BC8B6FA77316628E2B98FE79729553ED14B9"
+    bytes: 2164401
+    tracking: excluded_by_default
+  - path: "CubeMars/AK系列/AK系列电机模组产品使用说明V3.2.0（适用AK3.0电机）.pdf"
+    category: supplier_document
+    source_version: "AK3.0 V3.2.0"
+    source_uri: null
+    sha256: "41069C1810C27EE2C1D03049F7FF68A14F9DC0579304176BB0240E71CCF0C5AA"
+    bytes: 3218805
+    tracking: excluded_nested_repository
+  - path: "CubeMars/驱动板/【小板-驱动板V3.0】AK54-4810-1C-A2驱动器安装说明.pdf"
+    category: supplier_document
+    source_version: "V1.0.0"
+    source_uri: null
+    sha256: "649DFF4FC8EAE9DEFA79920694EA00AED3B6639DA40B1C46AACC8C47652AA04F"
+    bytes: 1338403
+    tracking: excluded_nested_repository
+  - path: "CubeMars/AKA系列/AKA系列电机模组产品使用说明V3.0.0.pdf"
+    category: supplier_document
+    source_version: "V3.0.0"
+    source_uri: null
+    sha256: "F0DACCB2954EBCC03CDC05A8F436B839D2AC0CD8737D01F840BCC1EAE28135BC"
+    bytes: 2248815
+    tracking: excluded_nested_repository
+  - path: "CubeMars/AKE系列/AKE60-8 KV80/AKE60-8-KV80-2D工程图.pdf"
+    category: supplier_drawing
+    source_version: unknown
+    source_uri: null
+    sha256: "B58324FAB3D84B264DAA0ED76862CA3EBBC348A7FAE7AA2C9A7A577EAC7E65B2"
+    bytes: 103673
+    tracking: excluded_nested_repository
+  - path: "CubeMars/AK系列驱动及DEMO实例/AK系列-V3.0电机- Arduino-Demo实例.zip"
+    category: supplier_demo_archive
+    source_version: "V3.0"
+    source_uri: null
+    sha256: "2D35EDC8704ADF9AD40CDE29AA714C88D7B1695E3CBBCDBB468548849DD92ABE"
+    bytes: 2804
+    tracking: excluded_nested_repository
+  - path: "CubeMars/AK系列驱动及DEMO实例/AK系列电机CAN-DEMO实例.zip"
+    category: supplier_demo_archive
+    source_version: unknown
+    source_uri: null
+    sha256: "6FD5183E5FE51C9D8BCE5A321701A6B9F622CE075ADB0F48D663A81E9FAC0423"
+    bytes: 25395332
+    tracking: excluded_nested_repository
+  - path: "CubeMars/CubeMars上位机/AK系列 V3.2.0上位机（3.0电机使用）.zip"
+    category: supplier_tool_archive
+    source_version: "V3.2.0"
+    source_uri: null
+    sha256: "6FDCFBE9402F5E13B1FA32DC76D2EAAAAE8D98DF6647248B26EFED82FC33DE13"
+    bytes: 66628186
+    tracking: excluded_nested_repository
+  - path: "CubeMars/驱动板/AKE60-8 驱动板- AK54-4810-1C-A2.rar"
+    category: supplier_archive
+    source_version: unknown
+    source_uri: null
+    sha256: "87508F2B61C578A07195F7F5859B55417AD43A4B0EB9C15C10A86F8DCF86A94C"
+    bytes: 2661641
+    tracking: excluded_nested_repository
+
+rules:
+  - "Track source, version, hash, and a credential-free controlled URI instead of raw supplier archives or large experiment data."
+  - "Review each DBC, golden frame, or small test vector for source, license, and redistribution scope before tracking."
+  - "Do not use a broad git add before reviewing staged paths."

@@ -1,0 +1,100 @@
+# Repository policy: keep the main repository limited to reviewed source,
+# configuration, documentation, manifests, tests, and project memory.
+
+# Nested supplier repository and supplier/experimental source bundles.
+/CubeMars/
+
+# Local AI/session state and temporary workspace material.
+/.codex/
+/.agents/
+/tmp/
+
+# Legacy presentation bundle contains pre-FND-000 assumptions and excluded
+# local attachments; retain locally until its claims and references are
+# reconciled with the authoritative planning documents.
+/presentation/
+
+# Build, install, test, coverage, and generated output.
+/build/
+/install/
+/log/
+/out/
+/dist/
+/.cache/
+/.pytest_cache/
+/.colcon/
+compile_commands.json
+*.coverage
+coverage/
+
+# Credentials and local configuration.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Vendor archives, binaries, captures, and large experiment artifacts.
+*.pdf
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+*.elf
+*.hex
+*.uf2
+*.bag
+*.db3
+*.mcap
+*.rosbag*
+*.blf
+*.asc
+*.pcap
+*.pcapng
+*.candump
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.csv
+*.tsv
+*.parquet
+*.h5
+*.hdf5
+*.mat
+*.npy
+*.npz
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.engine
+
+# Common generated media/data and editor files.
+*.tmp
+*.swp
+*.swo
+*.bak
+*.orig
+*.pyc
+__pycache__/
+.DS_Store
+Thumbs.db
+/.vscode/
+/.idea/
+/.vs/
+
+# Keep reviewed small test vectors explicit rather than relying on broad rules.
+!interfaces/golden_frames/
+!interfaces/golden_frames/**
+!tests/fixtures/
+!tests/fixtures/**
