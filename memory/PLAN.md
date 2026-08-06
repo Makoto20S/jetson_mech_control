@@ -1,6 +1,6 @@
 # Project Plan
 
-> Last updated: 2026-08-06T19:28:00+08:00
+> Last updated: 2026-08-06T19:36:43+08:00
 
 ## Overall Goal
 
@@ -32,8 +32,8 @@
   - Purpose: Create a reliable source of truth before implementation.
   - Scope: establish `main`, `.gitignore`, README/AGENTS, asset/source manifests and the reviewed `manifests/ai_skills.yaml`; create the authorized baseline commit, then create/push the confirmed private remote only with explicit external-action authorization.
   - Completion criteria: clean clone contains plans/memory/AI workflow and pinned skill provenance but not `CubeMars/`, `.codex/`, `tmp/`, binaries or build output.
-  - Progress: Local `main`, reviewed index, repository-level author identity and `origin` are ready; commit/push are authorized, but authenticated API verification shows the target GitHub repository has not been created.
-  - Validation: `git status`, branch, HEAD, remote and staged-path review.
+  - Progress: Initial Foundation commit `057ad8d` contains the 21 reviewed paths; repository-level author identity and `origin` are configured. Authenticated API verification shows the target GitHub repository has not been created, so remote creation authorization, push and clean-clone verification remain.
+  - Validation: staged-path/forbidden-path/secret/whitespace checks and memory validation passed before commit; branch, commit, remote and clean post-commit status were inspected.
   - Dependencies: FND-000.
 
 - [ ] FND-002/FND-003: Establish Ubuntu 22.04/Humble build manifest, five-package workspace and CI.
@@ -133,7 +133,7 @@
 ## Risks
 
 - New machines or AI environments may lack the two skills; the approved repositories have no tags and moving `main` may differ from the manifest, so installations must report drift and retain the documented fallback.
-- Initial Git commit may accidentally include the nested `CubeMars/` repository or vendor binaries if ignore/asset policy is late.
+- Future broad staging could still include unintended supplier or experimental assets if `.gitignore` and explicit staged-path review are bypassed; the initial commit passed this boundary review.
 - Premature vendor packages or generic interfaces may create abstractions with no tested consumer.
 - Windows editing results may be mistaken for Ubuntu/Humble build evidence.
 - `ros2_socketcan` reuse may conflict with the required single-writer/thread/timestamp boundary.

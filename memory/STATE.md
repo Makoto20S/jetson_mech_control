@@ -1,23 +1,23 @@
 # Current Project State
 
-> Last updated: 2026-08-06T19:28:00+08:00
+> Last updated: 2026-08-06T19:36:43+08:00
 > Repository: D:\Work\jetson
 > Branch: main
-> HEAD: unborn (no commit yet)
-> Working tree: approved baseline paths staged; `origin` configured; target GitHub repository absent
+> HEAD: committed `main`; initial Foundation baseline `057ad8d`
+> Working tree: clean at baseline verification; `origin` configured; target GitHub repository absent
 
 ## Current Objective
 
-- 完成 FND-001 Git/规划基线：创建已授权的本地首次提交，并在获得目标私有仓库创建授权后推送与验证。
+- 完成 FND-001 Git/规划基线：在获得目标私有仓库创建授权后，创建远端、推送 `main` 并验证可复现的 clean clone 边界。
 
 ## Current Status
 
 - 项目仍处于规划阶段：未启用 CAN、未控制真实设备、未修改 Jetson，也未创建实现代码。
 - `docs/planning/07_framework_bootstrap_plan.md` 已成为当前实施入口，包含四周路线、Issue 依赖、复用计划和 Foundation Definition of Done。
 - 根 `AGENTS.md` 和 `docs/development/ai_collaboration_workflow.md` 已更新 AI 连续性标准：每个新项目任务结束/暂停前由 AI 自动更新并验证 `STATE.md`/`PLAN.md`；handoff 只在用户明确要求或真实转交/阶段/暂停/风险事件触发时创建。
-- `manifests/ai_skills.yaml` 已记录两个批准仓库、当前核验提交和缺失安装策略；尚未进入 Git 基线。
+- `manifests/ai_skills.yaml` 已记录两个批准仓库、当前核验提交和缺失安装策略，并已进入首次 Git 基线。
 - `docs/planning/fnd-000_repository_and_asset_policy.md` 已标记 Accepted；项目负责人于 2026-08-06 确认 D1–D5、GitHub 目标 `Makoto20S/jetson_mech_control`，并授权创建 commit 及推送。
-- 本地 Git 已用 `git init -b main` 初始化；规划/治理/Memory/资产边界文件已显式暂存，尚未提交或推送。仓库级 Git 作者身份及 `origin` 已配置，邮箱值未写入项目文件。
+- 本地 Git 已用 `git init -b main` 初始化；21 个规划/治理/Memory/资产边界文件已提交为 `057ad8d`，尚未推送。仓库级 Git 作者身份及 `origin` 已配置，邮箱值未写入项目文件。
 - GitHub 凭据只读核验确认当前账户为 `Makoto20S`；认证 API 确认目标仓库尚不存在。创建新的私有仓库尚未获得独立授权。
 
 ## Completed Recently
@@ -32,13 +32,14 @@
 - 初始化前只读确认根 `.git/` 是空目录；本轮已将其初始化为 `main`。`CubeMars/` 仍是必须忽略的独立嵌套仓库。
 - 根据用户 2026-08-06 的补充，修订 handoff 与 project-memory 规则：普通任务不自动创建 handoff；每个新项目任务必须自动保存 Memory 检查点。
 - 启动并完成 FND-000 盘点与决策确认；更新政策文档为 Accepted，创建 `.gitignore`、`.gitattributes`、`LICENSE-or-INTERNAL-LICENSE.md`、`manifests/assets.yaml` 和根 `README.md`；初始化本地 `main` 并完成暂存审查。
+- 创建首次 Foundation 基线提交 `057ad8d`（`chore: establish foundation repository baseline`）；提交包含 21 个批准路径和 3605 行新增内容，未包含任何禁止路径或秘密扫描匹配。
 
 ## In Progress
 
 - 当前规划文档已完成，尚无代码实现进行中。
-- FND-000 已完成；FND-001 本地初始化、暂存审查、作者身份和远端目标配置已完成。首次提交已获授权，推送等待目标私有仓库创建。
-- AI 治理规范和来源 manifest 已准备；将其纳入首次 Git 基线及建立可移植 installer/CI 检查仍留待 FND-001/FND-003。
-- 目标 GitHub 仓库不存在；本地 commit 完成后，需要项目负责人明确授权创建该私有仓库，随后才能推送。
+- FND-000 已完成；FND-001 本地初始化、暂存审查、作者身份、远端目标配置和首次提交已完成。推送等待目标私有仓库创建。
+- AI 治理规范和来源 manifest 已进入首次 Git 基线；可移植 installer/CI 检查仍留待 FND-003。
+- 目标 GitHub 仓库不存在；需要项目负责人明确授权创建该私有仓库，随后才能推送。
 - 实机配置和 HI12 身份取证已移到 Foundation 后的集成工作，不再阻塞当前阶段。
 
 ## Modified Files
@@ -46,7 +47,7 @@
 - `manifests/ai_skills.yaml`
   - Change: 记录两个批准 skill 仓库、默认分支、已核验提交、用途和安装/升级策略。
   - Reason: 让新机器和新 AI 不依赖搜索结果或个人路径获取关键 skills。
-  - Status: Staged in the local `main` baseline; not committed.
+  - Status: Committed in the initial `main` baseline `057ad8d`.
   - Validation: YAML structured parse passed; remote HEAD and tags were checked with `git ls-remote`.
 - `AGENTS.md`, `docs/development/ai_collaboration_workflow.md`
   - Change: 新增仓库级 AI 强制入口和详细的跨对话/跨机器连续性 SOP。
@@ -66,7 +67,7 @@
 - `.gitignore`, `LICENSE-or-INTERNAL-LICENSE.md`, `manifests/assets.yaml`, `README.md`
   - Change: 建立主仓库资产边界、内部科研使用声明、已观测排除资产哈希清单和恢复入口。
   - Reason: 为 FND-001 的显式暂存审查提供可复现基线，避免误纳入 `CubeMars/`、会话状态、供应商原始资料和生成物。
-  - Status: Staged in the local `main` baseline; not committed.
+  - Status: Committed in the initial `main` baseline `057ad8d`.
   - Validation: 资产哈希、YAML、禁区路径、排除链接、秘密模式和 `git diff --cached --check` 检查通过。
 - `docs/planning/README.md`, `03_mvp_delivery_plan.md`, `07_framework_bootstrap_plan.md`
   - Change: 增加 AI 标准导航，记录不新增重复 continuity skill 的决定，并统一 Foundation 恢复顺序。
@@ -109,13 +110,13 @@
 - FND-000 inventory at 2026-08-06: pre-init root Git probes returned “not a git repository”; root `.git/` was empty; `CubeMars/` contains an independent `.git`, supplier directories and an archive. No remote or hardware configuration was changed.
 - FND-001 local baseline at 2026-08-06: `git init -b main` succeeded; staged-path, forbidden-extension, excluded-link, secret-pattern, YAML and `git diff --cached --check` reviews passed. No commit or remote exists.
 - FND-001 remote check at 2026-08-06T19:28:00+08:00: repository-level Git identity and `origin` were configured; Git Credential Manager identified the saved GitHub account as `Makoto20S`; authenticated GitHub API lookup returned `REPO_EXISTS=False` for `Makoto20S/jetson_mech_control`. No credential value was printed or stored in project files.
+- FND-001 baseline commit at 2026-08-06T19:36:00+08:00: `git commit -m "chore: establish foundation repository baseline"` created root commit `057ad8d478a79f192c69caa5446b65e9fb0418c6`; `git log -1`, branch, remote and clean post-commit status were inspected. The commit contains the same 21 reviewed paths that passed forbidden-path, secret-pattern and whitespace checks; project build/tests remain not run because implementation code does not yet exist.
 - Stage-transition handoff at 2026-08-06T19:11:45+08:00: created `.codex/handoffs/2026-08-06_191145_jetson-foundation-fnd-000-to-fnd-001-local-baseline.md`; `validate_handoff.py` passed and `check_staleness.py` reported `CURRENT`. This is an event-triggered handoff, not a routine task log.
 - FND-000 decision audit at 2026-08-06T17:38:00+08:00: D1–D5 each have structural markers, explicit owner/status/recommendation, required links exist, Markdown table smoke passed, and `validate_memory.py` returned errors=0 warnings=0. Five existing PDFs were observed outside `CubeMars/`; none were deleted or moved.
 - Project build/tests: not run because no implementation code exists.
 
 ## Current Problems
 
-- No valid Git commit exists yet; the unborn `main` branch has the reviewed index and a configured `origin`.
 - The confirmed target GitHub repository does not exist yet, so push cannot succeed until it is created. NAS 目标位置和具体 CODEOWNERS 评审人仍未知。
 - 两个批准来源和核验提交已记录，但远端没有 tag，当前本机安装副本与核验提交是否完全一致尚未断言；可移植 installer/CI wrapper 仍未实现。
 - The target Ubuntu/Humble build environment and CI commands have not yet been created or verified.
@@ -123,7 +124,7 @@
 
 ## Blockers
 
-- FND-000 已完成；FND-001 的本地首次提交已获授权，远端推送仅受目标私有仓库尚未创建阻塞。
+- FND-000 已完成；FND-001 的本地首次提交已创建，远端推送仅受目标私有仓库尚未创建阻塞。
 - Real motor/IMU integration remains blocked by device evidence and G0~G3, independently of Foundation.
 
 ## Unverified Assumptions
@@ -142,4 +143,4 @@
 
 ## Immediate Next Action
 
-- 创建并核验已授权的本地 baseline commit；随后由项目负责人明确授权创建 `Makoto20S/jetson_mech_control` 私有仓库，再推送并验证。全程不启用 CAN 或真实硬件。
+- 由项目负责人明确授权创建 `Makoto20S/jetson_mech_control` 私有仓库；获授权后创建空私有仓库、推送 `main`，并验证远端 HEAD、工作树和 clean clone 资产边界。全程不启用 CAN 或真实硬件。
