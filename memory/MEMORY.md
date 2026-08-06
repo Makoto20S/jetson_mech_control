@@ -1,6 +1,6 @@
 # Project Memory
 
-> Last reviewed: 2026-08-06T19:28:00+08:00
+> Last reviewed: 2026-08-06T20:06:00+08:00
 
 ## Project Overview
 
@@ -19,11 +19,11 @@
 
 ### Repository and asset policy (FND-000)
 
-- Decision: The project owner confirmed on 2026-08-06 that the recommended D1–D5 policy is accepted: private GitHub target `Makoto20S/jetson_mech_control` with a later NAS mirror; internal research-use/all-rights-reserved notice; no raw supplier archives, binaries, large logs, or rosbag in the main repository; track the three project-memory files without secrets; and enable branch protection/review/CODEOWNERS after the first runnable CI. The owner also authorized the local baseline commit and push to that target.
+- Decision: The project owner confirmed on 2026-08-06 that the recommended D1–D5 policy is accepted: private GitHub target `Makoto20S/jetson_mech_control` with a later NAS mirror; internal research-use/all-rights-reserved notice; no raw supplier archives, binaries, large logs, or rosbag in the main repository; track the three project-memory files without secrets; and enable branch protection/review/CODEOWNERS after the first runnable CI. The owner authorized creation, baseline commit, and push; the private remote now exists and `main` is synchronized.
 - Reason: Freeze ownership, redistribution, asset, continuity, and review boundaries before the first Git baseline.
-- Evidence: `docs/planning/fnd-000_repository_and_asset_policy.md`; explicit user confirmations on 2026-08-06; root inventory of the original empty `.git/`, nested `CubeMars/`, and temporary directories.
+- Evidence: `docs/planning/fnd-000_repository_and_asset_policy.md`; explicit user confirmations on 2026-08-06; commits `057ad8d` and `69815f6`; authenticated GitHub API and `git ls-remote`; clean clone verification; root inventory of the original empty `.git/`, nested `CubeMars/`, and temporary directories.
 - Date: 2026-08-06.
-- Scope: FND-001 may use the confirmed GitHub target and commit/push authorization. NAS target and reviewer identities remain unknown and must not be guessed; transient remote-repository availability belongs in `STATE.md`.
+- Scope: FND-001 is complete. NAS target and reviewer identities remain unknown and must not be guessed; branch protection waits for the first runnable CI as specified by D5.
 
 ### Foundation-first implementation
 

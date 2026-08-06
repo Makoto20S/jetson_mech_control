@@ -8,7 +8,7 @@
 
 ## 决策摘要
 
-FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1–D5 均采用推荐值，因此这些政策可以作为 FND-001 的前置条件。项目负责人随后确认 GitHub owner 为 `Makoto20S`、目标私有仓库为 `jetson_mech_control`，并授权创建本地基线提交及推送；GitHub 仓库本身的创建仍是独立外部操作。
+FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1–D5 均采用推荐值，因此这些政策作为 FND-001 的前置条件。项目负责人随后确认 GitHub owner 为 `Makoto20S`、目标私有仓库为 `jetson_mech_control`，授权创建本地基线提交、创建私有远端及推送；FND-001 已完成并通过远端 clean-clone 验证。
 
 | 编号 | 决策项 | 推荐值 | 当前状态 | 负责人 |
 |---|---|---|---|---|
@@ -22,17 +22,18 @@ FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1�
 
 - **用户确认（2026-08-06）：** 项目负责人明确表示 D1、D2、D3、D4、D5 全部采用推荐值，并授权开始执行 FND-000 及其后续本地 FND-001 基线准备。
 - **Git 实施授权（2026-08-06）：** 项目负责人确认 GitHub owner 为 `Makoto20S`，目标路径为 `Makoto20S/jetson_mech_control`，并授权使用其提供的本地 Git 作者身份创建 commit 后推送。作者邮箱只保存在仓库级 Git 配置中，不写入项目文档或 Memory。
-- **仍未决的实施信息：** 目标 GitHub 仓库经认证 API 核验尚未创建；NAS 目标位置和具体评审人身份也未提供。创建新的私有 GitHub 仓库属于独立外部操作，须获得明确授权；不猜测 CODEOWNERS 内容。
-- **本轮安全边界：** 允许配置本地 Git 身份和 `origin`、创建基线 commit，并在目标私有仓库存在后推送；不安装依赖、不启用 CAN、不发送电机命令、不修改 Jetson。
+- **已完成的 Git 实施（2026-08-06）：** 在明确授权后创建了私有仓库 `Makoto20S/jetson_mech_control`，将本地 `main` 推送至远端，并确认远端 HEAD 为 `69815f62…`；从远端进行的 clean clone 通过必需文件、资产边界和 Memory 验证。
+- **仍未决的实施信息：** NAS 目标位置和具体评审人身份未提供；不猜测 CODEOWNERS 内容。分支保护、PR review 和 required checks 按 D5 等首个可运行 CI 后启用。
+- **本轮安全边界：** 仅配置本地 Git/远端并完成基线提交和推送；不安装依赖、不启用 CAN、不发送电机命令、不修改 Jetson。
 
 ## 证据与边界
 
 ### D1：仓库与远端
 
-- **Repository evidence (2026-08-06):** `D:\Work\jetson` 已初始化为根 Git 仓库，当前分支为 `main`；规划/治理/Memory/资产边界文件已显式暂存，`CubeMars/` 等排除内容未进入索引。
+- **Repository evidence (2026-08-06):** `D:\Work\jetson` 已初始化为根 Git 仓库，当前分支为 `main`；21 个规划/治理/Memory/资产边界文件已提交，`CubeMars/` 等排除内容未进入索引。
 - **Planning evidence:** `docs/planning/07_framework_bootstrap_plan.md` section 5 推荐根目录和临时名称 `jetson_mech_control`，并要求先决定远端再初始化。
-- **Remote evidence (2026-08-06):** 本地 `origin` 已配置为 `https://github.com/Makoto20S/jetson_mech_control.git`；认证 API 返回登录账户 `Makoto20S` 且目标仓库不存在。未输出或写入任何凭据值。
-- **限制:** 未经项目负责人明确授权，不创建新的 GitHub 仓库。
+- **Remote evidence (2026-08-06):** 本地 `origin` 配置为 `https://github.com/Makoto20S/jetson_mech_control.git`；认证 API 确认仓库为 private，默认分支为 `main`，远端 HEAD 与本地 `69815f62…` 一致；未输出或写入任何凭据值。
+- **限制:** 分支保护和评审规则仍按 D5 延后至首个可运行 CI；不得把私有访问控制当作许可证。
 
 ### D2：内部科研许可证边界
 
@@ -62,11 +63,11 @@ FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1�
 
 ## FND-001 前置条件
 
-D1–D5、GitHub owner/目标路径和 commit/push 授权均已确认，可以执行以下下一步：
+D1–D5、GitHub owner/目标路径和 commit/push 授权均已确认，以下 FND-001 步骤已完成：
 
 1. 编写并审查 `.gitignore` 与资产 manifest；
 2. 检查 staged paths，确保不含 `CubeMars/`、`.codex/`、`.agents/`、`tmp/`、供应商二进制和构建产物；
 3. 初始化根 Git 的 `main` 分支；
 4. 将本地 `origin` 设置为已确认的私有远端目标；
 5. 使用明确授权创建首次规划/协作基线提交；
-6. 目标仓库不存在时，另获明确授权后创建私有仓库，再推送并验证 clean clone 边界。
+6. 创建私有仓库、推送 `main`，并验证远端 HEAD 与 clean clone 资产边界。

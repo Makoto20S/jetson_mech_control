@@ -1,6 +1,6 @@
 # Project Plan
 
-> Last updated: 2026-08-06T19:36:43+08:00
+> Last updated: 2026-08-06T20:06:00+08:00
 
 ## Overall Goal
 
@@ -9,7 +9,7 @@
 ## Current Milestone
 
 - Deliver `Foundation v0.1` without real hardware: reproducible Git/CI, pure C++ core, deterministic simulation, SocketCAN/vcan integration, thin ros2_control adapter and a simulated end-to-end demo.
-- Recovery baseline: project-memory points to local FND-001; the verified Foundation handoff remains historical context, not authorization for remote or hardware actions.
+- Recovery baseline: project-memory points to completed FND-001; the verified Foundation handoff remains historical context, not authorization for remote or hardware actions.
 
 ## P0 — Next Critical Tasks
 
@@ -25,15 +25,15 @@
   - Purpose: Prevent the first commit from embedding wrong ownership or supplier assets.
   - Scope: repo name/private remote, code license, binary/PDF/archive policy, `memory/` tracking and branch protection timing.
   - Outcome: D1–D5 all accepted on 2026-08-06; GitHub target is confirmed as `Makoto20S/jetson_mech_control`, and baseline commit/push authorization was supplied.
-  - Validation: FND-000 status/confirmation record, asset inventory and Markdown structure reviewed; checkpoint validator pending.
-  - Dependencies: None for local FND-001; creating the currently absent private GitHub repository remains a separately authorized external action.
+  - Validation: FND-000 status/confirmation record, asset inventory and Markdown structure reviewed; project-memory validator passed.
+  - Dependencies: None for FND-001.
 
-- [ ] FND-001: Initialize the private Git repository and planning baseline.
+- [x] FND-001: Initialize the private Git repository and planning baseline.
   - Purpose: Create a reliable source of truth before implementation.
-  - Scope: establish `main`, `.gitignore`, README/AGENTS, asset/source manifests and the reviewed `manifests/ai_skills.yaml`; create the authorized baseline commit, then create/push the confirmed private remote only with explicit external-action authorization.
+  - Scope: establish `main`, `.gitignore`, README/AGENTS, asset/source manifests and the reviewed `manifests/ai_skills.yaml`; create the authorized baseline commit, private remote, push, and clean-clone verification.
   - Completion criteria: clean clone contains plans/memory/AI workflow and pinned skill provenance but not `CubeMars/`, `.codex/`, `tmp/`, binaries or build output.
-  - Progress: Initial Foundation commit `057ad8d` contains the 21 reviewed paths; repository-level author identity and `origin` are configured. Authenticated API verification shows the target GitHub repository has not been created, so remote creation authorization, push and clean-clone verification remain.
-  - Validation: staged-path/forbidden-path/secret/whitespace checks and memory validation passed before commit; branch, commit, remote and clean post-commit status were inspected.
+  - Outcome: Commits `057ad8d` and `69815f6` establish the 21-path baseline; private `Makoto20S/jetson_mech_control` exists with `main` pushed and tracking enabled.
+  - Validation: staged-path/forbidden-path/secret/whitespace checks, local and remote HEAD comparison, private/default-branch API lookup, clean clone boundary review and clone Memory validation all passed; no project build/tests were run because implementation code does not yet exist.
   - Dependencies: FND-000.
 
 - [ ] FND-002/FND-003: Establish Ubuntu 22.04/Humble build manifest, five-package workspace and CI.
@@ -124,8 +124,8 @@
 
 ## Dependencies
 
-- FND-000 project decisions, GitHub target and commit/push authorization are confirmed; local `main`, staged-path review and `origin` configuration are complete. Creating the absent private repository remains the only remote setup decision.
-- FND-001 must review and track the prepared approved-source manifest; until a clone contains it, the repository SOP remains the portable fallback.
+- FND-000 project decisions, GitHub target and commit/push authorization are confirmed; local `main`, staged-path review, `origin`, remote push and clean clone are complete.
+- FND-001 is complete; the clean clone contains the approved-source manifest and all three Memory files, while the repository SOP remains the portable fallback for tools without AGENTS support.
 - Ubuntu 22.04/ROS 2 Humble build/CI environment for all implementation evidence.
 - Current CubeMars documentation is reviewed; live motor/HI12 evidence is required only for P1 integration.
 - Approved CAN topology, termination and G0~G3 only for hardware stages.
@@ -145,7 +145,7 @@
 
 ## Open Questions
 
-- Whether Codex should create the confirmed `Makoto20S/jetson_mech_control` private GitHub repository now; NAS mirror target and concrete reviewers remain undecided.
+- NAS mirror target and concrete reviewers remain undecided; branch protection waits for the first runnable CI per D5.
 - Portable installer/CI wrapper and whether onboarding should verify installed skill contents against the manifest commits.
 - Exact pinned Ubuntu/Humble container/runner and ARM64 CI path.
 - Whether RSP-001 selects a wrapped `ros2_socketcan` low-level API or a minimal direct RAW SocketCAN adapter.

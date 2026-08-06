@@ -2,7 +2,7 @@
 
 > 制定日期：2026-08-03
 > 当前实施入口：本文件
-> 当前状态：规划完成；本地 `main` 已初始化并完成显式暂存审查，尚未创建实现代码、配置远端或提交
+> 当前状态：规划完成；本地 `main` 已初始化并推送到私有 GitHub，尚未创建实现代码
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
 
 ## 1. 决策结论
@@ -118,10 +118,10 @@ flowchart TB
 
 ### 5.1 推荐仓库边界
 
-- 推荐主仓库根：当前 `D:\Work\jetson`。
-- 临时仓库名：`jetson_mech_control`；ROS package 和 C++ namespace 延续现有规划的 `mech_*` / `mech`。
-- 推荐先建私有远端；公开前再独立做版权、供应商资料和许可证审查。
-- 当前空 `.git/` 可以由后续 `git init -b main` 正常初始化，不需要先删除；本轮只规划，不执行初始化。
+- 主仓库根：当前 `D:\Work\jetson`。
+- 仓库名：`jetson_mech_control`；ROS package 和 C++ namespace 延续现有规划的 `mech_*` / `mech`。
+- 私有远端：`Makoto20S/jetson_mech_control`；公开前再独立做版权、供应商资料和许可证审查。
+- 根 Git 已初始化为 `main`，基线已推送并通过 clean-clone 验证。
 
 ### 5.2 初始 Git 资产规则
 
@@ -180,15 +180,15 @@ Foundation 只创建当前需要的五个 ROS packages。`mech_protocol_cubemars
 
 ### 5.4 初始 Git 决策
 
-FND-000 的决策和确认状态记录在 [`fnd-000_repository_and_asset_policy.md`](fnd-000_repository_and_asset_policy.md)。D1–D5 已由项目负责人于 2026-08-06 确认；GitHub 目标随后确认为 `Makoto20S/jetson_mech_control`，本地 commit 与 push 已获授权。目标私有仓库尚未创建，创建该外部资源仍需单独确认。
+FND-000 的决策和确认状态记录在 [`fnd-000_repository_and_asset_policy.md`](fnd-000_repository_and_asset_policy.md)。D1–D5 已由项目负责人于 2026-08-06 确认；GitHub 目标确认为 `Makoto20S/jetson_mech_control`，并已在明确授权后创建为私有仓库。提交 `69815f6` 已推送到 `main`，远端 HEAD 与本地一致；分支保护和 CODEOWNERS 按 D5 等首个可运行 CI 后再启用。
 
-在第一次提交前明确：
+首次提交前已明确并完成：
 
 1. 私有远端位置和仓库名；
-2. 项目代码许可证：建议评估 Apache-2.0；若暂不开放，则使用明确的内部专有声明，不能留空后复制第三方代码；
-3. 供应商/实验资产只存哈希和 URI，还是使用受控 Git LFS；
-4. `memory/` 是否随私有仓库同步；当前建议同步；
-5. branch protection、PR 审查和 CODEOWNERS 何时启用。
+2. 项目代码许可证：采用内部科研专用、保留所有权利声明；公开或商业化前重新审查；
+3. 供应商/实验资产不进入普通 Git，仓库仅保存受审清单、哈希和无凭据 URI；
+4. `memory/` 随私有仓库同步，且不写秘密或瞬态日志；
+5. branch protection、PR 审查和 CODEOWNERS 何时启用；按 D5 延后至首个可运行 CI。
 
 ## 6. 构建和运行环境
 
@@ -489,9 +489,9 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 当前下一步不是写 CAN 协议，也不是连接硬件，而是：
 
 1. 完成 FND-000：已确认临时仓库名、私有远端策略、内部科研许可、二进制资产和 memory 策略；
-2. 完成 FND-001：在当前根初始化 Git，审查并暂存规划/上下文基线；远端和提交等待明确实施授权；
+2. 完成 FND-001：已在当前根初始化 Git，审查并提交规划/上下文基线，创建私有远端并验证 clean clone；
 3. 完成 FND-002/FND-003：固定 Ubuntu/Humble 构建环境并建立最小 workspace/CI；
 4. 完成 FND-004：把核心 ADR 从建议表转为独立 Accepted/Proposed 文档；
 5. 从 FND-005 开始写第一行业务代码。
 
-在用户明确进入“开始搭建”阶段前，本文件只授权规划和仓库准备设计，不自动初始化 Git、创建远端、安装依赖或修改 Jetson。
+当前仍未授权启用 CAN、发送电机命令、修改 Jetson 或安装真实设备依赖；FND-002/FND-003 的构建与 CI 工作需按项目负责人后续确认推进。
