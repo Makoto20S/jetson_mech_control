@@ -6,7 +6,8 @@ adapters.
 
 ## Current status
 
-FND-002/FND-003 are complete at commits `ee4c64c` and `fbaaf26`: a pinned
+FND-002/FND-003 are complete at implementation commit `ee4c64c` and final
+status commit `195ef47`: a pinned
 Ubuntu 22.04/ROS 2 Humble build boundary, five package skeletons, and a minimal
 CI/context workflow are committed and pushed. Native x86_64 Humble builds pass
 all 30 skeleton tests with both the default official `rosdep` and an explicitly

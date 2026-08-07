@@ -28,7 +28,7 @@
 | CubeMars 资料 | AK3.0 V3.2 协议足以做离线 codec 设计；实机配置仍缺 | 不阻塞接口和模拟器；阻塞真实激活 |
 | HI12 | 通用 J1939/CANopen 资料存在，交付固件未知 | Foundation 只保留 sensor capability，不选现场 profile |
 | 控制频率 | 当前两电机正常目标 500 Hz；框架支持 1 kHz 测试 | 测试和配置从第一天支持多速率，不承诺真实硬件性能 |
-| Git | `main` 已建立并推送；FND-002/FND-003 提交为 `ee4c64c`，状态 checkpoint 为 `fbaaf26` | 进入 FND-004 ADR 基线；继续保持供应商和生成物边界 |
+| Git | `main` 已建立并推送；FND-002/FND-003 实现提交为 `ee4c64c`，最终状态同步提交为 `195ef47` | 进入 FND-004 ADR 基线；继续保持供应商和生成物边界 |
 | 供应商资料 | `CubeMars/` 是独立嵌套 Git 仓库 | 主仓库必须忽略它，避免误提交为 gitlink 或复制供应商资产 |
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context 脚本已存在 | 下一业务实现仍从 FND-004/FND-005 开始，不提前写厂商 adapter |
 | 目标平台 | Jetson Ubuntu 22.04 / ROS 2 Humble；当前编辑工作区是 Windows | 构建与 vcan 测试必须在 Ubuntu 22.04 环境执行，Windows 不作为 ROS 运行目标 |
