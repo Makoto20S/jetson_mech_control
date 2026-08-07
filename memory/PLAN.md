@@ -1,6 +1,6 @@
 # Project Plan
 
-> Last updated: 2026-08-07T12:00:00+08:00
+> Last updated: 2026-08-07T13:20:36+08:00
 
 ## Overall Goal
 
@@ -8,8 +8,8 @@
 
 ## Current Milestone
 
-- Deliver `Foundation v0.1` without real hardware. FND-000/FND-001 are committed; FND-002/FND-003 are implemented and native-Humble validated in the uncommitted working tree, with Docker/GitHub Actions execution still pending.
-- The project is intentionally paused after the 2026-08-07 Memory/documentation checkpoint. Historical handoffs are context only and do not authorize remote, CAN, Jetson, or hardware actions.
+- Deliver `Foundation v0.1` without real hardware. FND-000 through FND-003 are committed; FND-002/FND-003 have native Humble and successful GitHub Actions pinned-Docker evidence.
+- The next planned task is FND-004. Historical handoffs are context only and do not authorize CAN, Jetson, or hardware actions.
 
 ## P0 — Next Critical Tasks
 
@@ -21,13 +21,13 @@
   - Outcome: D1–D5 accepted; `main` is synchronized at committed HEAD `c0f9306`, and supplier/session/build assets are excluded.
   - Validation: Staged-path, secret, whitespace, private-remote, remote-HEAD and clean-clone checks passed.
 
-- [ ] FND-002/FND-003: Finalize the Ubuntu 22.04/Humble manifest, five-package workspace, and CI baseline.
+- [x] FND-002/FND-003: Finalize the Ubuntu 22.04/Humble manifest, five-package workspace, and CI baseline.
   - Purpose: Make every later interface change reproducibly buildable.
-  - Scope: Review the current uncommitted manifest, digest-pinned Docker image, workflow, five packages, build script and portable context check; execute CI/container evidence and then decide on commit/push.
-  - Current outcome: Exactly five planned packages exist; official `rosdep` and explicit `ROSDEP_COMMAND=rosdepc` native WSL runs each built five packages and passed 30/30 tests; context checks pass.
+  - Scope: Review and commit the manifest, digest-pinned Docker image, workflow, five packages, build script and portable context check; execute CI/container evidence.
+  - Outcome: Commit `ee4c64c` adds exactly five planned packages, the pinned dependency/container boundary, shared build/context scripts, and the minimal CI workflow; official `rosdep` and explicit `ROSDEP_COMMAND=rosdepc` native WSL runs each built five packages and passed 30/30 tests, and Actions run `31150054330` passed context validation plus the pinned Humble Docker build.
   - Completion criteria: A clean committed checkout builds/tests through the pinned Docker/GitHub Actions path, required context files are validated, and reviewed files contain no host-specific paths or forbidden assets.
-  - Validation remaining: Docker image build or GitHub Actions logs, followed by clean-checkout review. ARM64 is a later Foundation RC gate, not required to close this bootstrap issue.
-  - Dependencies: User instruction to resume and review/commit; Docker-capable or GitHub Actions environment.
+  - Validation: Clean local clone context check and GitHub Actions run `31150054330`; ARM64 is a later Foundation RC gate, not required for this bootstrap issue.
+  - Dependencies: None for this issue; proceed to FND-004.
 
 - [ ] FND-004: Convert core architecture decisions into ADRs.
   - Purpose: Freeze ownership and interface direction before runtime implementation.
@@ -85,13 +85,13 @@
 - Use `Ubuntu-22.04` explicitly for the current x86_64 Humble build evidence; the separate `Ubuntu` WSL distribution is not provisioned for ROS.
 - Official `rosdep` is the portable default. `ROSDEP_COMMAND=rosdepc` is a documented host override only after that host's mirror sources/cache are configured.
 - Use a Linux filesystem output root through `MECH_OUTPUT_ROOT` for WSL builds; DrvFS output is not a reliable build path.
-- Docker/GitHub Actions execution, then ARM64 and vcan environments, are required at their respective gates.
+- ARM64 and vcan environments remain required at their later gates; the amd64 GitHub Actions Docker path now passes.
 - Live CubeMars/HI12 evidence and G0–G3 are required only for later device integration.
 
 ## Risks
 
-- The working tree is entirely uncommitted for FND-002/FND-003; broad staging could include unintended assets unless the explicit path/context review is repeated.
-- Structural CI/Docker review can be mistaken for executed CI evidence; current Docker/Actions status is explicitly unrun.
+- Future staging must continue excluding supplier/session/build assets; the FND-002/FND-003 commit passed its explicit staged-boundary review.
+- The current CI evidence covers amd64 pinned-container build/unit only; it must not be promoted to ARM64, vcan, performance or hardware evidence.
 - WSL distribution ambiguity or DrvFS output can create false failures/hangs.
 - A host-specific `rosdepc` mirror must not silently replace official `rosdep` as the repository/CI standard.
 - Premature vendor packages or generic interfaces may create untested abstractions.
@@ -99,7 +99,6 @@
 
 ## Open Questions
 
-- Whether the pinned Docker image and GitHub Actions workflow pass from a clean committed checkout.
 - NAS mirror target, concrete reviewers, CODEOWNERS and branch-protection activation after runnable CI.
 - Portable skill installation/content verification against manifest commits.
 - Whether RSP-001 selects a wrapped `ros2_socketcan` API or minimal Linux RAW SocketCAN.
@@ -108,5 +107,5 @@
 
 ## Deferred
 
-- No FND-004 or later work proceeds until the user gives a new instruction.
-- Docker/CI, ARM64, vcan, SocketCAN, CAN enablement, hardware commands, six-motor integration, STM32, learning control, firmware updates and safety certification are not performed in this pause checkpoint.
+- FND-004 is next; FND-005 and later work follow their recorded dependencies.
+- ARM64, vcan, SocketCAN, CAN enablement, hardware commands, six-motor integration, STM32, learning control, firmware updates and safety certification remain deferred to their planned gates.

@@ -1,18 +1,18 @@
 # Current Project State
 
-> Last updated: 2026-08-07T12:00:00+08:00
+> Last updated: 2026-08-07T13:20:36+08:00
 > Repository: D:\Work\jetson
 > Branch: main
-> HEAD: `c0f93063e0c513c4cab160897d3b892ceb729aa9` (`c0f9306`); `origin/main` matched when inspected
-> Working tree: FND-002/FND-003 implementation and this Memory/documentation checkpoint are uncommitted; no commit or push was requested
+> HEAD: `ee4c64cc9844adb5efc256289f22ad9b1b0bc649` (`ee4c64c`); `origin/main` matched when inspected
+> Working tree: clean after the FND-002/FND-003 commit and push
 
 ## Current Objective
 
-- Pause after checkpointing the implemented FND-002/FND-003 Ubuntu 22.04/ROS 2 Humble dependency baseline, five-package workspace, CI skeleton, and verified `rosdep`/`rosdepc` build paths.
+- FND-002/FND-003 are complete: the reproducible Ubuntu 22.04/ROS 2 Humble dependency baseline, five-package workspace, context validator, shared build script, and CI/Docker path are committed and verified.
 
 ## Current Status
 
-- FND-000 and FND-001 are complete at committed HEAD `c0f9306`; the current FND-002/FND-003 files are present but uncommitted.
+- FND-000/FND-001 remain complete; FND-002/FND-003 are committed and pushed at `ee4c64c`.
 - The repository now contains a pinned Jammy/Humble dependency manifest, digest-pinned multi-architecture ROS base image, minimal GitHub Actions workflow, portable context validator, shared build/test script, and exactly five planned ROS 2 package skeletons.
 - Ubuntu evidence comes from WSL distribution `Ubuntu-22.04`, not the separate `Ubuntu` distribution. The verified environment is Ubuntu 22.04.5 LTS, x86_64, user `makoto`, ROS 2 Humble, GCC/G++ 11.4, CMake 3.22.1, Python 3.10.12, and rosdep/rosdepc 0.26.0.
 - Official `rosdep` remains the CI/Docker/default resolver. A configured host may select the compatible mirror wrapper explicitly with `ROSDEP_COMMAND=rosdepc`; both complete paths have now built and tested the workspace successfully.
@@ -29,8 +29,8 @@
 
 ## In Progress
 
-- FND-002/FND-003 implementation is technically ready for repository review, but remains uncommitted and has not been pushed.
-- Docker image construction and the GitHub Actions workflow have not run because no local Docker/Podman engine is available and the workflow only exists in the uncommitted working tree.
+- FND-002/FND-003 implementation is committed and pushed; no uncommitted project changes remain.
+- GitHub Actions supplied the clean-checkout context and pinned-container build evidence; local Docker execution remains unavailable.
 - ARM64, vcan, SocketCAN, performance, sanitizers, and hardware validation are intentionally outside this checkpoint and remain future tasks.
 
 ## Modified Files
@@ -38,23 +38,23 @@
 - `manifests/dependencies.json`, `manifests/dependencies.repos`, `.dockerignore`, `docker/ros_humble_jammy/`, `.github/workflows/foundation.yml`
   - Change: Define the pinned Ubuntu/Humble dependency and CI/container boundary.
   - Reason: Make Foundation builds reproducible without floating images or supplier assets.
-  - Status: Implemented; uncommitted.
-  - Validation: Portable context check passed; Docker/Actions execution not run locally.
+  - Status: Implemented, committed in `ee4c64c`, and pushed.
+  - Validation: Portable context job and pinned Humble Docker build job passed in Actions run `31150054330`.
 - `ros2_ws/README.md`, `ros2_ws/src/mech_*`
   - Change: Add the five planned package skeletons, dependency boundaries, marker tests and host instructions.
   - Reason: Establish the smallest hardware-independent ROS workspace before runtime code.
-  - Status: Implemented; uncommitted.
+  - Status: Implemented, committed in `ee4c64c`, and pushed.
   - Validation: `colcon list` found exactly five packages; two current full build/test runs passed.
 - `tools/ci/build_workspace.sh`, `tools/ci/context_check.py`
   - Change: Add reusable context/build/test automation, Linux output-root support, and explicit `rosdep`/`rosdepc` selection.
   - Reason: Keep CI standard on official rosdep while supporting the configured WSL mirror path.
-  - Status: Implemented; uncommitted.
+  - Status: Implemented, committed in `ee4c64c`, and pushed.
   - Validation: Context check and both dependency-resolver build paths passed.
 - `README.md`, `docs/planning/README.md`, `docs/planning/07_framework_bootstrap_plan.md`, `memory/MEMORY.md`, `memory/STATE.md`, `memory/PLAN.md`
   - Change: Replace stale planning-only/FND-001 status with the current FND-002/FND-003 implementation and evidence boundary.
   - Reason: Preserve an accurate pause checkpoint and documented build entry.
-  - Status: Updated in this checkpoint; uncommitted.
-  - Validation: Final text/context/diff checks and Memory validator are required before pause.
+  - Status: Updated and committed in `ee4c64c`.
+  - Validation: Final text/context/diff checks and Memory validator passed.
 
 ## Validation Results
 
@@ -64,24 +64,25 @@
 - `ROSDEP_COMMAND=rosdepc MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build-rosdepc bash tools/ci/build_workspace.sh` on 2026-08-07: five packages built; 30 tests, 0 errors, 0 failures, 0 skipped.
 - `MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build-rosdep bash tools/ci/build_workspace.sh` on 2026-08-07: official rosdep installed/resolved dependencies; five packages built; 30 tests, 0 errors, 0 failures, 0 skipped.
 - A prior `MECH_SKIP_ROSDEP=1` WSL run also completed five packages and 30/30 tests, proving the build independently of resolver-index availability.
-- Docker image build, GitHub Actions, ARM64, vcan, CAN, performance, sanitizer and real-hardware checks: not run; environment/milestone constraints are recorded above.
+- `MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build-fnd002-final MECH_SKIP_ROSDEP=0 bash tools/ci/build_workspace.sh` in `Ubuntu-22.04` on 2026-08-07 installed official rosdep dependencies, built 5 packages, and passed 30 tests with 0 errors/failures/skips.
+- GitHub Actions run `31150054330` for commit `ee4c64c`: portable context check and pinned Humble Docker build both completed successfully.
+- Docker image build on the local Windows/WSL host, ARM64, vcan, CAN, performance, sanitizer and real-hardware checks: not run; later milestone constraints remain.
 
 ## Current Problems
 
 - There are two WSL distributions: `Ubuntu` lacks ROS, while `Ubuntu-22.04` is the verified Humble environment. Future commands must name `Ubuntu-22.04` explicitly.
 - Generating `build/install/log` on `/mnt/d` caused severe DrvFS I/O blocking; use `MECH_OUTPUT_ROOT` under the WSL Linux filesystem such as `/tmp`.
-- The Dockerfile and GitHub Actions job are structurally present but have no executed image/workflow evidence yet.
+- Local Docker/Podman is unavailable; the remote GitHub Actions Docker job is the executed container evidence.
 - NAS target, concrete CODEOWNERS reviewers, branch protection activation, and portable skill-content verification remain undecided.
 
 ## Blockers
 
-- No blocker to reviewing and committing FND-002/FND-003 after the user resumes work.
-- Full FND-003 clean-checkout/CI acceptance still requires executing the pinned Docker/GitHub Actions path.
+- No blocker remains for FND-002/FND-003. FND-004 is the next planned task.
 - Real motor/IMU integration remains blocked by device evidence and G0–G3, independently of Foundation.
 
 ## Unverified Assumptions
 
-- The recorded container manifest/platform digests are intended to remain the reviewed immutable baseline, but the image was not pulled or built locally in this checkpoint.
+- The recorded container manifest/platform digests are the reviewed immutable baseline; amd64 Docker execution was verified by GitHub Actions, while arm64 execution remains unverified.
 - The two AKE60-8 custom motors and two HI12 devices are planned to share `can0`; compatibility remains unverified.
 - Actual motor firmware/configuration, encoder source, standard AKE60-8 scaling applicability, both HI12 identities, and physical bus timing remain unknown.
 
@@ -93,4 +94,4 @@
 
 ## Immediate Next Action
 
-- Wait for the user's next instruction. When work resumes, first review the full uncommitted FND-002/FND-003 diff and run/inspect the pinned Docker or GitHub Actions job before deciding whether to commit; do not start FND-004, CAN, or hardware work implicitly.
+- Begin FND-004 by converting the approved architecture decisions into linked Accepted/Proposed ADR documents; do not start CAN or hardware work implicitly.

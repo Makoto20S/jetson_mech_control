@@ -1,6 +1,6 @@
 # Project Memory
 
-> Last reviewed: 2026-08-07T12:00:00+08:00
+> Last reviewed: 2026-08-07T13:20:36+08:00
 
 ## Project Overview
 
@@ -37,9 +37,9 @@
 
 - Decision: Foundation 构建基线固定为 Ubuntu 22.04、ROS 2 Humble、C++17 和 digest-pinned `ros:humble-ros-base-jammy`；仓库与 CI 默认使用官方 `rosdep`，已配置镜像的主机可通过 `ROSDEP_COMMAND=rosdepc` 显式选择兼容 wrapper，但不得静默改变 CI 标准。WSL 源码可位于 Windows 挂载路径，生成物必须通过 `MECH_OUTPUT_ROOT` 放在 Linux 文件系统以避开 DrvFS I/O 阻塞。
 - Reason: 同时保持上游可移植标准、国内镜像可用性与 WSL 构建稳定性，并让 CI 和开发机复用同一 build/test 脚本。
-- Evidence: `manifests/dependencies.json`; `docker/ros_humble_jammy/Dockerfile`; `tools/ci/build_workspace.sh`; `ros2_ws/README.md`; 2026-08-07 在 `Ubuntu-22.04` 中用官方 `rosdep` 和 `ROSDEP_COMMAND=rosdepc` 各完成一次五包构建及 30/30 测试。
+- Evidence: `manifests/dependencies.json`; `docker/ros_humble_jammy/Dockerfile`; `tools/ci/build_workspace.sh`; `ros2_ws/README.md`; 2026-08-07 在 `Ubuntu-22.04` 中用官方 `rosdep` 和 `ROSDEP_COMMAND=rosdepc` 各完成一次五包构建及 30/30 测试；提交 `ee4c64c` 的 GitHub Actions run `31150054330` 成功完成 portable context check 与 pinned Humble Docker build。
 - Date: 2026-08-07.
-- Scope: 这是 x86_64 Ubuntu/Humble build/unit 证据；不代表 Docker/GitHub Actions、ARM64、vcan、性能或真实硬件已验证。
+- Scope: 已有 x86_64 Ubuntu/Humble 原生与 amd64 GitHub Actions/Docker build/unit 证据；不代表 ARM64、vcan、性能或真实硬件已验证。
 
 ### Current control rates
 
