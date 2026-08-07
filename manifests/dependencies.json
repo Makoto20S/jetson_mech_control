@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "last_verified": "2026-08-06",
+  "purpose": "Reproducible Foundation v0.1 build and unit-test environment",
+  "target": {
+    "os": "Ubuntu",
+    "os_release": "22.04",
+    "ros_distribution": "humble",
+    "architectures": ["amd64", "arm64"],
+    "cxx_standard": 17,
+    "workspace": "ros2_ws",
+    "build_type": "RelWithDebInfo"
+  },
+  "base_image": {
+    "reference": "ros:humble-ros-base-jammy",
+    "digest": "sha256:7bea3d9aa2483d3ca34c8e30d921b79273b0913bd7dc64bebf51d082b5d107e4",
+    "platform_digests": {
+      "linux/amd64": "sha256:09da889006b4d4f120ada9b788394d566818f9e451f59a3a9246a1f9eecf849b",
+      "linux/arm64": "sha256:da735406a84643be3ad3fe3b8ff4888683ac38457c97f14f8099cb8567dd2ec6"
+    },
+    "verified_from": "registry-1.docker.io/library/ros",
+    "floating_tags_forbidden": true
+  },
+  "base_image_tools": [
+    "build-essential",
+    "git",
+    "python3-colcon-common-extensions",
+    "python3-rosdep",
+    "python3-vcstool"
+  ],
+  "rosdep": {
+    "default_command": "rosdep",
+    "command_override_environment": "ROSDEP_COMMAND",
+    "rosdistro": "humble",
+    "install_from": "ros2_ws/src",
+    "ignore_source": true
+  },
+  "build": {
+    "script": "tools/ci/build_workspace.sh",
+    "base_paths": ["ros2_ws/src"],
+    "cmake_args": ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"],
+    "warnings": ["-Wall", "-Wextra", "-Wpedantic", "-Werror"],
+    "tests": ["colcon test", "colcon test-result --verbose"],
+    "hardware_access": false,
+    "can_enablement": false
+  },
+  "external_source_repositories": {
+    "vcs_manifest": "manifests/dependencies.repos",
+    "required_repositories": []
+  }
+}

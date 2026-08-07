@@ -3,7 +3,7 @@
 > 规划基线：2026-07-28
 > CubeMars 资料复核：2026-08-03
 > 适用范围：NVIDIA Jetson、最多 6 台电机、2 条 CAN/CAN FD 总线、2 台 HI12、1 个未来 STM32 传感器节点
-> 本轮状态：仅规划；未启用 CAN、未控制设备、未修改 Jetson、未创建实现代码
+> 本轮状态：FND-002/FND-003 已在工作区实现并通过 x86_64 Ubuntu 22.04/Humble 原生构建测试；Docker/CI、ARM64、vcan 与硬件验证仍未执行；未启用 CAN、未控制设备、未修改 Jetson
 
 ## 结论标记
 
@@ -30,6 +30,8 @@
 **规划决定（2026-08-03 复核）**：当前两电机正常 MVP 的 `controller_manager` 与电机命令/反馈目标仍为 500 Hz，HI12 初始 100 Hz，Python 策略 20~50 Hz。V3.2 的 2000 Hz 是反馈配置上限，不是控制循环验收值。100~200 Hz 只作为模拟/首次硬件 bring-up 的保守档，代码和配置需支持 1 kHz 控制循环测试；1 kHz 电机通信是否启用由单 `can0` 负载和时序实测决定。可选 `0x2A` 会增加一帧位置反馈，必须单独计入预算。详见 `05` 和 `06`。
 
 **规划决定（2026-08-03）**：当前立即进入无真实硬件依赖的 `Foundation v0.1`。先由项目负责人统一建立 Git、构建/CI、纯 C++ core、fake/vcan、BusRuntime、模拟设备、薄 `SystemInterface` 和模拟 demo controller；实机资料不再阻塞基础框架，只阻塞真实设备 profile 激活和物理验收。当前详细执行入口为 `07_framework_bootstrap_plan.md`。
+
+**已确认事实（2026-08-07）**：FND-002/FND-003 的 pinned dependency manifest、五包 ROS 2 骨架、共享 build/test 脚本和最小 GitHub Actions/context workflow 已进入未提交工作区。`Ubuntu-22.04` 中官方 `rosdep` 与显式 `ROSDEP_COMMAND=rosdepc` 两条路径均完成 5 包构建和 30/30 测试；本机没有 Docker/Podman，因此 Docker image 与 GitHub Actions 尚无执行证据，也尚无 ARM64、vcan 或硬件结论。
 
 **已确认事实**：按经典 CAN 最坏位填充估算，8 字节标准帧为 135 bit，8 字节扩展帧为 160 bit，均包含 3 bit 帧间隔。六台电机每周期一发一收、均按 8 字节扩展帧保守计，在 1 Mbit/s、200 Hz 时占 38.4%，250 Hz 时占 48.0%，500 Hz 时占 96.0%。因此 500 Hz 不能作为六电机通用默认值。
 

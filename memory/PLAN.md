@@ -1,161 +1,112 @@
 # Project Plan
 
-> Last updated: 2026-08-06T20:06:00+08:00
+> Last updated: 2026-08-07T12:00:00+08:00
 
 ## Overall Goal
 
-- Deliver a reusable Jetson C++/ros2_control CAN framework that can control supported motors and read supported sensors through device-specific protocol adapters while preserving standard controller interfaces.
+- Deliver a reusable Jetson C++/ros2_control CAN framework that controls supported motors and reads supported sensors through device-specific adapters while preserving vendor-independent controller interfaces.
 
 ## Current Milestone
 
-- Deliver `Foundation v0.1` without real hardware: reproducible Git/CI, pure C++ core, deterministic simulation, SocketCAN/vcan integration, thin ros2_control adapter and a simulated end-to-end demo.
-- Recovery baseline: project-memory points to completed FND-001; the verified Foundation handoff remains historical context, not authorization for remote or hardware actions.
+- Deliver `Foundation v0.1` without real hardware. FND-000/FND-001 are committed; FND-002/FND-003 are implemented and native-Humble validated in the uncommitted working tree, with Docker/GitHub Actions execution still pending.
+- The project is intentionally paused after the 2026-08-07 Memory/documentation checkpoint. Historical handoffs are context only and do not authorize remote, CAN, Jetson, or hardware actions.
 
 ## P0 — Next Critical Tasks
 
-- [x] GOV-001: Establish the AI collaboration continuity baseline.
-  - Outcome: Added root `AGENTS.md`, the detailed SOP and `manifests/ai_skills.yaml`; project memory is mandatory and automatically updated/validated after every new project task, while handoff remains event-triggered and is not created for ordinary task completion.
-  - Validation: Initial Markdown/YAML, remote-ref and memory/handoff checks passed on 2026-08-03; rule reconciliation and cross-document search completed on 2026-08-06, with the current memory validator run recorded below.
+- [x] GOV-001/GOV-002: Establish the AI continuity and checkpoint policy.
+  - Outcome: Root `AGENTS.md`, collaboration SOP, approved skill manifest, mandatory project-memory checkpoints, and event-triggered handoffs are established.
+  - Validation: Documentation/YAML and Memory/handoff validation passed in the recorded governance tasks.
 
-- [x] GOV-002: Reconcile automatic project-memory checkpoints and event-triggered handoffs.
-  - Outcome: User-confirmed policy is reflected in `AGENTS.md`, the collaboration SOP, planning references and the approved skill manifest; implementation remains gated on explicit user confirmation.
-  - Validation: Cross-document rule search, Markdown table smoke and YAML parse passed; `validate_memory.py` returned errors=0 and warnings=0 on 2026-08-06.
+- [x] FND-000/FND-001: Establish repository, asset, private remote, and clean-clone baseline.
+  - Outcome: D1–D5 accepted; `main` is synchronized at committed HEAD `c0f9306`, and supplier/session/build assets are excluded.
+  - Validation: Staged-path, secret, whitespace, private-remote, remote-HEAD and clean-clone checks passed.
 
-- [x] FND-000: Decide repository and asset policy.
-  - Purpose: Prevent the first commit from embedding wrong ownership or supplier assets.
-  - Scope: repo name/private remote, code license, binary/PDF/archive policy, `memory/` tracking and branch protection timing.
-  - Outcome: D1–D5 all accepted on 2026-08-06; GitHub target is confirmed as `Makoto20S/jetson_mech_control`, and baseline commit/push authorization was supplied.
-  - Validation: FND-000 status/confirmation record, asset inventory and Markdown structure reviewed; project-memory validator passed.
-  - Dependencies: None for FND-001.
-
-- [x] FND-001: Initialize the private Git repository and planning baseline.
-  - Purpose: Create a reliable source of truth before implementation.
-  - Scope: establish `main`, `.gitignore`, README/AGENTS, asset/source manifests and the reviewed `manifests/ai_skills.yaml`; create the authorized baseline commit, private remote, push, and clean-clone verification.
-  - Completion criteria: clean clone contains plans/memory/AI workflow and pinned skill provenance but not `CubeMars/`, `.codex/`, `tmp/`, binaries or build output.
-  - Outcome: Commits `057ad8d` and `69815f6` establish the 21-path baseline; private `Makoto20S/jetson_mech_control` exists with `main` pushed and tracking enabled.
-  - Validation: staged-path/forbidden-path/secret/whitespace checks, local and remote HEAD comparison, private/default-branch API lookup, clean clone boundary review and clone Memory validation all passed; no project build/tests were run because implementation code does not yet exist.
-  - Dependencies: FND-000.
-
-- [ ] FND-002/FND-003: Establish Ubuntu 22.04/Humble build manifest, five-package workspace and CI.
+- [ ] FND-002/FND-003: Finalize the Ubuntu 22.04/Humble manifest, five-package workspace, and CI baseline.
   - Purpose: Make every later interface change reproducibly buildable.
-  - Scope: `mech_control_core`, `mech_simulation`, `mech_hardware_ros2_control`, `mech_controllers`, `mech_bringup`; rosdep/colcon/lint/unit jobs and portable context validation.
-  - Completion criteria: clean checkout builds/tests in a pinned Ubuntu/Humble environment and validates required memory/AI entry files without user-specific absolute paths.
-  - Validation: actual CI logs and `colcon test-result --verbose`.
-  - Dependencies: FND-000/FND-001.
+  - Scope: Review the current uncommitted manifest, digest-pinned Docker image, workflow, five packages, build script and portable context check; execute CI/container evidence and then decide on commit/push.
+  - Current outcome: Exactly five planned packages exist; official `rosdep` and explicit `ROSDEP_COMMAND=rosdepc` native WSL runs each built five packages and passed 30/30 tests; context checks pass.
+  - Completion criteria: A clean committed checkout builds/tests through the pinned Docker/GitHub Actions path, required context files are validated, and reviewed files contain no host-specific paths or forbidden assets.
+  - Validation remaining: Docker image build or GitHub Actions logs, followed by clean-checkout review. ARM64 is a later Foundation RC gate, not required to close this bootstrap issue.
+  - Dependencies: User instruction to resume and review/commit; Docker-capable or GitHub Actions environment.
 
 - [ ] FND-004: Convert core architecture decisions into ADRs.
-  - Purpose: Freeze ownership and interface direction before writing runtime code.
-  - Scope: ADR-001/002/003/004/005/006/009 with status, consequences, validation and triggers.
-  - Completion criteria: Each ADR is Accepted or explicitly Proposed; no hidden default remains.
-  - Validation: ADR lint/review.
-  - Dependencies: FND-001.
+  - Purpose: Freeze ownership and interface direction before runtime implementation.
+  - Scope: ADR-001/002/003/004/005/006/009 with status, consequences, validation, and review triggers.
+  - Completion criteria: Each ADR is Accepted or explicitly Proposed with no unresolved contradiction across planning documents.
+  - Validation: Link/status/table checks and architecture review.
+  - Dependencies: Resume instruction; preferably FND-002/FND-003 review complete.
 
-- [ ] FND-005 through FND-009: Implement and test pure C++ contracts and deterministic BusRuntime simulation.
-  - Purpose: Build the vendor-independent core.
-  - Scope: frame/time/status, schema/capability, fake clock/transport, router/filter conflicts, snapshots, command lease and single-writer runtime.
-  - Completion criteria: no-sleep tests deterministically cover stale/TTL/drop/duplicate/reorder/queue/fault behavior.
-  - Validation: unit/property/sanitizer tests without ROS or hardware.
-  - Dependencies: FND-002/FND-003/FND-004.
+- [ ] FND-005 through FND-009: Implement core types, deterministic fakes, routing, leases, snapshots, and BusRuntime.
+  - Purpose: Establish the vendor-independent runtime contract before device work.
+  - Completion criteria: Boundary/config/time/stale/TTL/queue/fault tests pass deterministically without ROS, sleep, CAN, or hardware.
+  - Validation: Unit/property tests and sanitizer jobs.
+  - Dependencies: FND-003/FND-004.
 
-- [ ] RSP-001/FND-010: Decide and implement SocketCAN reuse boundary.
-  - Purpose: Reuse mature pieces without putting DDS or foreign thread ownership in the control loop.
-  - Scope: compare `ros2_socketcan` low-level APIs with minimal Linux RAW SocketCAN; implement chosen non-blocking adapter and vcan tests.
-  - Completion criteria: license, filter, error frame, timestamp, allocation/thread and ARM64 criteria are evidenced in an ADR.
-  - Validation: vcan integration and ARM64 build.
+- [ ] RSP-001/FND-010: Select and implement the SocketCAN transport.
+  - Purpose: Reuse only code that fits the single-writer, non-blocking, timestamped runtime boundary.
+  - Completion criteria: License, filter, error-frame, timestamp, allocation/thread and ARM64 criteria are evidenced in an ADR and vcan tests.
   - Dependencies: FND-004/FND-005/FND-009.
 
 - [ ] FND-011 through FND-015: Complete simulated ros2_control path and Foundation RC.
-  - Purpose: Prove the complete controller-to-bus-to-state architecture before vendor adapters.
-  - Scope: loopback profile/device, composite SystemInterface, bounded demo controller, lifecycle/switch/fault tests, 500 Hz/1 kHz measurements and AdapterContract v1.
-  - Completion criteria: every Definition of Done item in `07_framework_bootstrap_plan.md` section 11 has actual evidence.
-  - Validation: CI, 30 min simulation, lifecycle/switch repetitions, sanitizers and ARM64 clean build.
+  - Purpose: Prove the controller-to-bus-to-state architecture before vendor adapters.
+  - Completion criteria: The Foundation Definition of Done has actual simulation, lifecycle, performance, sanitizer and ARM64 evidence; AdapterContract v1 is frozen.
   - Dependencies: FND-006/FND-009/FND-010.
 
 ## P1 — Important Tasks
 
 - [ ] Freeze INT-001 adapter template, then split CubeMars and HI12 work.
-  - Purpose: Let device owners work in parallel without changing core/controller semantics.
-  - Scope: codec/session package template, golden tests, config/capability, simulator and registry contract.
-  - Completion criteria: A reference adapter can be copied and renamed without modifying core public APIs.
-  - Validation: template package build/test and architecture dependency check.
+  - Completion criteria: A reference codec/session/config/simulator package can be adapted without changing core/controller public semantics.
   - Dependencies: `v0.1.0-foundation` RC.
 
 - [ ] Capture read-only identity/configuration evidence for both AKE60-8 units and both HI12 devices.
-  - Purpose: Bind vendor adapters to actual firmware/configuration.
-  - Scope: motor version/CAN/AppParams/McParams; HI12 PNAME/APP_VER/protocol/node/bitrate/profile.
-  - Completion criteria: each device has a versioned evidence record; remaining questions are exact and supplier-addressable.
-  - Validation: hashes, matched documentation and later passive candump.
+  - Completion criteria: Each device has a versioned evidence record with exact remaining supplier questions.
   - Dependencies: Physical access; does not block Foundation.
 
 - [ ] Implement CubeMars and HI12 adapters with evidence-backed profiles.
-  - Purpose: Add real devices through the frozen adapter boundary.
-  - Scope: AK V3 servo/force and selected HI12 protocol codec/session/golden/simulator.
-  - Completion criteria: adapter tests pass without changing compatible controllers or core semantic contracts.
-  - Validation: golden, fuzz, vcan/simulation, then gated G0~G2 evidence.
+  - Completion criteria: Golden, negative, fuzz and simulation/vcan tests pass without changing compatible controllers or core semantics.
   - Dependencies: INT-001 and device evidence.
 
-- [ ] Decide the initial single-`can0` deployment profile.
-  - Purpose: Confirm two motors plus two HI12 can coexist.
-  - Scope: common bitrate, IDs, termination, load, response latency and error coupling.
-  - Completion criteria: ADR accepts single bus or requires second interface/profile change.
-  - Validation: static budget, G1 passive capture and bus statistics.
-  - Dependencies: all device configs/adapters.
-
-- [ ] Run gated hardware bring-up and 500 Hz performance validation.
-  - Purpose: Verify real device behavior and the current two-motor operating target.
-  - Scope: G0 identity, G1 passive bus, G2 read-only motor feedback, G3 constrained command/measurement, timing/load/freshness statistics.
-  - Completion criteria: Planning acceptance metrics are met with archived raw evidence.
-  - Validation: 30-minute nominal/stress runs, candump, timing histograms and fault matrix.
-  - Dependencies: Hardware authorization and completed safety/measurement gates.
+- [ ] Decide and validate the initial single-`can0` deployment profile through G0–G3.
+  - Completion criteria: Bitrate, identifiers, termination, load, latency, fault coupling, safety and measurement evidence accept a single bus or require a second interface.
+  - Dependencies: Completed adapters, device evidence and explicit hardware authorization.
 
 ## P2 — Later Improvements
 
-- [ ] Compare the 1 kHz controller_manager profile with the 500 Hz baseline.
-  - Purpose: Enable 1 kHz only when measured control benefit and timing margin justify it.
-  - Completion criteria: An ADR records controller, motor-I/O and bus-rate choices from nominal/stress data.
-  - Validation: Actual `dt`, command-to-wire, state age, CAN load and closed-loop comparison.
+- [ ] Compare the 1 kHz controller-manager profile with the measured 500 Hz baseline.
+  - Completion criteria: An ADR records controller, motor-I/O and bus rates using actual timing/load/closed-loop data.
   - Dependencies: Stable 500 Hz system.
 
 - [ ] Extend to additional motor/sensor brands and the future STM32 node.
-  - Purpose: Exercise the planned codec/session/capability extension boundary.
   - Completion criteria: New devices work through adapters without changing compatible C++ controllers.
-  - Validation: Protocol golden frames, simulator/vcan tests and gated hardware evidence.
-  - Dependencies: Device specifications and stable core APIs.
+  - Dependencies: Stable core APIs and device specifications.
 
 ## Dependencies
 
-- FND-000 project decisions, GitHub target and commit/push authorization are confirmed; local `main`, staged-path review, `origin`, remote push and clean clone are complete.
-- FND-001 is complete; the clean clone contains the approved-source manifest and all three Memory files, while the repository SOP remains the portable fallback for tools without AGENTS support.
-- Ubuntu 22.04/ROS 2 Humble build/CI environment for all implementation evidence.
-- Current CubeMars documentation is reviewed; live motor/HI12 evidence is required only for P1 integration.
-- Approved CAN topology, termination and G0~G3 only for hardware stages.
+- Use `Ubuntu-22.04` explicitly for the current x86_64 Humble build evidence; the separate `Ubuntu` WSL distribution is not provisioned for ROS.
+- Official `rosdep` is the portable default. `ROSDEP_COMMAND=rosdepc` is a documented host override only after that host's mirror sources/cache are configured.
+- Use a Linux filesystem output root through `MECH_OUTPUT_ROOT` for WSL builds; DrvFS output is not a reliable build path.
+- Docker/GitHub Actions execution, then ARM64 and vcan environments, are required at their respective gates.
+- Live CubeMars/HI12 evidence and G0–G3 are required only for later device integration.
 
 ## Risks
 
-- New machines or AI environments may lack the two skills; the approved repositories have no tags and moving `main` may differ from the manifest, so installations must report drift and retain the documented fallback.
-- Future broad staging could still include unintended supplier or experimental assets if `.gitignore` and explicit staged-path review are bypassed; the initial commit passed this boundary review.
-- Premature vendor packages or generic interfaces may create abstractions with no tested consumer.
-- Windows editing results may be mistaken for Ubuntu/Humble build evidence.
-- `ros2_socketcan` reuse may conflict with the required single-writer/thread/timestamp boundary.
-- Custom AKE60-8 firmware may differ from AK3.0 V3.2 in frame format, scaling, encoder source or watchdog behavior.
-- Both HI12 units may use the same default node ID or a bitrate incompatible with the motors.
-- Standard effort has an AKE60-8 candidate (`Kt = 0.7382 N*m/A`) but may be wrong if the custom units changed the relevant parameters.
-- Enabling optional `0x2A` at full motor feedback rate may push the current single-bus profile beyond the 50% average-load target.
-- Single-bus load or fault coupling may force a second CAN interface.
+- The working tree is entirely uncommitted for FND-002/FND-003; broad staging could include unintended assets unless the explicit path/context review is repeated.
+- Structural CI/Docker review can be mistaken for executed CI evidence; current Docker/Actions status is explicitly unrun.
+- WSL distribution ambiguity or DrvFS output can create false failures/hangs.
+- A host-specific `rosdepc` mirror must not silently replace official `rosdep` as the repository/CI standard.
+- Premature vendor packages or generic interfaces may create untested abstractions.
+- Custom AKE60-8 and HI12 identities, scaling, watchdogs, IDs and common-bus behavior remain unknown.
 
 ## Open Questions
 
-- NAS mirror target and concrete reviewers remain undecided; branch protection waits for the first runnable CI per D5.
-- Portable installer/CI wrapper and whether onboarding should verify installed skill contents against the manifest commits.
-- Exact pinned Ubuntu/Humble container/runner and ARM64 CI path.
-- Whether RSP-001 selects a wrapped `ros2_socketcan` low-level API or a minimal direct RAW SocketCAN adapter.
-- Exact custom identifiers, driver hardware, firmware and current AK3.0 command profile of both AKE60-8 units.
-- CAN visibility of both encoders and which source supplies `0x29/0x2A` position.
-- Whether standard AKE60-8 Kt/ranges remain valid for the custom units.
-- Stable motor feedback rate, command watchdog and neutral behavior.
-- Both HI12 protocols, IDs, bitrates and output profiles.
-- Measured Jetson 500 Hz/1 kHz timing and command-to-wire behavior.
+- Whether the pinned Docker image and GitHub Actions workflow pass from a clean committed checkout.
+- NAS mirror target, concrete reviewers, CODEOWNERS and branch-protection activation after runnable CI.
+- Portable skill installation/content verification against manifest commits.
+- Whether RSP-001 selects a wrapped `ros2_socketcan` API or minimal Linux RAW SocketCAN.
+- Exact custom AKE60-8 firmware/configuration/encoder sources and both HI12 protocol/ID/bitrate profiles.
+- Measured Jetson ARM64 500 Hz/1 kHz timing and command-to-wire behavior.
 
 ## Deferred
 
-- Six-motor real integration, final two-bus topology, STM32 firmware/AFE, learning control, automatic firmware updates and safety certification remain outside the current milestone.
+- No FND-004 or later work proceeds until the user gives a new instruction.
+- Docker/CI, ARM64, vcan, SocketCAN, CAN enablement, hardware commands, six-motor integration, STM32, learning control, firmware updates and safety certification are not performed in this pause checkpoint.

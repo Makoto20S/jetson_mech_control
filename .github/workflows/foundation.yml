@@ -1,0 +1,39 @@
+name: Foundation v0.1
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context:
+    name: Portable context checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate repository context
+        run: python3 tools/ci/context_check.py
+
+  build:
+    name: Ubuntu 22.04 / ROS 2 Humble build and unit tests
+    runs-on: ubuntu-22.04
+    needs: context
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build pinned Humble image
+        run: >-
+          docker build
+          --file docker/ros_humble_jammy/Dockerfile
+          --tag jetson-mech-control-foundation:${{ github.sha }}
+          .

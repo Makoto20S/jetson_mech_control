@@ -1,0 +1,3 @@
+# Foundation v0.1 has no external source repositories.
+# Future additions must be pinned to reviewed commits, not moving branches.
+repositories: {}

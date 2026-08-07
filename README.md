@@ -6,11 +6,13 @@ adapters.
 
 ## Current status
 
-The project is at the planning and repository-baseline stage. Foundation v0.1
-is intentionally hardware-independent: no CAN interface is enabled, no motor
-command is sent, and no Jetson system configuration is changed from this
-workspace. ROS 2 Humble, vcan, timing, and ARM64 claims must be verified in the
-corresponding Ubuntu/ARM64 environment.
+FND-002/FND-003 are implemented in the current working tree: a pinned
+Ubuntu 22.04/ROS 2 Humble build boundary, five package skeletons, and a minimal
+CI/context workflow. Native x86_64 Humble builds pass all 30 skeleton tests
+with both the default official `rosdep` and an explicitly selected `rosdepc`
+wrapper. Docker/GitHub Actions, ARM64, vcan, timing, and hardware evidence are
+still pending. No CAN interface is enabled, no motor command is sent, and no
+Jetson system configuration is changed from this workspace.
 
 Start with:
 
@@ -27,9 +29,12 @@ The private GitHub target is `Makoto20S/jetson_mech_control`, and the local
 `origin` points to that repository. See `memory/STATE.md` for the current
 commit, repository-creation, and push status.
 
-## Planned Foundation packages
+## Foundation workspace
 
-The first implementation packages are `mech_control_core`, `mech_simulation`,
+The current packages are `mech_control_core`, `mech_simulation`,
 `mech_hardware_ros2_control`, `mech_controllers`, and `mech_bringup`. CubeMars,
 HI12, and other vendor adapters are deferred until the core adapter contract is
 frozen and device evidence is available.
+
+Build and test instructions, including the optional `rosdepc` host override
+and WSL output-directory guidance, are in [`ros2_ws/README.md`](ros2_ws/README.md).

@@ -1,6 +1,6 @@
 # Project Memory
 
-> Last reviewed: 2026-08-06T20:06:00+08:00
+> Last reviewed: 2026-08-07T12:00:00+08:00
 
 ## Project Overview
 
@@ -32,6 +32,14 @@
 - Evidence: `docs/planning/07_framework_bootstrap_plan.md`, `docs/planning/05_decisions_and_open_questions.md` section 3.7.
 - Date: 2026-08-03.
 - Scope: Foundation 不连接或控制真实设备；设备适配包在核心契约稳定后创建。
+
+### Reproducible Foundation build boundary (FND-002/FND-003)
+
+- Decision: Foundation 构建基线固定为 Ubuntu 22.04、ROS 2 Humble、C++17 和 digest-pinned `ros:humble-ros-base-jammy`；仓库与 CI 默认使用官方 `rosdep`，已配置镜像的主机可通过 `ROSDEP_COMMAND=rosdepc` 显式选择兼容 wrapper，但不得静默改变 CI 标准。WSL 源码可位于 Windows 挂载路径，生成物必须通过 `MECH_OUTPUT_ROOT` 放在 Linux 文件系统以避开 DrvFS I/O 阻塞。
+- Reason: 同时保持上游可移植标准、国内镜像可用性与 WSL 构建稳定性，并让 CI 和开发机复用同一 build/test 脚本。
+- Evidence: `manifests/dependencies.json`; `docker/ros_humble_jammy/Dockerfile`; `tools/ci/build_workspace.sh`; `ros2_ws/README.md`; 2026-08-07 在 `Ubuntu-22.04` 中用官方 `rosdep` 和 `ROSDEP_COMMAND=rosdepc` 各完成一次五包构建及 30/30 测试。
+- Date: 2026-08-07.
+- Scope: 这是 x86_64 Ubuntu/Humble build/unit 证据；不代表 Docker/GitHub Actions、ARM64、vcan、性能或真实硬件已验证。
 
 ### Current control rates
 
@@ -106,7 +114,9 @@
 
 - 项目 memory 验证：`D:\Work\anaconda\python.exe C:\Users\sinfi\.codex-happysolve-cli\skills\project-memory\scripts\validate_memory.py --root D:\Work\jetson`。
 - 当前系统的裸 `python` 命令解析到不可用的 WindowsApps 别名；本项目 memory 脚本使用上述 Anaconda Python。
-- 尚无已验证的项目构建或测试命令，因为实现代码尚未创建。
+- Ubuntu 22.04/Humble 默认构建测试：`MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build bash tools/ci/build_workspace.sh`；2026-08-07 以官方 `rosdep` 验证五包和 30/30 测试通过。
+- 已配置 rosdepc 镜像的主机可先运行 `rosdepc update --rosdistro humble`，再用 `ROSDEP_COMMAND=rosdepc MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build bash tools/ci/build_workspace.sh`；2026-08-07 验证通过。
+- 当前 WSL 必须显式选择 `Ubuntu-22.04`；名为 `Ubuntu` 的另一个发行版未安装 ROS。不要把 `build/install/log` 写到 `/mnt/d`。
 
 ## Long-Term Constraints
 
