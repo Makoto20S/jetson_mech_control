@@ -32,6 +32,14 @@ REQUIRED_FILES = {
     "AGENTS.md",
     "CONTRIBUTING.md",
     "docker/ros_humble_jammy/Dockerfile",
+    "docs/adr/ADR-001-core-boundary.md",
+    "docs/adr/ADR-002-bus-runtime-ownership.md",
+    "docs/adr/ADR-003-composite-system-interface.md",
+    "docs/adr/ADR-004-fixed-protocol-profile.md",
+    "docs/adr/ADR-005-monotonic-time-freshness.md",
+    "docs/adr/ADR-006-conditional-can0-deployment.md",
+    "docs/adr/ADR-009-effort-semantic-gate.md",
+    "docs/adr/README.md",
     "docs/development/ai_collaboration_workflow.md",
     "docs/development/jetson_arm64_smoke_test.md",
     "docs/planning/07_framework_bootstrap_plan.md",
@@ -44,6 +52,7 @@ REQUIRED_FILES = {
     "ros2_ws/src/mech_controllers/package.xml",
     "ros2_ws/src/mech_bringup/package.xml",
     "tools/ci/build_workspace.sh",
+    "tools/ci/check_adrs.py",
     "tools/ci/context_check.py",
 }
 
@@ -60,9 +69,18 @@ PORTABLE_FILES = {
     ".dockerignore",
     ".github/workflows/foundation.yml",
     "docker/ros_humble_jammy/Dockerfile",
+    "docs/adr/ADR-001-core-boundary.md",
+    "docs/adr/ADR-002-bus-runtime-ownership.md",
+    "docs/adr/ADR-003-composite-system-interface.md",
+    "docs/adr/ADR-004-fixed-protocol-profile.md",
+    "docs/adr/ADR-005-monotonic-time-freshness.md",
+    "docs/adr/ADR-006-conditional-can0-deployment.md",
+    "docs/adr/ADR-009-effort-semantic-gate.md",
+    "docs/adr/README.md",
     "manifests/dependencies.json",
     "manifests/dependencies.repos",
     "tools/ci/build_workspace.sh",
+    "tools/ci/check_adrs.py",
 }
 
 
@@ -129,6 +147,12 @@ def main() -> int:
         for relative in REQUIRED_FILES:
             if not (root / relative).is_file():
                 fail(f"missing required file: {relative}")
+
+        subprocess.run(
+            [sys.executable, str(root / "tools/ci/check_adrs.py")],
+            check=True,
+            cwd=root,
+        )
 
         manifest = json.loads(read_text(root, "manifests/dependencies.json"))
         if manifest.get("schema_version") != 1:

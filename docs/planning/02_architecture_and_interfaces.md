@@ -1,5 +1,7 @@
 # 总体架构与接口设计
 
+> FND-004 已完成：当前规范决策见 [ADR 索引](../adr/README.md)。本文件保留架构背景、比较和图示；与 ADR 冲突时，以 ADR 的状态和正文为准。
+
 ## 1. 设计原则
 
 | 原则 | 具体约束 | 性质 |
@@ -79,7 +81,7 @@ flowchart TB
     TOOLS -. read-only observation .-> CAN1
 ```
 
-**规划决定**：图中的第二物理接口是未来扩展边界，当前硬件只有 `can0`。首个两电机、两 HI12 profile 先以一个 `BusRuntime` 映射到 `can0`，但只有四台设备位速率一致、ID 无冲突且负载/故障测试通过后才激活；不通过时必须增加第二接口或降低/调整 profile，不能在软件中假装存在 `can1`。
+**ADR-006 Proposed 边界**：图中的第二物理接口是未来扩展边界，当前硬件只有 `can0`。首个两电机、两 HI12 profile 仅把一个 `BusRuntime` 映射到 `can0` 作为待证候选；只有四台设备位速率一致、ID 无冲突且负载/仲裁/故障测试通过并将 ADR-006 转为 Accepted 后才可激活。不通过时必须增加第二接口或降低/调整 profile，不能在软件中假装存在 `can1`。
 
 ## 4. 分层与所有权
 
@@ -407,29 +409,29 @@ flowchart TB
 
 **有依据的推断**：主机原生运行时不等于手工不可复现。release manifest 固定 Git commit/tag、依赖版本、构建选项、配置哈希、Jetson OS/内核/ROS 清单和设备固件身份；安装、权限、RT 内核或 systemd 变更都需要独立评审和回滚记录。
 
-## 15. 关键 ADR 建议
+## 15. 正式 ADR 基线与后续候选
 
-| ADR | 决策 | 被否决替代 | 后果/重审触发 | 性质 |
-|---|---|---|---|---|
-| ADR-001 | 纯 C++ 核心 + ros2_control 薄适配 | 协议直接散落硬件插件 | 多一个边界；若核心不能脱 ROS 单测则重审 | 有依据的推断 |
-| ADR-002 | 每条物理总线一个进程内 BusRuntime 和单写者 | 每设备独立 socket 写者；DDS 网关命令路径 | 集中调度；若 CANopen 库无法嵌入则给其专用总线/后端 | 有依据的推断 |
-| ADR-003 | MVP 一个复合 SystemInterface | 每设备一个 hardware component | 生命周期耦合但所有权明确；确有独立恢复需求时拆分 | 有依据的推断 |
-| ADR-004 | 协议代际与 active command profile 在 ACTIVE 期间不可变 | 按收到帧自动猜 AK V3/legacy MIT/J1939/CANopen，或混发 servo/force 命令 | claim 与命令映射确定；若将来确需在线 mode switch，则走显式 controller/hardware mode-switch 设计 | 有依据的推断 |
-| ADR-005 | 单调时钟管理 freshness，源时间独立保存 | 全部用 ROS `now()` | 时间字段更多；获得可靠设备时钟后增加映射 | 有依据的推断 |
-| ADR-006 | 当前两电机、两 HI12 以条件式单 `can0` profile 验证，架构保留双总线 | 假装已有 `can1`；无证据强行共总线 | 同速/ID/负载不通过即增加接口或修改 profile | 规划决定 |
-| ADR-007 | 目标原生运行、开发与 CI 容器化 | 所有运行都容器；所有开发都污染主机 | 两套清单需维护；容器 RT 测量证明充分时重审 | 有依据的推断 |
-| ADR-008 | Python 只交付有序号和 TTL 的低频目标 | Python 直接写 effort 或设备命令 | 需要 C++ fallback；推理进入安全认证范围时另立设计 | 有依据的推断 |
-| ADR-009 | effort 接口由型号、协议语义和机械侧映射闸门控制；最小恒定命令 demo 与物理精度分开验收 | 电流直接命名为力矩 | 允许先验证框架纵向链路，同时避免把 demo 当作最终控制目标 | 有依据的推断 |
-| ADR-010 | 大数据不进入普通 Git | rosbag/日志/权重直接 commit | 需要外部资产清单和保留策略 | 有依据的推断 |
-| ADR-011 | 一次只支持一个 ROS 发行版 | MVP 同时维护多发行版 | 迁移需专门里程碑；Humble 生命周期临近时触发 | 有依据的推断 |
+FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 
-**有依据的推断**：每个 ADR 文件后续至少包含状态、日期、上下文、决策、替代项、正负后果、验证指标、重审触发和批准者。上述表是建议清单，不替代后续仓库中的独立 ADR 文件。
+| ADR | Status | 当前规范边界 |
+|---|---|---|
+| [ADR-001](../adr/ADR-001-core-boundary.md) | Accepted | 纯 C++ 核心 + 薄 ros2_control 适配层 |
+| [ADR-002](../adr/ADR-002-bus-runtime-ownership.md) | Accepted | 每条物理 CAN 一个进程内 `BusRuntime` 写者 |
+| [ADR-003](../adr/ADR-003-composite-system-interface.md) | Accepted | Foundation/MVP 一个配置驱动的复合 `SystemInterface` |
+| [ADR-004](../adr/ADR-004-fixed-protocol-profile.md) | Accepted | 配置期固定协议代际和 active command profile；ACTIVE 期间不自动猜测或混发 |
+| [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) | Accepted | 单调时钟管理 freshness/TTL，源时间和到达时间独立保存 |
+| [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 单 `can0` 只是等待逐台配置、ID/位速率和负载证据的条件式 deployment profile；架构保留双总线 |
+| [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort [N*m]` 受物理语义证据闸门约束；demo 与物理精度分开验收 |
+
+状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
+
+ADR-007（部署）、ADR-008（Python 低频目标）、ADR-010（大数据）和 ADR-011（ROS 发行版）仍是规划候选，不是当前存在或已接受的 ADR。它们需在出现独立任务、替代方案和验证证据后再创建。
 
 ## 16. 扩展到 6 电机、2 CAN 的规则
 
 **有依据的推断**：长期两总线设计包络是一条经确认位速率的 actuator bus 承载最多 6 台电机，另一条 sensor bus 承载两台 HI12 和 Classic CAN 模式 STM32。AK V3 8 字节扩展命令加 8 字节扩展反馈按 1 Mbit/s、200 Hz 估算为 38.4%，仍需保留错误/诊断/仲裁余量；传感器总线加入 STM32 前必须重算。
 
-**规划决定（2026-07-30）**：当前两电机单 `can0` profile 以 500 Hz 为正常目标；上段 200~250 Hz 只描述六电机单总线扩展预算。若两电机需要 1 kHz 电机收发、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
+**规划目标（受 ADR-006 Proposed 约束）**：当前两电机候选 profile 以 500 Hz 为正常目标；上段 200~250 Hz 只描述六电机单总线扩展预算。500 Hz 目标不证明单 `can0` 部署已通过；若两电机需要 1 kHz 电机收发、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
 
 **有依据的推断**：新增设备只增加配置、codec/device session 和 capability 映射；上层控制器继续使用标准物理量与质量接口。新增 Jetson 只更换部署映射和经过验证的 host manifest，不修改协议常量。
 

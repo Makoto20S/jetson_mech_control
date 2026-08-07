@@ -9,8 +9,9 @@ adapters.
 FND-000 through FND-003 are complete. The repository has a pinned Ubuntu
 22.04/ROS 2 Humble build boundary, five package skeletons, and a minimal
 CI/context workflow. Native x86_64 Humble builds and the pinned CI build pass
-all skeleton tests. FND-004 will formalize the core architecture decisions;
-FND-004A will then run an early native Jetson ARM64 smoke test before FND-005.
+all skeleton tests. FND-004 has formalized the core architecture baseline as
+six Accepted ADRs and one intentionally Proposed deployment ADR. FND-004A is
+the next gate and will run an early native Jetson ARM64 smoke test before FND-005.
 ARM64, vcan, timing, and hardware results are not claimed until those gates run.
 No CAN interface is enabled and no motor command is sent by the current
 Foundation work.
@@ -20,8 +21,9 @@ Start with:
 1. [`AGENTS.md`](AGENTS.md) for the repository collaboration contract.
 2. [`CONTRIBUTING.md`](CONTRIBUTING.md) for the shared-versus-local boundary and contribution workflow.
 3. [`docs/planning/README.md`](docs/planning/README.md) for the planning index.
-4. [`docs/planning/07_framework_bootstrap_plan.md`](docs/planning/07_framework_bootstrap_plan.md) for the active Foundation sequence.
-5. GitHub Issues/Milestones for shared task state. Developers may use an ignored local `memory/` directory through the approved `project-memory` skill.
+4. [`docs/adr/README.md`](docs/adr/README.md) for the FND-004 architecture decisions and their status.
+5. [`docs/planning/07_framework_bootstrap_plan.md`](docs/planning/07_framework_bootstrap_plan.md) for the active Foundation sequence.
+6. GitHub Issues/Milestones for shared task state. Developers may use an ignored local `memory/` directory through the approved `project-memory` skill.
 
 ## Repository and asset boundary
 

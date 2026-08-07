@@ -33,6 +33,6 @@
 
 ## 文档生命周期
 
-FND-004 先把 `docs/planning/02_architecture_and_interfaces.md` 和 `05_decisions_and_open_questions.md` 中的核心结论迁入独立 ADR。ADR 完成后再单独审查规划文档：仍提供证据或路线价值的内容保留并压缩，已被 ADR/实现替代的历史移入归档，冲突内容直接修正或删除。归档材料不得继续作为当前规范引用。
+FND-004 已把 `docs/planning/02_architecture_and_interfaces.md` 和 `05_decisions_and_open_questions.md` 中的核心结论迁入[独立 ADR](docs/adr/README.md)。ADR-006 因缺少当前单 `can0` 的实机配置和总线证据保持 Proposed；不得把该状态解释为允许激活。下一次独立文档任务再审查长规划：仍提供证据或路线价值的内容保留并压缩，已被 ADR/实现替代的历史移入归档，冲突内容直接修正或删除。归档材料不得继续作为当前规范引用。
 
 FND-004 后、FND-005 前执行 FND-004A Jetson ARM64 原生烟测，步骤见 [`docs/development/jetson_arm64_smoke_test.md`](docs/development/jetson_arm64_smoke_test.md)。该烟测不启用 CAN，也不操作真实设备。

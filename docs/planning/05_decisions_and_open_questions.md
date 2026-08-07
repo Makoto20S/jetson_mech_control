@@ -4,6 +4,8 @@
 > 作用：记录总体规划完成后的讨论结论；与早期规划冲突时，以本文件中标明的最新决定为准。
 > 边界：本文件只更新设计与验收语义，不代表真实设备、固件、CAN 总线或物理力矩已经验证。
 
+> FND-004 已完成：正式规范状态见 [ADR 索引](../adr/README.md)。本文件继续保存讨论背景和实机待确认项；与 ADR 冲突时，以 ADR 为准。
+
 ## 1. 证据标记
 
 - **规划决定**：当前同意采用的架构或工程基线，后续可由测试或 ADR 修订。
@@ -27,11 +29,15 @@
 
 ### 3.1 核心边界
 
+当前规范：[ADR-001](../adr/ADR-001-core-boundary.md)、[ADR-002](../adr/ADR-002-bus-runtime-ownership.md) 和 [ADR-003](../adr/ADR-003-composite-system-interface.md) 均为 Accepted。
+
 **规划决定**：继续采用“纯 C++ 传输/协议/时间/设备核心 + 薄 ros2_control 复合 `SystemInterface`”。`SystemInterface` 导出标准状态和命令接口，但不包含厂商 CAN 位域或直接阻塞收发逻辑。
 
 **规划决定**：每条物理 CAN 总线由一个 `BusRuntime` 协调接收、路由、发送调度、时间戳、错误状态和命令租约。控制器不打开 SocketCAN，也不构造厂商 CAN 帧。
 
 ### 3.2 CubeMars servo 与力控/MIT-like
+
+当前规范：[ADR-004](../adr/ADR-004-fixed-protocol-profile.md) 为 Accepted；接受的是配置期固定和失败关闭规则，不表示实机协议代际已经确认。
 
 **规划决定（2026-08-03 修订）**：框架分别实现并测试 `AK V3 servo extended`、`AK V3 force-control extended` 和 `legacy MIT standard-frame`。当前 AKE60-8 只把前两个作为候选；legacy profile 仅用于明确匹配的旧固件。设备在 `on_configure` 时固定协议代际、active command profile 和接口 claim，ACTIVE 期间不自动猜测或混发。
 
@@ -44,6 +50,8 @@
 **规划决定**：阻抗、滑模、PID、学习策略融合等关节级算法由 Jetson 的 C++ 控制器读取电机与 IMU 状态，计算目标位置、速度或力矩。Python 不直接拥有电机命令接口。
 
 ### 3.4 最小恒定力矩命令 demo
+
+当前规范：[ADR-009](../adr/ADR-009-effort-semantic-gate.md) 为 Accepted；定制实机标准 `effort` 映射仍需 OQ-01/OQ-04 和 G0–G3 证据。
 
 **规划决定**：恒定力矩命令只是验证控制框架的最小 demo，不是项目最终控制目标。它用于贯通并观察“C++ controller `update()` -> ros2_control 接口 claim -> `SystemInterface::write()` -> device session -> `BusRuntime` -> CAN -> 状态与诊断”整条链路。
 
@@ -61,6 +69,8 @@ joint/effort command = 2.0 N*m
 
 ### 3.5 控制频率
 
+时间与 freshness 语义以 Accepted 的 [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) 为准；单 `can0` 部署以 Proposed 的 [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) 为准，当前频率预算不是激活证据。
+
 | 场景 | controller_manager | 电机命令/反馈 | HI12 | 性质 |
 |---|---:|---:|---:|---|
 | 模拟与首次硬件 bring-up | 100~200 Hz | 100~200 Hz | 100 Hz | 规划决定 |
@@ -72,7 +82,7 @@ joint/effort command = 2.0 N*m
 
 **规划决定**：控制循环、CAN 命令、设备反馈和 IMU 输出是独立频率。若控制循环为 1 kHz 而反馈为 500 Hz，控制器允许读取同一完整快照两次，但必须保留源时间、递增 age，并使用实际 `dt`。
 
-**资料事实 + 规划决定（2026-08-03）**：AK V3.2 的 `0x29` 状态反馈可配置 1–2000 Hz，因此 500 Hz 不是设备手册上限。500 Hz 仍作为当前单 `can0` 正常基线，是因为两电机基础反馈加两 HI12 的保守占用约 41.6%；若两电机都按 500 Hz 启用额外 `0x2A` 位置帧，占用约升至 53.6%，不再满足平均 50% 目标。`0x2A` 必须按需显式启用。
+**资料事实 + 规划目标（受 ADR-006 Proposed 约束）**：AK V3.2 的 `0x29` 状态反馈可配置 1–2000 Hz，因此 500 Hz 不是设备手册上限。500 Hz 是当前两电机候选 profile 的正常目标；两电机基础反馈加两 HI12 的保守估算约 41.6%，但该计算不证明单 `can0` 已可激活。若两电机都按 500 Hz 启用额外 `0x2A` 位置帧，占用约升至 53.6%，不再满足平均 50% 目标；`0x2A` 必须按需显式启用并重新验证 deployment。
 
 ### 3.6 新 CAN 设备扩展
 
@@ -113,4 +123,6 @@ joint/effort command = 2.0 N*m
 
 ## 6. 变更规则
 
-**规划决定**：上述决定进入实现前应转为独立 ADR、配置 schema 和可执行验收。供应商资料或现场证据与本文件冲突时，不静默覆盖；更新对应待确认项、记录证据来源，并说明是否触发架构或接口变更。
+**已完成（FND-004）**：核心边界已转为 ADR-001/002/003/004/005/006/009；六项为 Accepted，ADR-006 因缺少当前四设备单 `can0` 的决定性证据保持 Proposed。后续配置 schema 和运行时验收由 FND-005～FND-015 实现。
+
+供应商资料或现场证据与本文件或 ADR 冲突时，不静默覆盖；先停止受影响的真实 profile，更新对应待确认项、记录证据来源，并按 ADR 的重审触发修改正式决策。

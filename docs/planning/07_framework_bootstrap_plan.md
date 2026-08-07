@@ -2,7 +2,7 @@
 
 > 制定日期：2026-08-03
 > 当前实施入口：本文件
-> 当前状态：FND-000～FND-003 已完成；下一步为 FND-004，随后在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测
+> 当前状态：FND-000～FND-004 已完成；下一步是在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
 
 ## 1. 决策结论
@@ -28,9 +28,9 @@
 | CubeMars 资料 | AK3.0 V3.2 协议足以做离线 codec 设计；实机配置仍缺 | 不阻塞接口和模拟器；阻塞真实激活 |
 | HI12 | 通用 J1939/CANopen 资料存在，交付固件未知 | Foundation 只保留 sensor capability，不选现场 profile |
 | 控制频率 | 当前两电机正常目标 500 Hz；框架支持 1 kHz 测试 | 测试和配置从第一天支持多速率，不承诺真实硬件性能 |
-| Git | `main` 已建立并推送；FND-000～FND-003 已完成 | 进入 FND-004 ADR 基线；继续保持供应商、生成物和个人 Memory 边界 |
+| Git | `main` 已建立并推送；FND-000～FND-004 已完成 | 进入 FND-004A；继续保持供应商、生成物和个人 Memory 边界 |
 | 供应商资料 | `CubeMars/` 是独立嵌套 Git 仓库 | 主仓库必须忽略它，避免误提交为 gitlink 或复制供应商资产 |
-| 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context 脚本已存在 | 先完成 FND-004 与 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
+| 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context/ADR 检查脚本已存在 | 先完成 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
 | 目标平台 | Jetson Ubuntu 22.04 / ROS 2 Humble；当前编辑工作区是 Windows | 构建与 vcan 测试必须在 Ubuntu 22.04 环境执行，Windows 不作为 ROS 运行目标 |
 
 `03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件取代它作为当前 Foundation 阶段的具体执行顺序。
@@ -229,7 +229,7 @@ bash tools/ci/build_workspace.sh
 1. 完成仓库/许可证/资产策略决策；
 2. 初始化 Git、私有远端、`.gitignore` 和规划基线；
 3. 创建五个必要 packages、最小可构建目标和 CI；
-4. 将 ADR-001/002/003/004/005/006/009 转成独立 ADR 并标明 Accepted/Proposed；
+4. 已将 ADR-001/002/003/004/005/006/009 转成独立 ADR 并标明 Accepted/Proposed；
 5. 在目标 Jetson 上完成 FND-004A ARM64 原生烟测；
 6. 实现 frame/time/status/config/capability 的纯 C++ 类型与验证测试。
 
@@ -276,7 +276,7 @@ bash tools/ci/build_workspace.sh
 | FND-001 | 初始化私有 Git 主仓库 | FND-000 | main、remote、ignore、AI 协作规范/skill manifest、baseline commit | clean clone 可看到正式规划和 AI 入口且不含个人 Memory、供应商或临时资产 |
 | FND-002 | 固定 Ubuntu/Humble dependency manifest | FND-000 | rosdep/容器/host manifest | 新环境可复现依赖安装 |
 | FND-003 | 创建最小 ROS workspace 与 CI | FND-001/002 | 五个 package、build/test/context workflow | clean build、空骨架测试和可移植上下文检查通过 |
-| FND-004 | 建立 ADR 基线 | FND-001 | ADR-001/002/003/004/005/006/009 | 每项有状态、后果、验证和重审触发 |
+| FND-004 | 建立 ADR 基线（已完成） | FND-001 | [ADR 索引与七份记录](../adr/README.md) | 6 Accepted、1 Proposed；每项有状态、后果、验证、重审触发和规划反向链接 |
 | FND-004A | Jetson ARM64 原生早期烟测 | FND-003/004 | 环境记录 + clean-clone context/build/test 结果 | Jetson Ubuntu 22.04/Humble 原生执行 context check、依赖解析、5 包 build/test；记录 JetPack/L4T/ROS/GCC/CMake；不启用 CAN、不操作设备 |
 | FND-005 | 定义 frame/time/status 类型 | FND-003/004/004A | pure C++ headers/sources/tests | 边界、无效 DLC/ID/时间测试通过 |
 | FND-006 | 定义 config/capability/schema v1 | FND-005 | typed config + validator | 缺字段、重复 ID、未知 profile 可被拒绝 |
@@ -294,27 +294,25 @@ bash tools/ci/build_workspace.sh
 
 严格执行顺序不是“先写 CubeMars driver”，而是 `FND-000 -> FND-001/002 -> FND-003 -> FND-004 -> FND-004A -> core -> simulation -> ros2_control -> adapter template`。
 
-### 8.1 FND-004 到底做什么
+### 8.1 FND-004 完成结果
 
-FND-004 是架构决策固化任务，不写运行时代码，也不连接 Jetson/CAN。它把 `02_architecture_and_interfaces.md`、`05_decisions_and_open_questions.md` 和当前 Foundation 计划中已经反复使用的核心结论，转换为 `docs/adr/` 下可评审、可链接、可被后续代码验证的正式记录：
+FND-004 已完成架构决策固化；该任务没有写运行时代码，也没有连接 Jetson/CAN。正式入口为 [ADR 索引](../adr/README.md)：
 
-| ADR | 要冻结的问题 |
-|---|---|
-| ADR-001 | 纯 C++ 核心与薄 ros2_control 适配层的边界 |
-| ADR-002 | 每条物理 CAN 总线的单写者 `BusRuntime` 所有权 |
-| ADR-003 | Foundation/MVP 采用复合 `SystemInterface` 的生命周期与拆分触发条件 |
-| ADR-004 | 协议代际和 active command profile 在 ACTIVE 期间不可自动猜测或混发 |
-| ADR-005 | 单调时钟、源时间、到达时间和 freshness 的语义 |
-| ADR-006 | 当前单 `can0` 只是条件式部署 profile，架构保留双总线 |
-| ADR-009 | 标准 `effort` 必须经过物理语义闸门，框架 demo 与力矩精度分开验收 |
+| ADR | Status | 已冻结的问题 |
+|---|---|---|
+| [ADR-001](../adr/ADR-001-core-boundary.md) | Accepted | 纯 C++ 核心与薄 ros2_control 适配层的边界 |
+| [ADR-002](../adr/ADR-002-bus-runtime-ownership.md) | Accepted | 每条物理 CAN 总线的单写者 `BusRuntime` 所有权 |
+| [ADR-003](../adr/ADR-003-composite-system-interface.md) | Accepted | Foundation/MVP 复合 `SystemInterface` 的生命周期与拆分触发条件 |
+| [ADR-004](../adr/ADR-004-fixed-protocol-profile.md) | Accepted | 协议代际和 active command profile 在 ACTIVE 期间不可自动猜测或混发 |
+| [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) | Accepted | 单调时钟、源时间、到达时间和 freshness/TTL 的语义 |
+| [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 当前单 `can0` 只是等待逐台配置和总线证据的条件式 profile；架构保留双总线 |
+| [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort` 的物理语义闸门，框架 demo 与力矩精度分开验收 |
 
-每份 ADR 至少包含：状态（Accepted 或 Proposed）、日期/负责人、上下文、决策、被否决替代、正负后果、可执行验证、重审触发和来源链接。没有足够证据的项必须标为 Proposed，并列出转为 Accepted 所需的证据，不能用模糊文字假装已经决定。
-
-FND-004 同时创建 ADR 索引，更新规划文档中的反向链接并消除冲突。完成标准是七份 ADR 均可从规划入口到达、状态明确、相互无矛盾，且后续 FND-005～009 能直接引用其接口边界。FND-004 不实现 `CanFrame`、`BusRuntime` 或厂商 adapter。
+七份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
 
 ### 8.2 现有规划文档如何处理
 
-FND-004 完成前不批量删除或归档现有规划，因为 ADR 的上下文、替代方案和理由仍需从中提取。ADR 完成后单独执行一次文档收敛审查：
+FND-004 本轮只完成必要的 ADR 提取、反向链接和矛盾修正，没有批量删除或归档规划。后续单独执行文档收敛审查：
 
 - `01_evidence_and_research.md`、`04_source_register.md`、`06_cubemars_material_review.md` 保留为证据/来源层，删除过期状态但不丢失可追溯证据；
 - `02_architecture_and_interfaces.md` 与 `05_decisions_and_open_questions.md` 压缩为概览和未决问题，并链接正式 ADR，不再复制完整决策正文；
@@ -521,8 +519,8 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 1. 完成 FND-000：已确认仓库、许可和资产策略；D4 已修订为个人 Memory 本地化、共享状态进入 GitHub；
 2. 完成 FND-001：已在当前根初始化 Git，审查并提交规划/上下文基线，创建私有远端并验证 clean clone；
 3. 完成 FND-002/FND-003：manifest、五包 workspace、共享构建脚本和最小 CI 已提交；原生 Humble、clean checkout context 和 pinned Docker CI 证据均通过；
-4. 完成 FND-004：把核心 ADR 从建议表转为独立 Accepted/Proposed 文档；
-5. 完成 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行只读/无硬件烟测并记录版本与结果；
+4. FND-004 已完成：核心 ADR 已转为 6 份 Accepted、1 份 Proposed 文档，并建立可执行结构/链接检查；
+5. 下一步完成 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行只读/无硬件烟测并记录版本与结果；
 6. 烟测通过后，从 FND-005 开始写第一行业务代码。
 
-当前仍未授权启用 CAN、发送电机命令、修改 Jetson 系统或安装真实设备依赖；下一业务任务按计划进入 FND-004。FND-004A 需要在 Jetson 上执行依赖解析和用户态 build/test，但不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，应另行取得明确授权。
+当前仍未授权启用 CAN、发送电机命令、修改 Jetson 系统或安装真实设备依赖；下一业务任务按计划进入 FND-004A。FND-004A 需要在 Jetson 上执行依赖解析和用户态 build/test，但不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，应另行取得明确授权。
