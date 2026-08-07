@@ -2,7 +2,7 @@
 
 > 制定日期：2026-08-03
 > 当前实施入口：本文件
-> 当前状态：FND-000/FND-001 已提交；FND-002/FND-003 已在未提交工作区实现并通过 x86_64 Ubuntu 22.04/Humble 原生构建测试，Docker/CI 执行仍待验证
+> 当前状态：FND-000/FND-003 已提交；FND-002/FND-003 已通过 x86_64 Ubuntu 22.04/Humble 原生构建和 GitHub Actions pinned-Docker/context 验证，下一步为 FND-004
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
 
 ## 1. 决策结论
@@ -28,7 +28,7 @@
 | CubeMars 资料 | AK3.0 V3.2 协议足以做离线 codec 设计；实机配置仍缺 | 不阻塞接口和模拟器；阻塞真实激活 |
 | HI12 | 通用 J1939/CANopen 资料存在，交付固件未知 | Foundation 只保留 sensor capability，不选现场 profile |
 | 控制频率 | 当前两电机正常目标 500 Hz；框架支持 1 kHz 测试 | 测试和配置从第一天支持多速率，不承诺真实硬件性能 |
-| Git | `main` 已建立并推送；当前 HEAD 为 `c0f9306`，FND-002/FND-003 修改尚未提交 | 审查完整 diff 与 CI 证据后再决定 commit/push |
+| Git | `main` 已建立并推送；FND-002/FND-003 提交为 `ee4c64c`，状态 checkpoint 为 `fbaaf26` | 进入 FND-004 ADR 基线；继续保持供应商和生成物边界 |
 | 供应商资料 | `CubeMars/` 是独立嵌套 Git 仓库 | 主仓库必须忽略它，避免误提交为 gitlink 或复制供应商资产 |
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context 脚本已存在 | 下一业务实现仍从 FND-004/FND-005 开始，不提前写厂商 adapter |
 | 目标平台 | Jetson Ubuntu 22.04 / ROS 2 Humble；当前编辑工作区是 Windows | 构建与 vcan 测试必须在 Ubuntu 22.04 环境执行，Windows 不作为 ROS 运行目标 |
@@ -220,7 +220,7 @@ MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build \
 bash tools/ci/build_workspace.sh
 ```
 
-已配置国内镜像的主机可以显式运行 `rosdepc update --rosdistro humble`，并以 `ROSDEP_COMMAND=rosdepc` 调用同一脚本。2026-08-07 在 x86_64 `Ubuntu-22.04` 中，两种 resolver 路径都完成 5 包构建和 30/30 测试。该证据不覆盖尚未实际运行的 Docker/GitHub Actions、ARM64、vcan、性能或硬件。
+已配置国内镜像的主机可以显式运行 `rosdepc update --rosdistro humble`，并以 `ROSDEP_COMMAND=rosdepc` 调用同一脚本。2026-08-07 在 x86_64 `Ubuntu-22.04` 中，两种 resolver 路径都完成 5 包构建和 30/30 测试；GitHub Actions run `31150054330` 又从 clean checkout 完成 context check 和 pinned Humble Docker build。该证据不覆盖 ARM64、vcan、性能或硬件。
 
 ## 7. 四周 Foundation 路线
 
@@ -488,8 +488,8 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 
 1. 完成 FND-000：已确认临时仓库名、私有远端策略、内部科研许可、二进制资产和 memory 策略；
 2. 完成 FND-001：已在当前根初始化 Git，审查并提交规划/上下文基线，创建私有远端并验证 clean clone；
-3. 审查并收口 FND-002/FND-003：当前已实现 manifest、五包 workspace、共享构建脚本和最小 CI，原生 Humble 测试已通过；仍需 Docker/GitHub Actions 与 clean committed checkout 证据；
-4. 用户恢复任务后再完成 FND-004：把核心 ADR 从建议表转为独立 Accepted/Proposed 文档；
+3. 完成 FND-002/FND-003：manifest、五包 workspace、共享构建脚本和最小 CI 已提交；原生 Humble、clean checkout context 和 pinned Docker CI 证据均通过；
+4. 完成 FND-004：把核心 ADR 从建议表转为独立 Accepted/Proposed 文档；
 5. 从 FND-005 开始写第一行业务代码。
 
-当前按项目负责人指令暂停。仍未授权启用 CAN、发送电机命令、修改 Jetson 或安装真实设备依赖；不得在新指令前自动进入 FND-004 或后续实现。
+当前仍未授权启用 CAN、发送电机命令、修改 Jetson 或安装真实设备依赖；下一业务任务按计划进入 FND-004，不得跳过 ADR 和后续验证闸门。

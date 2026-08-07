@@ -3,7 +3,7 @@
 > 规划基线：2026-07-28
 > CubeMars 资料复核：2026-08-03
 > 适用范围：NVIDIA Jetson、最多 6 台电机、2 条 CAN/CAN FD 总线、2 台 HI12、1 个未来 STM32 传感器节点
-> 本轮状态：FND-002/FND-003 已在工作区实现并通过 x86_64 Ubuntu 22.04/Humble 原生构建测试；Docker/CI、ARM64、vcan 与硬件验证仍未执行；未启用 CAN、未控制设备、未修改 Jetson
+> 本轮状态：FND-002/FND-003 已提交并推送；x86_64 Ubuntu 22.04/Humble 原生构建和 GitHub Actions pinned-Docker/context 验证通过；ARM64、vcan 与硬件验证仍未执行；未启用 CAN、未控制设备、未修改 Jetson
 
 ## 结论标记
 
@@ -31,7 +31,7 @@
 
 **规划决定（2026-08-03）**：当前立即进入无真实硬件依赖的 `Foundation v0.1`。先由项目负责人统一建立 Git、构建/CI、纯 C++ core、fake/vcan、BusRuntime、模拟设备、薄 `SystemInterface` 和模拟 demo controller；实机资料不再阻塞基础框架，只阻塞真实设备 profile 激活和物理验收。当前详细执行入口为 `07_framework_bootstrap_plan.md`。
 
-**已确认事实（2026-08-07）**：FND-002/FND-003 的 pinned dependency manifest、五包 ROS 2 骨架、共享 build/test 脚本和最小 GitHub Actions/context workflow 已进入未提交工作区。`Ubuntu-22.04` 中官方 `rosdep` 与显式 `ROSDEP_COMMAND=rosdepc` 两条路径均完成 5 包构建和 30/30 测试；本机没有 Docker/Podman，因此 Docker image 与 GitHub Actions 尚无执行证据，也尚无 ARM64、vcan 或硬件结论。
+**已确认事实（2026-08-07）**：FND-002/FND-003 的 pinned dependency manifest、五包 ROS 2 骨架、共享 build/test 脚本和最小 GitHub Actions/context workflow 已提交于 `ee4c64c` 并推送；`Ubuntu-22.04` 中官方 `rosdep` 与显式 `ROSDEP_COMMAND=rosdepc` 两条路径均完成 5 包构建和 30/30 测试；GitHub Actions run `31150054330` 的 context check 与 pinned Humble Docker build 均成功。该证据不覆盖 ARM64、vcan、性能或硬件结论。
 
 **已确认事实**：按经典 CAN 最坏位填充估算，8 字节标准帧为 135 bit，8 字节扩展帧为 160 bit，均包含 3 bit 帧间隔。六台电机每周期一发一收、均按 8 字节扩展帧保守计，在 1 Mbit/s、200 Hz 时占 38.4%，250 Hz 时占 48.0%，500 Hz 时占 96.0%。因此 500 Hz 不能作为六电机通用默认值。
 

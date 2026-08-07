@@ -1,6 +1,6 @@
 # Project Plan
 
-> Last updated: 2026-08-07T13:20:36+08:00
+> Last updated: 2026-08-07T13:26:44+08:00
 
 ## Overall Goal
 
@@ -34,7 +34,7 @@
   - Scope: ADR-001/002/003/004/005/006/009 with status, consequences, validation, and review triggers.
   - Completion criteria: Each ADR is Accepted or explicitly Proposed with no unresolved contradiction across planning documents.
   - Validation: Link/status/table checks and architecture review.
-  - Dependencies: Resume instruction; preferably FND-002/FND-003 review complete.
+  - Dependencies: FND-002/FND-003 review and CI baseline complete; begin with the next explicit implementation instruction.
 
 - [ ] FND-005 through FND-009: Implement core types, deterministic fakes, routing, leases, snapshots, and BusRuntime.
   - Purpose: Establish the vendor-independent runtime contract before device work.

@@ -1,9 +1,9 @@
 # Current Project State
 
-> Last updated: 2026-08-07T13:20:36+08:00
+> Last updated: 2026-08-07T13:26:44+08:00
 > Repository: D:\Work\jetson
 > Branch: main
-> HEAD: `ee4c64cc9844adb5efc256289f22ad9b1b0bc649` (`ee4c64c`); `origin/main` matched when inspected
+> HEAD: current `main`; FND-002/FND-003 implementation baseline `ee4c64c`; verify the latest checkpoint with `git rev-parse HEAD`
 > Working tree: clean after the FND-002/FND-003 commit and push
 
 ## Current Objective
@@ -29,7 +29,7 @@
 
 ## In Progress
 
-- FND-002/FND-003 implementation is committed and pushed; no uncommitted project changes remain.
+- FND-002/FND-003 implementation is committed in `ee4c64c` and the completion checkpoint is on `main`; no uncommitted project changes remain.
 - GitHub Actions supplied the clean-checkout context and pinned-container build evidence; local Docker execution remains unavailable.
 - ARM64, vcan, SocketCAN, performance, sanitizers, and hardware validation are intentionally outside this checkpoint and remain future tasks.
 
@@ -53,7 +53,7 @@
 - `README.md`, `docs/planning/README.md`, `docs/planning/07_framework_bootstrap_plan.md`, `memory/MEMORY.md`, `memory/STATE.md`, `memory/PLAN.md`
   - Change: Replace stale planning-only/FND-001 status with the current FND-002/FND-003 implementation and evidence boundary.
   - Reason: Preserve an accurate pause checkpoint and documented build entry.
-  - Status: Updated and committed in `ee4c64c`.
+  - Status: Updated for FND-002/FND-003 completion and committed on `main`.
   - Validation: Final text/context/diff checks and Memory validator passed.
 
 ## Validation Results

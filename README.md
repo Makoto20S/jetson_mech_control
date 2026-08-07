@@ -6,13 +6,15 @@ adapters.
 
 ## Current status
 
-FND-002/FND-003 are implemented in the current working tree: a pinned
+FND-002/FND-003 are complete at commits `ee4c64c` and `fbaaf26`: a pinned
 Ubuntu 22.04/ROS 2 Humble build boundary, five package skeletons, and a minimal
-CI/context workflow. Native x86_64 Humble builds pass all 30 skeleton tests
-with both the default official `rosdep` and an explicitly selected `rosdepc`
-wrapper. Docker/GitHub Actions, ARM64, vcan, timing, and hardware evidence are
-still pending. No CAN interface is enabled, no motor command is sent, and no
-Jetson system configuration is changed from this workspace.
+CI/context workflow are committed and pushed. Native x86_64 Humble builds pass
+all 30 skeleton tests with both the default official `rosdep` and an explicitly
+selected `rosdepc` wrapper. GitHub Actions run `31150054330` also passed the
+portable context check and pinned Humble Docker build. ARM64, vcan, timing, and
+hardware evidence remain future gates. No CAN interface is enabled, no motor
+command is sent, and no Jetson system configuration is changed from this
+workspace.
 
 Start with:
 
