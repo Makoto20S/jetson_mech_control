@@ -185,7 +185,7 @@
 [L03]: ../../manifests/assets.yaml
 [L04]: ../../manifests/assets.yaml
 [L05]: ../../manifests/assets.yaml
-[L06]: ../../presentation/first/下肢外骨骼控制系统组会汇报稿.md
+[L06]: 04_source_register.md
 [O01]: https://www.kernel.org/doc/html/latest/networking/can.html
 [O02]: https://www.kernel.org/doc/html/latest/networking/timestamping.html
 [O06]: https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/Kernel/RealTimeKernel.html

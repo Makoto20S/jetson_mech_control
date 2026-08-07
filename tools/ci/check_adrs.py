@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -69,7 +70,35 @@ def read_text(root: Path, relative: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def validate_local_links(root: Path, relative: str, text: str) -> None:
+def distributable_paths(root: Path) -> set[str]:
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return {
+        item
+        for item in result.stdout.decode("utf-8").split("\0")
+        if item
+    }
+
+
+def validate_local_links(
+    root: Path,
+    relative: str,
+    text: str,
+    available_paths: set[str],
+) -> None:
     source = root / relative
     for match in LINK_PATTERN.finditer(text):
         destination = match.group(1).strip()
@@ -85,6 +114,17 @@ def validate_local_links(root: Path, relative: str, text: str) -> None:
             fail(f"link escapes repository: {relative} -> {destination}")
         if not target.exists():
             fail(f"broken local link: {relative} -> {destination}")
+        target_relative = target.relative_to(root.resolve()).as_posix()
+        if target.is_dir():
+            prefix = target_relative.rstrip("/") + "/"
+            is_distributable = any(path.startswith(prefix) for path in available_paths)
+        else:
+            is_distributable = target_relative in available_paths
+        if not is_distributable:
+            fail(
+                "local link target is excluded from a clean clone: "
+                f"{relative} -> {destination}"
+            )
 
 
 def metadata_value(text: str, field: str) -> str:
@@ -98,6 +138,7 @@ def metadata_value(text: str, field: str) -> str:
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     try:
+        available_paths = distributable_paths(root)
         index_relative = "docs/adr/README.md"
         index = read_text(root, index_relative)
         if "# Architecture Decision Records / 架构决策记录" not in index:
@@ -142,9 +183,9 @@ def main() -> int:
                 index,
             ):
                 fail(f"{decision_id}: ADR index status differs")
-            validate_local_links(root, relative, text)
+            validate_local_links(root, relative, text, available_paths)
 
-        validate_local_links(root, index_relative, index)
+        validate_local_links(root, index_relative, index, available_paths)
 
         planning_texts = {
             relative: read_text(root, relative) for relative in PLANNING_FILES
@@ -152,16 +193,21 @@ def main() -> int:
         for relative, text in planning_texts.items():
             if "../adr/README.md" not in text:
                 fail(f"planning reverse link to ADR index is missing: {relative}")
-            validate_local_links(root, relative, text)
+            validate_local_links(root, relative, text, available_paths)
 
         for relative in ENTRY_FILES:
             text = read_text(root, relative)
             if "docs/adr/README.md" not in text and "../adr/README.md" not in text:
                 fail(f"ADR index entry link is missing: {relative}")
-            validate_local_links(root, relative, text)
+            validate_local_links(root, relative, text, available_paths)
 
         for relative in LINK_ONLY_FILES:
-            validate_local_links(root, relative, read_text(root, relative))
+            validate_local_links(
+                root,
+                relative,
+                read_text(root, relative),
+                available_paths,
+            )
 
         for decision_id, (filename, _) in ADR_FILES.items():
             direct_link = f"../adr/{filename}"
@@ -188,7 +234,7 @@ def main() -> int:
             if "FND-004 已完成" not in text or "FND-004A" not in text:
                 fail(f"FND-004 completion/next gate is not recorded in {relative}")
 
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

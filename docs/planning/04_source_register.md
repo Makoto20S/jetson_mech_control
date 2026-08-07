@@ -17,7 +17,7 @@
 | L03 | HI12 系列规格书（受控外部文件，见 `manifests/assets.yaml`） | Rev 1.5，30 页 | 型号/接口、SYNC_IN/PPS、CAN 500 kbit/s、0~200 Hz、采样与环境规格 | 已确认事实 |
 | L04 | HiPNUC IMU 指令与编程手册（受控外部文件，见 `manifests/assets.yaml`） | Rev 1.7.2，63 页 | J1939/CANopen、PGN/TPDO、缩放、时间、同步、默认配置 | 已确认事实 |
 | L05 | DM-MC-Board02 手册（受控外部文件，见 `manifests/assets.yaml`） | V1.1 | STM32H723、3 路 CAN FD、外设与引脚图 | 已确认事实 |
-| L06 | [此前组会汇报稿](../../presentation/first/下肢外骨骼控制系统组会汇报稿.md) | 2026-07-16 工作区版本 | 早期方案和来源线索；不作为现场硬件证据 | 已确认事实 |
+| L06 | 此前组会汇报稿（排除的本地 `presentation/` 资产，见 `manifests/assets.yaml`） | 2026-07-16 工作区版本 | 早期方案和来源线索；不作为现场硬件证据，也不要求 clean clone 包含原文件 | 历史来源 |
 | L07 | AK3.0 电机使用说明（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | V3.2.0，52 页 | AKE60-8、AK54、servo/force 扩展帧、`0x29/0x2A`、1–2000 Hz、Kt、CubeMarsTool | 资料事实 |
 | L08 | AK54 驱动器安装说明（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | V1.0.0，9 页 | 标准硬件版本、电压、电流、CAN 位速率和线色 | 资料事实 |
 | L09 | AKA 系列使用说明（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | V3.0.0，47 页 | CubeMars 内/外环双编码器通用交叉参考 | 仅参考 |
