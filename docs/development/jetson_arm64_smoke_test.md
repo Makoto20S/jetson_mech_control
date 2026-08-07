@@ -36,4 +36,14 @@
 - 版本清单、实际命令、结果摘要和限制附在 FND-004A GitHub Issue；
 - 没有 CAN/设备操作或未经授权的系统修改。
 
-FND-004A 通过后才能开始 FND-005。FND-015 仍负责完整 ARM64 clean build、sanitizer、性能、稳定性和 Foundation RC 证据，不能被本烟测替代。
+## 里程碑与治理切换
+
+FND-004A 结论绑定本次 clean clone 的精确 commit：
+
+1. 把 commit SHA、branch、dirty state 和全部命令/结果写入 FND-004A Issue；
+2. 如果烟测后需要修改任何跟踪文件，在新 commit 上重新执行完整清单，旧结果不能转移；
+3. 通过后给该 commit 创建 annotated tag `fnd-004a-passed`，tag message 摘要记录 ARM64 smoke 范围和明确未覆盖项；
+4. 推送 tag 并核对远端指向后，按 [D5](../planning/fnd-000_repository_and_asset_policy.md#d5分支保护与评审) 启用 `main` protection；
+5. FND-005 起包括仓库所有者在内均从任务分支经 PR 合并，外部成员可使用 fork。
+
+`fnd-004a-passed` 是 bootstrap/ARM64 smoke 里程碑，不是 SemVer 发布，也不替代 FND-015 的 `v0.1.0-foundation` RC。FND-004A 通过后才能开始 FND-005；FND-015 仍负责完整 ARM64 clean build、sanitizer、性能、稳定性和 Foundation RC 证据。

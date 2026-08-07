@@ -1,10 +1,12 @@
 # 事实基线与开源调研
 
+> 证据快照：主要盘点日期为 2026-07-28，CubeMars 补充审查日期为 2026-08-03。远程主机、仓库和硬件运行态均可能已经变化；本文件保留来源与历史观察，不作为当前运行状态。当前决策见 [ADR 索引](../adr/README.md)。
+
 ## 1. 调研边界与方法
 
 **已确认事实**：初始规划完整阅读了主提示词、四份本地 PDF 和此前汇报稿；2026-08-03 又审查了供应商 `CubeMars/` 仓库中与 AKE60-8、AK3.0、AK54 驱动板和双编码器有关的资料及 demo。对 Jetson 仍仅有此前的只读 SSH 检查；没有配置 CAN、设备、内核、服务或网络。[L01-L05][L07-L12][E01-E03]
 
-**已确认事实**：截至 2026-07-28，工作区根目录虽然存在名为 `.git` 的目录，但 `git status` 返回“not a git repository”；`docs/planning/` 在本轮前不存在。旧的 `/home/jetson/UAM_ROS` 只作为只读构建经验参考，不是新架构模板，也未被修改。[E02][E03]
+**历史事实**：截至 2026-07-28，工作区根目录虽然存在名为 `.git` 的目录，但 `git status` 返回“not a git repository”；`docs/planning/` 在当时尚不存在。该状态已由 FND-001 建仓替代，当前仓库状态以 Git 为准。旧的 `/home/jetson/UAM_ROS` 只作为只读构建经验参考，不是新架构模板，也未被修改。[E02][E03]
 
 **有依据的推断**：筛选开源组件时，协议名称相似不算兼容证据。核心依赖至少需要明确许可证、目标 ROS 分支、维护状态、可测试 API、ARM64 可构建性和与当前设备/固件一致的真实硬件证据；任一关键项缺失时降级为“封装验证”或“仅参考”。
 
@@ -172,7 +174,7 @@
 
 **待确认项**：在任何第三方代码进入主分支前，负责人必须锁定 commit、保存许可证扫描结果、记录修改边界、在 ARM64/Humble CI 构建并完成 vcan/HIL；`ros2_socketcan` 和 `ros2_canopen` 还需进行仓库级许可证复核。负责人为项目负责人，最迟在对应集成 Issue 合并前完成。
 
-[L01]: ../codex_ultra_master_planning_prompt.md
+[L01]: ../archive/codex_ultra_master_planning_prompt.md
 [L02]: ../../manifests/assets.yaml
 [L07]: ../../manifests/assets.yaml
 [L08]: ../../manifests/assets.yaml

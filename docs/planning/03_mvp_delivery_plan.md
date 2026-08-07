@@ -3,6 +3,8 @@
 > 2026-08-03 实施顺序更新：本文件保留完整 MVP、硬件闸门和月度验收总路线；当前无硬件 `Foundation v0.1` 的具体执行以 [07_framework_bootstrap_plan.md](07_framework_bootstrap_plan.md) 为准。实机身份和配置不阻塞 Foundation，只阻塞真实设备激活。
 >
 > 2026-08-07 FND-004 更新：当前架构规范和状态以 [ADR 索引](../adr/README.md) 为准；ADR-001/002/003/004/005/009 已 Accepted，ADR-006 在单 `can0` 实机/总线证据完成前保持 Proposed。本文件中的早期推荐不得提升 ADR 状态。
+>
+> 2026-08-07 文档收敛：本文件只保留完整 MVP、硬件闸门、带宽与量化验收；FND-004A 之后的任务顺序以 [07](07_framework_bootstrap_plan.md) 为准。初始规划输入已移入 [非规范归档](../archive/README.md)。
 
 ## 1. 需求分解与完成口径
 
@@ -19,7 +21,7 @@
 
 ## 2. 建议仓库与 ROS 包结构
 
-**已确认事实 + 有依据的推断**：私有 GitHub 单仓库 `Makoto20S/jetson_mech_control` 已建立；后续让 STM32、Jetson/ROS、协议、配置、文档和测试共同版本化。下面仍是后续目录规划，当前尚未创建实现代码。
+**已确认事实 + 有依据的推断**：私有 GitHub 单仓库 `Makoto20S/jetson_mech_control` 已建立，当前已有五个 Foundation package 骨架、manifest、CI 和 ADR；下图是目标目录包络，不表示所有目录或 vendor package 已创建。
 
 ```text
 /
@@ -97,7 +99,7 @@
 
 | 任务 | 依赖 | 负责人 | 协作者 | 评审者 | 交付/验收 | 性质 |
 |---|---|---|---|---|---|---|
-| 建私有主仓库、保护分支、Issue/PR/ADR 模板 | 本规划批准 | 项目负责人 | C | B | clean clone 可构建空骨架；main 保护生效 | 有依据的推断 |
+| 完成 FND-004A、里程碑 tag 与保护分支切换 | FND-004/目标 Jetson | 项目负责人 | C | B | clean clone ARM64 smoke 通过；`fnd-004a-passed` 指向实测 commit；main protection 生效 | 规划决定 |
 | G0 设备身份清单 | 可接触设备但先不发运动命令 | B | 项目负责人、A | 项目负责人 | 所有第 13 节必填项有证据或明确 no-go | 待确认项 |
 | 第二 CAN 接口/拓扑验收 | 采购/现有适配器 | B | A | 项目负责人 | 原生 SocketCAN、ARM64、隔离、序列号、时间戳能力记录 | 待确认项 |
 | 协议事实表和 golden frames | 本地手册、供应商资料 | 项目负责人 | B | 另一名非作者 | 每种选定 profile 至少正/负/边界帧，来源可追溯 | 有依据的推断 |
@@ -195,7 +197,7 @@
 
 | 类别 | 必须指标 | 测量窗口/方法 | 性质 |
 |---|---|---|---|
-| 可构建 | 私有仓库 clean checkout 后按 manifest 在当前 Jetson 构建；所有 T0~T3 测试通过 | 两次独立 build；保存命令、依赖和 commit | 有依据的推断 |
+| 可构建 | 受保护 `main` 的 clean checkout 或 PR commit 按 manifest 构建；所有 T0~T3 测试通过 | 两次独立 build；保存命令、依赖和 commit/tag | 有依据的推断 |
 | 协议 | 所有公开 codec golden 精确匹配；非法 ID/DLC/范围被拒；有效帧 parse error 为 0 | 单元/fuzz + 供应商/真实抓包 | 有依据的推断 |
 | HI12 身份 | 两台 PNAME、APP_VER、协议、节点、位速率、输出 profile、坐标和安装方向均记录 | 逐台配置读取与抓包 | 有依据的推断 |
 | HI12 稳定性 | 每个配置 PGN/TPDO 30 min；计数达到期望的 >=99.9%；软件 RX overflow=0；最大无解释 gap <=3 个期望周期 | 应用 counter + candump + 接口统计 | 有依据的推断 |
@@ -335,7 +337,7 @@
 | 主仓库 | 私有 GitHub 是唯一可写事实源；NAS 仅 mirror/备份 | 有依据的推断 |
 | 分支 | protected `main` + 短生命周期 issue branches；禁止共享 NAS working tree | 有依据的推断 |
 | PR | 关联 Issue、验收、风险、测试、硬件影响、数据链接；协议/安全需双评审 | 有依据的推断 |
-| CODEOWNERS | core/ros2_control：负责人+B；firmware/protocol：B+负责人；learning/data：C+负责人；rig docs：A+负责人 | 有依据的推断 |
+| CODEOWNERS | 评审人身份明确后按 core/ROS、protocol、data、rig 责任配置；在此之前不猜测账号或制造单人合并死锁 | 规划决定 |
 | 版本 | 软件 SemVer；MVP `v0.1.0-mvp`；协议、配置 schema 和数据 manifest 独立 version | 有依据的推断 |
 | 提交 | 小而可审；生成物不手工改；硬件结果必须附原始证据 | 有依据的推断 |
 | NAS | 定时 `--mirror` 备份和恢复演练；不接受直接开发提交 | 有依据的推断 |
@@ -414,7 +416,7 @@
 | R17 | 月度范围过大 | 中 | 高 | W2 仍未过 G0/G1 | 并行软件/HW；保留 no-go；不塞入 ML/六电机 | 项目负责人 | 有依据的推断 |
 | R18 | 台架或急停不足 | 中 | 极高 | G3 checklist 任何项失败 | 禁止非零命令；机械/电气整改并复审 | A | 有依据的推断 |
 | R19 | 设备配置持久化漂移 | 中 | 高 | 断电后 ID/位速率/profile 与清单不同 | 启动只读身份核对；配置 hash；不自动写 Flash | B | 有依据的推断 |
-| R20 | 当前目录尚非有效 Git 仓库 | 高 | 中 | 实施开始仍无主仓库 | 规划批准后先建立私有主仓库，不在本轮初始化 | 项目负责人 | 有依据的推断 |
+| R20 | 保护规则配置造成绕过或单人合并死锁 | 中 | 中 | required checks 名称错误、强制未知 reviewer、owner 可绕过 main | FND-004A tag 后核验 ruleset；先强制 PR/checks/对话解决，评审人到位后再启用 approval/CODEOWNERS | 项目负责人 | 规划决定 |
 
 ## 13. 硬件最小确认清单
 
@@ -464,8 +466,8 @@
 ## 14. 推荐的下一步行动顺序
 
 1. **已完成/待证据**：FND-004 已接受 ADR-001/002/003/004/005/009；[ADR-006](../adr/ADR-006-conditional-can0-deployment.md) 继续等待逐台配置、共同位速率、ID、终端、负载、仲裁和错误证据，未转为 Accepted 前不得激活当前单 `can0` profile。
-2. **有依据的推断**：建立私有 GitHub 主仓库、保护规则、CODEOWNERS 和 issue/PR 模板；不要把当前无效 `.git` 目录当成历史仓库。
-3. **待确认项**：B 与项目负责人在 W1D2 前完成电机和两台 HI12 的身份表；任何未知保留为空，不补默认值。
+2. **规划决定**：执行 FND-004A；通过后给实际测试的 commit 创建 `fnd-004a-passed` annotated tag，并保护 `main`。FND-005 起所有人通过任务分支和 PR 开发；外部成员可 fork。
+3. **待确认项**：Foundation 后由 B 与项目负责人完成电机和两台 HI12 的身份表；任何未知保留为空，不补默认值。
 4. **待确认项**：A 在 W1D2 前给出台架接口、机械限位、急停/断能和力矩计量交付计划。
 5. **待确认项**：B 在 W1D3 前提交当前单 `can0` 的共同位速率、ID、终端和负载证据；不通过时再验收第二个隔离 SocketCAN 接口或修改 profile。
 6. **有依据的推断**：从 AK V3.2 分别建立 servo extended、force-control extended golden frame，把旧标准帧 MIT 放入 legacy 测试集；再与第三方实现和现场抓包交叉比较。

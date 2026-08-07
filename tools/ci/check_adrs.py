@@ -48,6 +48,10 @@ ENTRY_FILES = (
 )
 
 LINK_ONLY_FILES = (
+    "docs/archive/README.md",
+    "docs/archive/codex_ultra_master_planning_prompt.md",
+    "docs/planning/01_evidence_and_research.md",
+    "docs/planning/04_source_register.md",
     "docs/planning/06_cubemars_material_review.md",
 )
 

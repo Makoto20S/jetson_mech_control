@@ -1,6 +1,6 @@
 # 总体架构与接口设计
 
-> FND-004 已完成：当前规范决策见 [ADR 索引](../adr/README.md)。本文件保留架构背景、比较和图示；与 ADR 冲突时，以 ADR 的状态和正文为准。
+> FND-004 后收敛：当前规范决策见 [ADR 索引](../adr/README.md)。本文件只保留实现所需的架构背景、图示和接口细化；与 ADR 冲突时，以 ADR 的状态和正文为准。
 
 ## 1. 设计原则
 
@@ -17,27 +17,9 @@
 
 ## 2. 备选架构比较
 
-### 2.1 方案 A：ros2_control 中心化、协议直接写在硬件插件内
+FND-004 比较了三类方案：协议直接写入 hardware plugin、独立 CAN 网关经 DDS 进入闭环，以及纯 C++ 核心配薄 ros2_control 适配层。前两者分别会让厂商/总线逻辑侵入生命周期，或把 DDS、序列化与跨进程失效带入命令路径。
 
-**有依据的推断**：方案 A 让一个或多个 `SystemInterface`/`SensorInterface` 直接打开 SocketCAN、编解码并导出接口。它最接近常见 demo，首个设备上线较快；但总线共享、跨设备路由、脱离 ROS 的协议测试、CANopen 事件循环和未来 STM32 会逐步侵入插件生命周期。
-
-### 2.2 方案 B：纯 C++ 核心 + ros2_control 薄适配层
-
-**有依据的推断**：方案 B 把 SocketCAN、路由、codec、设备会话、时间、新鲜度、命令租约、限幅和诊断放入不依赖 ROS 的库；一个复合 ros2_control 硬件插件仅做生命周期、接口 claim 和 SI 值映射。额外边界增加首周工作，但长期可测试性、总线协调和版本迁移更强。
-
-| 评价项 | 权重 | 方案 A（1~5） | 方案 B（1~5） | 评价依据 | 性质 |
-|---|---:|---:|---:|---|---|
-| 确定性路径与总线所有权 | 25 | 3 | 5 | A 易形成多插件/多写者；B 在核心统一 | 有依据的推断 |
-| 脱离 ROS 的可测试性 | 20 | 2 | 5 | B 的 codec/路由/状态机可直接单测与 fuzz | 有依据的推断 |
-| ros2_control 生命周期/切换 | 20 | 5 | 4 | A 更直接；B 需要薄适配但仍完整使用标准 API | 有依据的推断 |
-| 多设备/协议扩展 | 15 | 3 | 5 | B 以 capability 和设备会话扩展 | 有依据的推断 |
-| 故障隔离和诊断一致性 | 10 | 3 | 4 | B 有单一总线错误与命令租约事实源 | 有依据的推断 |
-| 一个月初始成本 | 10 | 5 | 3 | A 起步更快，B 需要先建核心边界 | 有依据的推断 |
-| 加权总分 | 100 | 340/500 | 450/500 | 分数用于显式比较，不是客观测量 | 有依据的推断 |
-
-**有依据的推断**：选择方案 B。方案 A 只保留为回退：若纯核心边界在 Week 1 无法通过 vcan 验证，可临时缩小功能，而不是把协议复制回多个插件。
-
-**有依据的推断**：不选择“独立 CAN 网关进程 + ROS topic 连接控制器”作为第三种命令架构，因为它会把 DDS、序列化、执行器调度和跨进程失效处理放进闭环。独立网关只允许作为只读诊断/录制旁路。
+当前选择与替代方案的正式理由见 [ADR-001](../adr/ADR-001-core-boundary.md)、[ADR-002](../adr/ADR-002-bus-runtime-ownership.md) 和 [ADR-003](../adr/ADR-003-composite-system-interface.md)。独立网关只允许作只读诊断/记录旁路；实现困难只能缩小 Foundation 范围，不能把协议复制回多个插件。
 
 ## 3. 总体组件图
 
@@ -167,11 +149,9 @@ flowchart LR
 
 ### 7.1 配置期固定协议
 
-**资料事实**：AK3.0 V3.2 称 servo 与力控/MIT-like 可由同代固件使用且无需模式切换，但两个命令族仍有不同的功能 ID、payload 位序和 command capability。旧标准帧 MIT 又属于不同协议代际。HI12 J1939/CANopen 则仍取决于交付固件。这些 profile 都不能只看第一帧后自动猜测。[L07][L04]
+AK3.0 V3.2 的 servo 与 force-control 命令族虽然可能由同代固件接受，但功能 ID、payload 和 command capability 不同；legacy MIT 又属于不同协议代际。HI12 J1939/CANopen 取决于交付固件。正式失败关闭规则见 [ADR-004](../adr/ADR-004-fixed-protocol-profile.md)，协议证据和三 codec 边界见 [06](06_cubemars_material_review.md)。
 
-**有依据的推断**：每个设备配置一个不可变 `protocol_profile`。配置时验证准确固件、允许的帧格式、codec 版本、反馈集合和命令集合；ACTIVE 期间不改变 profile。需要上电/刷固件的变化必须先停用硬件、断能并走独立 bring-up 流程。
-
-**规划决定（2026-08-03 修订）**：CubeMars 适配包至少区分三个 codec：`AK V3 servo extended`、`AK V3 force-control extended` 和 `legacy MIT standard-frame`。前两个是当前 AKE60-8 的候选并分别提供 golden frame、模拟器和 lifecycle/claim 测试；legacy 只用于明确匹配的旧固件。设备在 `on_configure` 绑定协议代际和 active command profile，ACTIVE 期间不自动识别、改变 claim 或混发命令族。
+实现必须在 `on_configure` 验证固件范围、帧格式、codec、反馈集合和命令集合并绑定 profile；ACTIVE 期间不得改变 profile、claim 或混发。需要设备写入或刷固件的变化先停用、断能并走独立 bring-up。
 
 ### 7.2 capability 描述
 
@@ -212,13 +192,13 @@ flowchart LR
 | `control_time_mono` | controller_manager 本周期时刻 | `dt`、命令租约、抖动 | 不覆盖源时间 | 有依据的推断 |
 | `ros_stamp` | 映射后的 ROS 时间 | 记录和跨节点关联 | 时钟域未知时需附质量标志 | 有依据的推断 |
 
-**有依据的推断**：所有 freshness/TTL 使用单调时钟，避免 NTP/人工改时破坏超时。若设备时钟可用，维护显式的 offset/drift/uncertainty 映射；若不可用，发布主机到达时间并把 `sample_time_valid=false`。
+所有 freshness/TTL 使用单调时钟；完整规范见 [ADR-005](../adr/ADR-005-monotonic-time-freshness.md)。若设备时钟可用，维护显式的 offset/drift/uncertainty 映射；若不可用，发布主机到达时间并把 `sample_time_valid=false`。
 
 ### 8.2 多帧和多速率规则
 
 **有依据的推断**：每个信号组独立保存 `value, source_time, rx_time, sequence, age, valid, quality`。只有协议提供公共序号/触发证据时才组成 `coherent_sample=true`；HI12 J1939 公开 PGN 缺少公共序号，因此默认按字段新鲜度发布，不宣称严格同采样。
 
-**规划决定（2026-07-30）**：当前两电机 profile 的控制循环以 500 Hz 读取 100 Hz（必要时 200 Hz）IMU 最新值；若后续控制循环升至 1 kHz，同样允许重复读取完整快照。值的源时间保持不变，age 递增；状态估计器明确选择零阶保持、插值或拒绝。不得每个控制周期把时间戳改成 `now()` 伪造高频传感器。
+当前两电机 profile 的控制循环以 500 Hz 读取 100 Hz（必要时 200 Hz）IMU 最新值；1 kHz 实验同样允许重复读取完整快照。值的源时间保持不变，age 递增；状态估计器明确选择零阶保持、插值或拒绝。不得每个周期把时间戳改成 `now()`。
 
 **有依据的推断**：freshness 阈值按设备/信号配置。初始建议 warning 为 2 个期望周期、active-critical fault 为 3 个周期；这个阈值在 Week 4 通过到达间隔分布验证，不能替代机械安全机制。
 
@@ -248,9 +228,7 @@ flowchart LR
 
 **有依据的推断**：自研 PID、阻抗、滑模和有界 effort 测试控制器只依赖标准 SI interface 与独立的状态质量/命令租约契约，不包含 CAN ID 或型号分支。标准 `joint_state_broadcaster` 和合适的 IMU broadcaster 可选择性复用。
 
-**规划决定（2026-08-03 修订）**：最小框架 demo 由专用 C++ ros2_control 控制器实现。其 `update()` 每周期持续写入一个可配置、有界、从零斜坡进入的 commanded effort；示例数值不进入默认配置或固定验收。控制器不打开 SocketCAN 或构造 CubeMars 帧；`SystemInterface::write()` 和 device session 负责最终校验，并按配置映射为 AK V3 servo Iq 或 AK V3 force-control torque 字段，再执行命令租约及 CAN 提交。
-
-**规划决定（2026-07-30）**：该 demo 只验证 controller -> hardware -> protocol -> CAN -> state/diagnostics 的最小纵向链路，不是最终控制算法。commanded-effort 链路与物理输出力矩精度分开验收；若只有 Iq 语义，则使用专用 `motor_current` 接口，直到 Kt、减速比和机械侧映射成立。
+最小框架 demo 由专用 C++ ros2_control 控制器持续写入可配置、有界、带 slew/TTL 的目标；控制器不打开 SocketCAN 或构造厂商帧。`SystemInterface::write()`、device session 与 `BusRuntime` 负责最终校验和提交。标准 `effort` 与 current/raw fallback 的规范边界见 [ADR-009](../adr/ADR-009-effort-semantic-gate.md)；demo 只验证纵向链路，物理输出精度另验收。
 
 ## 10. 控制器切换、claim、连续性和回滚
 

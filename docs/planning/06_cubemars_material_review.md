@@ -3,6 +3,7 @@
 > 审查日期：2026-08-03
 > 资料来源：工作区 `CubeMars/`，供应商仓库 `git@gitee.com:CubeMars/software.git`，`master@15885db`
 > 项目边界：两台电机由用户确认是基于 AKE60-8 的定制驱控一体双编码器电机；定制结构、2D/3D 图和工装不属于本软件任务
+> 规范边界：本文件保存供应商证据；协议固定与 `effort` 语义分别以 [ADR-004](../adr/ADR-004-fixed-protocol-profile.md) 和 [ADR-009](../adr/ADR-009-effort-semantic-gate.md) 为准
 
 ## 1. 审查结论
 

@@ -1,6 +1,7 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
+> 最近收敛：2026-08-07（活动文档、历史归档与 FND-004A 后治理切换）
 > 当前实施入口：本文件
 > 当前状态：FND-000～FND-004 已完成；下一步是在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
@@ -28,7 +29,7 @@
 | CubeMars 资料 | AK3.0 V3.2 协议足以做离线 codec 设计；实机配置仍缺 | 不阻塞接口和模拟器；阻塞真实激活 |
 | HI12 | 通用 J1939/CANopen 资料存在，交付固件未知 | Foundation 只保留 sensor capability，不选现场 profile |
 | 控制频率 | 当前两电机正常目标 500 Hz；框架支持 1 kHz 测试 | 测试和配置从第一天支持多速率，不承诺真实硬件性能 |
-| Git | `main` 已建立并推送；FND-000～FND-004 已完成 | 进入 FND-004A；继续保持供应商、生成物和个人 Memory 边界 |
+| Git | `main` 已建立并推送；FND-000～FND-004 已完成 | FND-004A 前继续完成 smoke 准备；通过后按 D5 打里程碑 tag 并保护 `main` |
 | 供应商资料 | `CubeMars/` 是独立嵌套 Git 仓库 | 主仓库必须忽略它，避免误提交为 gitlink 或复制供应商资产 |
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context/ADR 检查脚本已存在 | 先完成 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
 | 目标平台 | Jetson Ubuntu 22.04 / ROS 2 Humble；当前编辑工作区是 Windows | 构建与 vcan 测试必须在 Ubuntu 22.04 环境执行，Windows 不作为 ROS 运行目标 |
@@ -114,80 +115,20 @@ flowchart TB
 
 厂商 CAN 位域由 protocol codec 处理，有状态的握手、反馈聚合和命令 profile 由 device session 处理，总线收发和调度由 `BusRuntime` 处理。这样未来接入达妙或其他 CAN 电机时，兼容的 C++ controller 和 ros2_control 接口不需要改。
 
-## 5. Git 仓库启动方案
+## 5. 仓库、资产与治理基线
 
-### 5.1 推荐仓库边界
+FND-000～FND-003 已完成建仓、资产隔离、依赖和 CI 基线；详细确认记录见 [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md)，当前事实以 Git、manifest 和 CI 为准。
 
-- 主仓库根：当前 `D:\Work\jetson`。
-- 仓库名：`jetson_mech_control`；ROS package 和 C++ namespace 延续现有规划的 `mech_*` / `mech`。
-- 私有远端：`Makoto20S/jetson_mech_control`；公开前再独立做版权、供应商资料和许可证审查。
-- 根 Git 已初始化为 `main`，基线已推送并通过 clean-clone 验证。
+| 项目 | 当前基线 |
+|---|---|
+| 主仓库 | 私有 `Makoto20S/jetson_mech_control`；当前 HEAD/branch/status 不写死在规划正文 |
+| 跟踪内容 | 代码、配置、测试、ADR、正式文档、manifest 和经许可审查的小型测试向量 |
+| 排除内容 | 独立 `CubeMars/`、供应商二进制、生成物、大日志/抓包、`tmp/`、`.codex/`、`.agents/` |
+| 本地恢复 | `memory/` 由每位开发者本地维护并被 Git 忽略；共享任务进入 Issues/Milestones/PR |
+| 当前 packages | 只创建 `mech_control_core`、`mech_simulation`、`mech_hardware_ros2_control`、`mech_controllers`、`mech_bringup`；vendor packages 在契约稳定后按需创建 |
+| 治理切换 | FND-004A 通过后给实测 commit 创建 `fnd-004a-passed` tag 并保护 `main`；FND-005 起所有人经任务分支和 PR 合并 |
 
-### 5.2 初始 Git 资产规则
-
-| 资产 | 初始策略 | 原因 |
-|---|---|---|
-| C++、CMake、launch、配置、测试、ADR、Markdown | 跟踪 | 项目事实源 |
-| `memory/` | 每位开发者本地维护并由 Git 忽略 | 只用于个人 AI/会话恢复；不得成为共享项目事实或任务状态 |
-| `.codex/handoffs/`、`.agents/` | 默认忽略 | 包含本机/会话上下文；需要提交时单独审查 |
-| `CubeMars/` | 忽略 | 独立供应商仓库和二进制资料，不进入主仓库 |
-| `tmp/`、`build/`、`install/`、`log/` | 忽略 | 临时或生成内容 |
-| PDF、ZIP、RAR、EXE、rosbag、candump、大日志 | 默认不跟踪 | 版权、体积和历史污染风险；Git 只保存 manifest/哈希/URI |
-| DBC、golden frames、小型测试向量 | 审查后跟踪 | 可复现协议测试所需，必须记录来源和许可证 |
-
-不能在写好 `.gitignore` 和资产清单前执行宽泛的 `git add .`。
-
-### 5.3 初始仓库内容
-
-```text
-/
-  README.md
-  AGENTS.md
-  LICENSE-or-INTERNAL-LICENSE.md
-  .gitignore
-  .github/
-    CODEOWNERS
-    pull_request_template.md
-    workflows/
-  docs/
-    adr/
-    architecture/
-    development/
-    planning/
-  manifests/
-    ai_skills.yaml
-    dependencies.repos
-    sources/
-  config/
-    schema/
-    simulation/
-  interfaces/
-    golden_frames/
-  ros2_ws/src/
-    mech_control_core/
-    mech_simulation/
-    mech_hardware_ros2_control/
-    mech_controllers/
-    mech_bringup/
-  tools/
-  tests/
-    integration/
-    fault_injection/
-```
-
-Foundation 只创建当前需要的五个 ROS packages。`mech_protocol_cubemars`、`mech_protocol_hipnuc`、`mech_interfaces`、`mech_diagnostics`、`mech_learning_bridge` 和 STM32 firmware 在依赖和接口实际出现时再创建，避免空包和虚假抽象。
-
-### 5.4 初始 Git 决策
-
-FND-000 的决策和确认状态记录在 [`fnd-000_repository_and_asset_policy.md`](fnd-000_repository_and_asset_policy.md)。D1–D5 已由项目负责人于 2026-08-06 确认；GitHub 目标确认为 `Makoto20S/jetson_mech_control`，并已在明确授权后创建为私有仓库。提交 `69815f6` 已推送到 `main`，远端 HEAD 与本地一致；分支保护和 CODEOWNERS 按 D5 等首个可运行 CI 后再启用。
-
-首次提交前已明确并完成：
-
-1. 私有远端位置和仓库名；
-2. 项目代码许可证：采用内部科研专用、保留所有权利声明；公开或商业化前重新审查；
-3. 供应商/实验资产不进入普通 Git，仓库仅保存受审清单、哈希和无凭据 URI；
-4. `memory/` 只在每位开发者本地维护并由 Git 忽略；长期事实进入正式文档，共享任务状态进入 GitHub Issues/Milestones；
-5. branch protection、PR 审查和 CODEOWNERS 何时启用；按 D5 延后至首个可运行 CI。
+禁止宽泛暂存导致供应商/生成资产进入索引。公开、增加第三方代码、配置 CODEOWNERS 或提高 mandatory approval 前均需独立审查；未知评审账号不得写入规则。
 
 ## 6. 构建和运行环境
 
@@ -226,12 +167,13 @@ bash tools/ci/build_workspace.sh
 
 ### Week 1：仓库、ADR、构建骨架和核心契约
 
-1. 完成仓库/许可证/资产策略决策；
-2. 初始化 Git、私有远端、`.gitignore` 和规划基线；
-3. 创建五个必要 packages、最小可构建目标和 CI；
-4. 已将 ADR-001/002/003/004/005/006/009 转成独立 ADR 并标明 Accepted/Proposed；
+1. ~~完成仓库/许可证/资产策略决策~~（FND-000 已完成）；
+2. ~~初始化 Git、私有远端、`.gitignore` 和规划基线~~（FND-001 已完成）；
+3. ~~创建五个必要 packages、最小可构建目标和 CI~~（FND-002/FND-003 已完成）；
+4. ~~将 ADR-001/002/003/004/005/006/009 转成独立 ADR~~（FND-004 已完成，6 Accepted、1 Proposed）；
 5. 在目标 Jetson 上完成 FND-004A ARM64 原生烟测；
-6. 实现 frame/time/status/config/capability 的纯 C++ 类型与验证测试。
+6. 烟测通过后创建 `fnd-004a-passed` tag、保护 `main`，再从 FND-005 开始以任务分支 + PR 开发；
+7. 实现 frame/time/status/config/capability 的纯 C++ 类型与验证测试。
 
 **Week 1 出口**：干净 checkout 可在 Ubuntu 22.04 执行 build + unit；错误配置测试失败方式确定；没有 transport 线程和真实设备代码。
 
@@ -310,17 +252,17 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 
 七份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
 
-### 8.2 现有规划文档如何处理
+### 8.2 文档收敛结果
 
-FND-004 本轮只完成必要的 ADR 提取、反向链接和矛盾修正，没有批量删除或归档规划。后续单独执行文档收敛审查：
+FND-004 后的独立文档收敛已执行：
 
-- `01_evidence_and_research.md`、`04_source_register.md`、`06_cubemars_material_review.md` 保留为证据/来源层，删除过期状态但不丢失可追溯证据；
-- `02_architecture_and_interfaces.md` 与 `05_decisions_and_open_questions.md` 压缩为概览和未决问题，并链接正式 ADR，不再复制完整决策正文；
-- 本文件在 Foundation RC 前继续作为当前里程碑顺序，完成项只保留简短结果，详细进度放在 GitHub Issues/Milestones；
-- 已被 ADR、实现或新计划完全替代的提示词/历史段落移入 `docs/archive/`，明确标记 non-normative，并先更新所有入站链接；
-- 根 README 只保留稳定入口、当前能力边界和下一阶段，不记录 commit ID、单次 CI run ID 或个人会话状态。
+- `01_evidence_and_research.md`、`04_source_register.md`、`06_cubemars_material_review.md` 保留为证据/来源层，并明确快照与当前事实的边界；
+- `02_architecture_and_interfaces.md` 与 `05_decisions_and_open_questions.md` 已减少重复决策正文，直接链接正式 ADR；
+- `03_mvp_delivery_plan.md` 保留完整 MVP、硬件闸门、带宽与量化验收；本文件继续负责 Foundation 顺序和核心契约；
+- 初始总体规划提示词已移入 [`docs/archive/`](../archive/README.md) 并标记 non-normative；活动文档不把归档作为当前规范；
+- [规划索引](README.md)现在只提供权威边界、当前顺序和活动文档地图。
 
-该收敛审查应作为 FND-004 后的独立文档任务，不与 ADR 内容评审混成一次不可审查的大改动。
+后续完成项的详细进度进入 GitHub Issues/Milestones/PR，正式文档只保留可长期复现的结果和接口边界。
 
 ## 9. Foundation 核心契约
 
@@ -499,28 +441,21 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 
 ## 15. 新对话和新成员的恢复顺序
 
-所有 AI 对话的权威通用流程是根 `AGENTS.md` 和 `docs/development/ai_collaboration_workflow.md`。本节只补充 Foundation 当前里程碑的恢复入口：
+权威通用流程是根 [`AGENTS.md`](../../AGENTS.md) 和 [AI 协作 SOP](../development/ai_collaboration_workflow.md)，本节不复制其 project-memory、handoff 和结束检查点规则。Foundation 只补充三个恢复入口：
 
-1. 先读根 `AGENTS.md`，对非平凡任务使用 `project-memory`；
-2. 初始化或依次读当前开发者本地的 `memory/MEMORY.md`、`memory/STATE.md`、`memory/PLAN.md`；新 clone 没有本地 Memory 是正常状态；
-3. 检查实际 Git root、branch、HEAD、status 和最近测试结果；
-4. 读 `docs/planning/README.md`、本文件以及 GitHub 当前 Milestone/Issue；
-5. 只有用户、`STATE.md` 或明确的跨上下文任务指定 handoff 时，才使用 `write-codex-handoff` 验证并恢复该文件；不得默认把目录中“最新”文件当作当前事实；
-6. 从 GitHub Issues/Milestones 和本文件 Issue 表选择共享任务；本地 `STATE.md`/`PLAN.md` 只辅助个人恢复；
-7. 若 memory/handoff 与仓库冲突，以最新用户指令、实际文件、Git、测试和批准文档为准；
-8. 未重新检查前，真实硬件、Jetson 运行状态和外部仓库活动度都视为过期信息。
-
-每个新项目任务结束或暂停前，按统一 SOP 自动更新本地 `STATE.md` 和 `PLAN.md`，检查并在出现 durable fact 时更新本地 `MEMORY.md`，然后运行 memory validator；共享进度同步到 GitHub Issues/Milestones，长期事实进入本文件、ADR 或其他正式文档。只有用户明确要求写交接，或发生跨阶段、换人/机器、长暂停、上下文高风险或未完成高风险工作等真实事件时才新建 handoff；普通任务完成不创建，不把 handoff 当聊天日志。
+1. 读 [规划索引](README.md)、本文件、[ADR 索引](../adr/README.md)和当前 GitHub Milestone/Issue；
+2. 核对实际 branch/HEAD/status 与最近验证，不从归档、旧 memory 或旧 handoff 推断当前状态；
+3. FND-004A 前以 [ARM64 烟测清单](../development/jetson_arm64_smoke_test.md)为下一闸门；tag/保护切换后，确认自己位于任务分支而不是受保护 `main` 再编辑。
 
 ## 16. 立即执行顺序
 
 当前下一步不是写 CAN 协议，也不是连接硬件，而是：
 
-1. 完成 FND-000：已确认仓库、许可和资产策略；D4 已修订为个人 Memory 本地化、共享状态进入 GitHub；
-2. 完成 FND-001：已在当前根初始化 Git，审查并提交规划/上下文基线，创建私有远端并验证 clean clone；
-3. 完成 FND-002/FND-003：manifest、五包 workspace、共享构建脚本和最小 CI 已提交；原生 Humble、clean checkout context 和 pinned Docker CI 证据均通过；
-4. FND-004 已完成：核心 ADR 已转为 6 份 Accepted、1 份 Proposed 文档，并建立可执行结构/链接检查；
-5. 下一步完成 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行只读/无硬件烟测并记录版本与结果；
-6. 烟测通过后，从 FND-005 开始写第一行业务代码。
+1. FND-000～FND-004 与 post-FND-004 文档收敛已完成；
+2. 下一步执行 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行无 CAN/无设备烟测并记录版本与结果；
+3. 若发现问题，在 `main` 修复后对新 commit 重跑完整 FND-004A；旧烟测结果不得沿用；
+4. 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，推送 tag 后启用 `main` protection 和 required checks；
+5. FND-005 起从最新受保护 `main` 创建短生命周期任务分支并通过 PR 合并；仓库所有者使用同仓分支，外部成员可 fork；
+6. 从 FND-005 开始写第一行业务核心代码，不提前实现真实厂商 adapter。
 
 当前仍未授权启用 CAN、发送电机命令、修改 Jetson 系统或安装真实设备依赖；下一业务任务按计划进入 FND-004A。FND-004A 需要在 Jetson 上执行依赖解析和用户态 build/test，但不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，应另行取得明确授权。

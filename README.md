@@ -23,7 +23,13 @@ Start with:
 3. [`docs/planning/README.md`](docs/planning/README.md) for the planning index.
 4. [`docs/adr/README.md`](docs/adr/README.md) for the FND-004 architecture decisions and their status.
 5. [`docs/planning/07_framework_bootstrap_plan.md`](docs/planning/07_framework_bootstrap_plan.md) for the active Foundation sequence.
-6. GitHub Issues/Milestones for shared task state. Developers may use an ignored local `memory/` directory through the approved `project-memory` skill.
+6. [`docs/archive/README.md`](docs/archive/README.md) only when historical, non-normative planning inputs are needed.
+7. GitHub Issues/Milestones for shared task state. Developers may use an ignored local `memory/` directory through the approved `project-memory` skill.
+
+After FND-004A passes, the exact tested commit will receive the annotated
+`fnd-004a-passed` milestone tag and `main` will be protected. FND-005 and later
+work must use short-lived task branches and Pull Requests; repository owners
+use branches in this repository, while external contributors may use forks.
 
 ## Repository and asset boundary
 

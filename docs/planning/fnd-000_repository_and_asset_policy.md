@@ -1,6 +1,6 @@
 # FND-000：仓库与资产政策决策记录
 
-> 状态：已确认（Accepted；D4 于 2026-08-07 修订）
+> 状态：已确认（Accepted；D4、D5 于 2026-08-07 修订）
 > 创建日期：2026-08-06
 > 确认日期：2026-08-06
 > 最近修订：2026-08-07
@@ -17,15 +17,16 @@ FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1�
 | D2 | 代码许可证 | 内部科研专用、保留所有权利；暂不声明 Apache-2.0 等开源许可证；公开或商业化前另行审查 | 已确认（2026-08-06） | 项目负责人 + 所属单位按需审查 |
 | D3 | 供应商/实验资产 | 主仓库不存供应商 PDF/压缩包/可执行文件/大日志/rosbag；`CubeMars/` 整体忽略；Git 仅保存来源、版本、哈希和受控 URI；小型自有测试向量逐项审查后可跟踪 | 已确认（2026-08-06） | 项目负责人 |
 | D4 | `memory/` 边界 | `memory/` 仅在每个开发者本地由 `project-memory` 维护并由 Git 忽略；长期事实进入 ADR/正式文档，共享任务状态进入 GitHub Issues/Milestones | 已修订并确认（2026-08-07） | 项目负责人 |
-| D5 | 分支保护与评审 | FND-001 基线建立后先保持 `main` 可审查；首个 CI workflow 可运行后启用 `main` 保护、PR review、CODEOWNERS 和 required checks；未经评审不直接推送受保护分支 | 已确认（2026-08-06） | 项目负责人 |
+| D5 | 分支保护与评审 | FND-004A 通过后给实际烟测 commit 创建 annotated tag `fnd-004a-passed`，随后保护 `main`；FND-005 起所有人（含项目负责人）使用短生命周期任务分支并经 PR 合并，外部成员可使用 fork；required checks 强制通过，CODEOWNERS/强制 approval 随评审人到位启用 | 已修订并确认（2026-08-07） | 项目负责人 |
 
 ## 确认记录
 
 - **用户确认（2026-08-06）：** 项目负责人明确表示 D1、D2、D3、D4、D5 全部采用推荐值，并授权开始执行 FND-000 及其后续本地 FND-001 基线准备。
 - **D4 修订（2026-08-07）：** 项目负责人明确要求个人 Memory 不上传 GitHub，使任意成员的 clean clone 不受其他人的机器、AI 会话或个人计划影响；两项批准 skill 及根 `AGENTS.md` 约束继续保留。
+- **D5 修订（2026-08-07）：** 项目负责人把规范开发切换点定在 FND-004A 通过之后：烟测通过的精确 commit 打里程碑 tag，随后保护 `main`；此后的个人开发也不得直接推送 `main`，必须经任务分支和 PR。当前上游在项目负责人个人账号下，因此负责人使用同仓分支；字面 fork 留给外部成员或未来的组织上游/个人 fork 拓扑。
 - **Git 实施授权（2026-08-06）：** 项目负责人确认 GitHub owner 为 `Makoto20S`，目标路径为 `Makoto20S/jetson_mech_control`，并授权使用其提供的本地 Git 作者身份创建 commit 后推送。作者邮箱只保存在仓库级 Git 配置中，不写入项目文档或 Memory。
 - **已完成的 Git 实施（2026-08-06）：** 在明确授权后创建了私有仓库 `Makoto20S/jetson_mech_control`，将本地 `main` 推送至远端，并确认远端 HEAD 为 `69815f62…`；从远端进行的 clean clone 通过必需文件、资产边界和 Memory 验证。
-- **仍未决的实施信息：** NAS 目标位置和具体评审人身份未提供；不猜测 CODEOWNERS 内容。分支保护、PR review 和 required checks 按 D5 等首个可运行 CI 后启用。
+- **仍未决的实施信息：** NAS 目标位置和具体评审人身份未提供；不猜测 CODEOWNERS 内容。FND-004A 前需确认 GitHub ruleset 的准确 required-check 名称；没有独立评审人时先要求 PR、checks 和对话解决但不设置会导致单人死锁的 mandatory approval，评审人到位后再提高到至少 1 个 approval 并增加 CODEOWNERS。
 - **本轮安全边界：** 仅配置本地 Git/远端并完成基线提交和推送；不安装依赖、不启用 CAN、不发送电机命令、不修改 Jetson。
 
 ## 证据与边界
@@ -35,7 +36,7 @@ FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1�
 - **Repository evidence (2026-08-06):** `D:\Work\jetson` 已初始化为根 Git 仓库，当前分支为 `main`；21 个规划/治理/Memory/资产边界文件已提交，`CubeMars/` 等排除内容未进入索引。
 - **Planning evidence:** `docs/planning/07_framework_bootstrap_plan.md` section 5 推荐根目录和临时名称 `jetson_mech_control`，并要求先决定远端再初始化。
 - **Remote evidence (2026-08-06):** 本地 `origin` 配置为 `https://github.com/Makoto20S/jetson_mech_control.git`；认证 API 确认仓库为 private，默认分支为 `main`，远端 HEAD 与本地 `69815f62…` 一致；未输出或写入任何凭据值。
-- **限制:** 分支保护和评审规则仍按 D5 延后至首个可运行 CI；不得把私有访问控制当作许可证。
+- **限制:** 分支保护按修订后的 D5 延后到 FND-004A 里程碑 tag；当前未核验远端 ruleset 状态。不得把私有访问控制当作许可证。
 
 ### D2：内部科研许可证边界
 
@@ -60,9 +61,10 @@ FND-000 冻结第一次 Git 初始化前的边界。项目负责人已确认 D1�
 
 ### D5：分支保护与评审
 
-- **Planning evidence:** Foundation 规划要求在第一次提交前明确 branch protection、PR review 和 CODEOWNERS 时机。
-- **Recommended policy:** 先用 `main` 建立可审查基线；CI 能运行后启用保护和 required checks，避免在没有可用 CI 前制造无法合并的规则。
-- **最低评审规则建议:** 关键架构/安全/硬件边界变更至少一名项目负责人审查；vendor 协议、部署和硬件闸门相关变更不得绕过负责人。
+- **切换前：** FND-000～FND-004A 属于 bootstrap 期；只有用户明确要求时才可直接提交/推送 `main`，每次仍须审计 scope 和验证结果。
+- **里程碑：** FND-004A 必须从 clean clone 测试一个精确 commit。若产生任何修复，旧结果失效，新 commit 必须重跑完整烟测。通过后给该 commit 创建 annotated tag `fnd-004a-passed`；该 tag 不替代后续 `v0.1.0-foundation` RC。
+- **切换后：** 保护 `main`，禁止直接 push、force-push 和删除；所有 FND-005+ 工作从最新受保护 `main` 创建短生命周期任务分支，关联 Issue 并通过 PR 合并。仓库所有者使用同仓分支，外部贡献者可以 fork。
+- **最低规则：** PR 必须通过现有 context 与 Humble build/unit checks、解决对话并保持可审查提交。独立评审人未指定时 mandatory approvals 可为 0，避免单人永久死锁；评审人到位后提高到至少 1 个 approval 并增加 CODEOWNERS。架构、安全、vendor 协议、部署和硬件闸门变更不得绕过项目负责人。
 
 ## FND-001 前置条件
 

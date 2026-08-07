@@ -65,6 +65,7 @@
 
 - 当前实施入口是 `docs/planning/07_framework_bootstrap_plan.md`；当前先完成 Foundation，不提前开发真实 CubeMars/HI12 adapter。
 - FND-004 完成后、FND-005 开始前执行 FND-004A Jetson ARM64 原生烟测；仅做 clean clone、依赖解析、context check 和五包 build/test，不启用 CAN、不操作真实设备。
+- FND-004A 通过后，给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed` 并保护 `main`；FND-005 起所有修改（包括项目负责人自己的修改）均通过短生命周期任务分支和 PR 合并，外部成员可使用 fork。烟测后若有修复，必须在新 commit 上重跑完整 FND-004A 后再打 tag。
 - `CubeMars/` 是独立供应商资料仓库，不得进入未来主仓库。
 - Windows 只作为编辑/Git 环境；ROS 2 Humble、vcan、性能和 ARM64 结论必须来自对应 Ubuntu/ARM64 环境。
 - 控制器、ros2_control hardware plugin 和厂商 codec/session 的边界不得为单个设备品牌而破坏。
