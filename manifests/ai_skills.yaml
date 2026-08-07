@@ -8,7 +8,9 @@ policy:
   moving_branch_requires_review: true
   repository_fallback: docs/development/ai_collaboration_workflow.md
   secrets_allowed: false
-  project_memory_checkpoint: automatic_after_each_project_task_or_pause
+  project_memory_checkpoint: automatic_local_only_after_each_project_task_or_pause
+  project_memory_git_tracking: forbidden
+  shared_task_status: github_issues_and_milestones
   handoff_creation: event_triggered_not_per_task
   handoff_ai_initiated_events:
     - cross_person_machine_or_stage_transfer
@@ -23,7 +25,7 @@ skills:
     default_branch: main
     verified_commit: ab9d08cf9841f22feab278caeda115e4744b8635
     tags_observed: false
-    use: restore_reconcile_auto_update_checkpoint_and_validate_project_memory_for_each_project_task
+    use: restore_reconcile_auto_update_checkpoint_and_validate_each_developers_local_project_memory
 
   - name: write-codex-handoff
     requirement: required_only_for_handoff_create_resume_check_or_list

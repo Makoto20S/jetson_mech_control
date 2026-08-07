@@ -2,6 +2,7 @@
 
 > 状态：Accepted for planning and Foundation work
 > 日期：2026-08-03
+> 最近修订：2026-08-07（个人 Memory 本地化、共享状态迁移至 GitHub）
 > 适用对象：所有使用 AI 参与本仓库规划、开发、评审、验证和交接的人员
 > 强制入口：仓库根 `AGENTS.md`
 
@@ -9,16 +10,17 @@
 
 本标准解决三个长期问题：新对话如何可靠恢复、项目状态如何持续维护、工作如何在人员/机器/阶段之间安全交接。
 
-核心原则是：**仓库事实优先，memory 持续维护，handoff 按事件创建，skill 只是执行流程的工具。** 对话内容不是项目数据库，handoff 也不是代码和 Git 的替代品。
+核心原则是：**仓库事实优先，本地 memory 持续维护，共享状态进入 GitHub，handoff 按事件创建，skill 只是执行流程的工具。** 对话内容不是项目数据库，handoff 也不是代码和 Git 的替代品。
 
 ## 2. 信息分层
 
 | 载体 | 用途 | 更新方式 | 不应包含 |
 |---|---|---|---|
 | 代码、配置、测试、ADR、Git | 可执行且可审查的事实源 | 正常开发与评审 | 未验证结论、秘密 |
-| `memory/MEMORY.md` | 长期稳定的架构、规则、约束和已确认决策 | 每个新项目任务结束/暂停时由 AI 自动检查；仅在 durable fact 改变时实际更新 | 临时进度、聊天记录、猜测 |
-| `memory/STATE.md` | 可替换的当前工作快照 | 每个新项目任务结束/暂停时由 AI 自动更新 | 长期 backlog、完整日志 |
-| `memory/PLAN.md` | 按优先级维护的未来任务 | 每个新项目任务结束/暂停时由 AI 自动更新；完成、取消或重排时同步调整 | 当前工作区细节、聊天历史 |
+| 本地 `memory/MEMORY.md` | 当前开发者的长期恢复提示 | 每个新项目任务结束/暂停时由 AI 自动检查；仅在 durable fact 改变时实际更新 | 共享项目事实、临时进度、聊天记录、猜测 |
+| 本地 `memory/STATE.md` | 当前开发者的可替换工作快照 | 每个新项目任务结束/暂停时由 AI 自动更新 | 共享 backlog、完整日志 |
+| 本地 `memory/PLAN.md` | 当前开发者的个人恢复计划 | 每个新项目任务结束/暂停时由 AI 自动更新 | 团队任务状态、强制性的项目路线 |
+| GitHub Issues/Milestones | 团队共享任务、负责人、依赖和状态 | 通过 issue、milestone、PR 和评审维护 | 个人 AI 会话细节、本机路径和秘密 |
 | `.codex/handoffs/*.md` | 跨上下文的不可变交接快照 | 仅在触发事件发生时新建 | 每轮流水账、秘密、隐藏推理 |
 | AI 对话 | 讨论和执行界面 | 临时 | 唯一项目事实 |
 
@@ -74,10 +76,10 @@ flowchart LR
 
 1. 读取根 `AGENTS.md`。
 2. 定位项目根并启动 `project-memory`。
-3. 依次读取 `MEMORY.md`、`STATE.md`、`PLAN.md`。
+3. 若本地存在，依次读取 `MEMORY.md`、`STATE.md`、`PLAN.md`；新 clone 没有本地 memory 时，用 `project-memory` 初始化，不把共享状态文件复制进仓库。
 4. 检查 Git root、branch、HEAD、status；需要时查看 diff。
 5. 阅读 `docs/planning/README.md`、当前实施计划和任务相关 ADR/接口文档。
-6. 若用户或 `STATE.md` 明确指出 handoff，执行 `RESUME`；否则不自动加载历史 handoff。
+6. 若用户或本地 `STATE.md` 明确指出 handoff，执行 `RESUME`；否则不自动加载历史 handoff。共享任务状态以 GitHub Issues/Milestones 为准。
 7. 对照权威顺序修正过期信息。
 8. 选定一个任务 ID、范围、完成标准和验证命令，并向用户做简短开工说明。
 
@@ -117,7 +119,7 @@ AI 必须能够明确回答以下问题后才能修改项目：
 
 ### 7.3 检查点完成标准
 
-另一个 AI 在不读取聊天记录的情况下，只依靠仓库、memory 和必要的 handoff，能够确定当前事实、未完成工作和下一条安全命令。
+另一个 AI 在不读取聊天记录的情况下，只依靠仓库、GitHub Issues/Milestones、当前开发者的本地 memory 和必要的 handoff，能够确定当前事实、未完成工作和下一条安全命令。没有本地 memory 时，必须依靠正式文档和共享任务状态恢复，不得把别人的 memory 当作项目事实。
 
 ## 8. Handoff 生命周期 SOP
 
@@ -158,12 +160,12 @@ AI 必须能够明确回答以下问题后才能修改项目：
 
 1. **仓库层**：`AGENTS.md` 和本文件提供工具无关规范，是最低共同协议。
 2. **Skill 层**：支持 skills 的环境使用 `project-memory` 和 `write-codex-handoff` 执行标准化流程和 validator。
-3. **CI/评审层**：FND-001/FND-003 后增加可移植的上下文检查，验证 memory 文件存在、结构有效、规划链接不失效，并检查 PR 是否说明验证与 memory 影响。
+3. **CI/评审层**：FND-001/FND-003 后增加可移植的上下文检查，验证正式项目文件、依赖边界和规划链接；检查 PR 是否说明验证与共享文档影响。CI 不要求个人 memory 存在，也不把它作为共享事实源。
 
 | 场景 | 仓库规则 | Skills | 实际保证 |
 |---|---|---|---|
 | 当前工作区中的新 Codex 对话 | Codex 会发现适用范围内的根 `AGENTS.md` | 已安装时可直接触发；缺失时按 manifest 安装 | 可以自动获得核心规则，但仍需按启动 SOP 核对当前文件和 Git |
-| 新机器上的 Codex | FND-001 提交并推送后，clone 会带回 `AGENTS.md`、SOP 和 memory | 每个 Codex 环境需要安装或检查 skills | clone 前或 skills 未安装前不具备完整恢复能力 |
+| 新机器上的 Codex | clone 会带回 `AGENTS.md`、SOP、正式文档、manifest 和 CI；不会带回个人 memory | 每个 Codex 环境需要安装或检查 skills；本地需要初始化 memory | 没有安装 skills 或没有本地 checkpoint 时，仍可依靠正式文档和 Issues 开始工作，但恢复上下文较少 |
 | 支持 `AGENTS.md` 约定的其他 AI | 取决于该产品的发现和作用域实现 | 通常不支持 Codex skill 格式 | 必须验证该产品实际行为，不能仅凭文件存在宣称已加载 |
 | 不支持 `AGENTS.md` 的 AI | 不会自动加载 | 不会自动加载 | 使用第 12 节标准恢复口令，要求其先读取 `AGENTS.md` 和 SOP |
 
@@ -171,9 +173,17 @@ AI 必须能够明确回答以下问题后才能修改项目：
 
 团队级 skill 不能只存在于某个用户目录。未来若创建项目 skill，其源码应进入仓库的受审查目录，记录来源/版本/安装方法，并保留本文件中的手工 fallback。
 
-在 FND-000 批准后，建议把经过秘密审查的 `memory/` 随私有 Git 仓库同步，使它成为日常跨 AI、跨机器恢复路径。`.codex/handoffs/` 仍默认不批量进入主仓库；发生真实转交时，由负责人通过批准的私有渠道传递指定且已验证的 handoff，接收方再执行 `RESUME`。不得因为文件名较新就自动信任一个来源不明的 handoff。
+`memory/` 不进入远程仓库。每位开发者在自己的工作区维护三份本地文件，并将其视为恢复工具而非共享事实源；`.codex/handoffs/` 仍默认不批量进入主仓库。发生真实转交时，由负责人通过批准的私有渠道传递指定且已验证的 handoff，接收方再执行 `RESUME`。不得因为文件名较新就自动信任一个来源不明的 handoff。
 
-`manifests/ai_skills.yaml` 已记录两个批准仓库、当前已核验提交和使用条件；当前仓库尚未初始化 Git，因此它还不是可通过 clone 获取的团队基线。FND-001 负责审查并纳入首次提交，FND-003 再用可移植 wrapper/CI 检查这些依赖和上下文文件。
+`manifests/ai_skills.yaml` 已记录两个批准仓库、当前已核验提交和使用条件。新成员 clone 后应先阅读 `AGENTS.md`、本 SOP 和 manifest，再按批准来源安装或检查 `project-memory` 与 `write-codex-handoff`；技能安装不替代正式文档、Issues 或本地 memory 初始化。
+
+### 9.1 共享与本地边界
+
+共享并进入 Git 的内容包括：README、`AGENTS.md`、`CONTRIBUTING.md`、ADR、接口契约、构建/部署/安全文档、manifest、CI、测试向量和发布说明。长期事实必须迁入这些正式载体。
+
+每位开发者本地维护：`memory/MEMORY.md`、`memory/STATE.md`、`memory/PLAN.md`、`.codex/`、本机路径、工具版本和个人工作笔记。共享任务的 ID、负责人、依赖、阻塞和完成状态进入 GitHub Issues/Milestones，不进入个人 `PLAN.md`。
+
+README 只保留稳定入口和能力边界，不记录频繁变化的 commit ID、CI run ID 或单次会话的下一动作；这些信息放在 GitHub 提交、Checks、Issue/PR 和本地 memory 中。
 
 ## 10. 是否新增项目 Skill
 
@@ -216,7 +226,7 @@ AI 必须能够明确回答以下问题后才能修改项目：
 - 相关检查实际运行，未运行项及原因已说明；
 - 没有把文件修改冒充行为或实机验证；
 - 重要决策进入 ADR/权威文档，而不是只留在对话；
-- `STATE.md` 和 `PLAN.md` 已由 AI 自动更新并与当前事实一致；已检查是否需要更新 `MEMORY.md`，有长期事实变化时已更新；
+- 本地 `STATE.md` 和 `PLAN.md` 已由 AI 自动更新并与当前事实一致；已检查是否需要更新本地 `MEMORY.md`，有长期事实变化时已更新；共享进度已反映在 GitHub Issues/Milestones 或正式文档中；
 - memory validator 无 error；
 - 若触发交接，handoff validator 无 error；
 - 最终答复给出结果、验证、剩余风险和一个具体下一步。
@@ -225,7 +235,7 @@ AI 必须能够明确回答以下问题后才能修改项目：
 
 新对话可以直接使用以下请求：
 
-> 按根 `AGENTS.md` 开始工作。使用 `project-memory` 恢复当前项目，核对 Git 和当前实施文档，报告目标、状态、风险与 Immediate Next Action；只有存在明确 handoff 恢复事件时才使用 `write-codex-handoff`。不要在恢复阶段修改代码或硬件状态。
+> 按根 `AGENTS.md` 开始工作。使用 `project-memory` 恢复当前开发者的本地项目上下文，核对 Git、GitHub Issues/Milestones 和当前实施文档，报告目标、状态、风险与 Immediate Next Action；只有存在明确 handoff 恢复事件时才使用 `write-codex-handoff`。不要在恢复阶段修改代码或硬件状态。
 
 跨机器或换人时使用：
 

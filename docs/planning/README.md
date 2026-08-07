@@ -3,7 +3,7 @@
 > 规划基线：2026-07-28
 > CubeMars 资料复核：2026-08-03
 > 适用范围：NVIDIA Jetson、最多 6 台电机、2 条 CAN/CAN FD 总线、2 台 HI12、1 个未来 STM32 传感器节点
-> 本轮状态：FND-002/FND-003 已提交并推送；x86_64 Ubuntu 22.04/Humble 原生构建和 GitHub Actions pinned-Docker/context 验证通过；ARM64、vcan 与硬件验证仍未执行；未启用 CAN、未控制设备、未修改 Jetson
+> 当前状态：FND-000～FND-003 已完成；下一步为 FND-004 ADR 基线，随后在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测；未启用 CAN、未控制设备、未修改 Jetson
 
 ## 结论标记
 
@@ -31,7 +31,11 @@
 
 **规划决定（2026-08-03）**：当前立即进入无真实硬件依赖的 `Foundation v0.1`。先由项目负责人统一建立 Git、构建/CI、纯 C++ core、fake/vcan、BusRuntime、模拟设备、薄 `SystemInterface` 和模拟 demo controller；实机资料不再阻塞基础框架，只阻塞真实设备 profile 激活和物理验收。当前详细执行入口为 `07_framework_bootstrap_plan.md`。
 
-**已确认事实（2026-08-07）**：FND-002/FND-003 的 pinned dependency manifest、五包 ROS 2 骨架、共享 build/test 脚本和最小 GitHub Actions/context workflow 已提交于 `ee4c64c` 并推送；`Ubuntu-22.04` 中官方 `rosdep` 与显式 `ROSDEP_COMMAND=rosdepc` 两条路径均完成 5 包构建和 30/30 测试；GitHub Actions run `31150054330` 的 context check 与 pinned Humble Docker build 均成功。该证据不覆盖 ARM64、vcan、性能或硬件结论。
+**已确认事实（2026-08-07）**：FND-002/FND-003 的 pinned dependency manifest、五包 ROS 2 骨架、共享 build/test 脚本和最小 GitHub Actions/context workflow 已完成并推送；`Ubuntu-22.04` 中官方 `rosdep` 与显式 `ROSDEP_COMMAND=rosdepc` 两条路径均完成 5 包构建和 30/30 测试，GitHub Actions 的 context check 与 pinned Humble Docker build 也成功。具体提交与 run 证据由 Git/GitHub Checks 保存；该证据不覆盖 ARM64、vcan、性能或硬件结论。
+
+**规划决定（2026-08-07）**：FND-004 完成后、FND-005 开始前增加 `FND-004A`。该任务在目标 Jetson Orin 的 ARM64 原生 Ubuntu 22.04/ROS 2 Humble 环境，从 clean clone 执行 context check、依赖解析和五包 build/test，并记录 JetPack/L4T/ROS/GCC/CMake；不启用 CAN、不操作真实设备、不代替 FND-015 的性能、sanitizer、稳定性和 RC 验收。
+
+**治理决定（2026-08-07）**：`memory/` 改为每位开发者本地恢复工具并由 Git 忽略；根 `AGENTS.md` 继续强制使用 `project-memory` 和事件触发的 `write-codex-handoff`。长期事实进入 ADR/正式文档，共享任务状态进入 GitHub Issues/Milestones，README 不记录频繁变化的 commit/run ID。
 
 **已确认事实**：按经典 CAN 最坏位填充估算，8 字节标准帧为 135 bit，8 字节扩展帧为 160 bit，均包含 3 bit 帧间隔。六台电机每周期一发一收、均按 8 字节扩展帧保守计，在 1 Mbit/s、200 Hz 时占 38.4%，250 Hz 时占 48.0%，500 Hz 时占 96.0%。因此 500 Hz 不能作为六电机通用默认值。
 
@@ -84,8 +88,9 @@
 5. [已确认决策与待确认项](05_decisions_and_open_questions.md)：2026-07-30 后续讨论形成的频率、控制语义、servo/MIT、扩展边界和供应商资料清单。
 6. [CubeMars 供应商资料审查](06_cubemars_material_review.md)：AKE60-8/AK3.0 资料采用矩阵、协议代际冲突、双编码器证据、总线预算和实机待确认项。
 7. [Foundation v0.1 搭建计划](07_framework_bootstrap_plan.md)：当前实施入口；Git、包依赖、四周里程碑、核心契约、复用 spike、Issue 清单、验收和跨对话恢复规则。
-8. [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md)：已确认的第一次 Git 初始化前仓库、内部科研许可、供应商资产、Memory 和分支保护决策。
+8. [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md)：仓库、内部科研许可、供应商资产、个人 Memory 与共享状态边界、分支保护决策及 D4 修订记录。
 9. [AI 协作与上下文连续性标准](../development/ai_collaboration_workflow.md)：所有 AI 对话的恢复、执行、project memory、handoff、跨机器和新 skill 决策规范；根 `AGENTS.md` 是强制入口。
+10. [FND-004A Jetson ARM64 原生烟测](../development/jetson_arm64_smoke_test.md)：FND-004 后、FND-005 前的 clean-clone 目标机验证清单和安全边界。
 
 ## 6. 23 项交付映射
 

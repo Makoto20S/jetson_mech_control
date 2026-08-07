@@ -4,6 +4,8 @@
 .codex/**
 .agents
 .agents/**
+memory
+memory/**
 tmp
 tmp/**
 presentation

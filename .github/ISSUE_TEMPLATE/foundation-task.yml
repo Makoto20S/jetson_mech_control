@@ -1,0 +1,47 @@
+name: Foundation task
+description: Track an FND/RSP/INT task with explicit scope and acceptance evidence.
+title: "[FND-XXX] "
+labels: []
+body:
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      placeholder: FND-004
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose and scope
+      description: State the outcome, included work, and explicit non-goals.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and blockers
+      description: Link prerequisite Issues, ADRs, evidence, or hardware gates.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Completion criteria
+      description: List observable acceptance conditions.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: List commands, environments, and evidence expected.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Hardware and safety boundary
+      description: State whether CAN, Jetson configuration, or real devices are in scope and which gates apply.
+    validations:
+      required: true

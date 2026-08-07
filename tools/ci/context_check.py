@@ -26,8 +26,16 @@ EXPECTED_PACKAGES = {
 
 REQUIRED_FILES = {
     ".dockerignore",
+    ".github/ISSUE_TEMPLATE/foundation-task.yml",
+    ".github/pull_request_template.md",
     ".github/workflows/foundation.yml",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
     "docker/ros_humble_jammy/Dockerfile",
+    "docs/development/ai_collaboration_workflow.md",
+    "docs/development/jetson_arm64_smoke_test.md",
+    "docs/planning/07_framework_bootstrap_plan.md",
+    "manifests/ai_skills.yaml",
     "manifests/dependencies.json",
     "manifests/dependencies.repos",
     "ros2_ws/src/mech_control_core/package.xml",
@@ -43,6 +51,7 @@ FORBIDDEN_TRACKED_PARTS = {
     "CubeMars",
     ".codex",
     ".agents",
+    "memory",
     "tmp",
     "presentation",
 }
@@ -202,6 +211,16 @@ def main() -> int:
             fail("workflow does not build the pinned Humble image")
         if not re.search(r"actions/checkout@[0-9a-f]{40}", workflow):
             fail("workflow actions must be pinned to full commit SHAs")
+
+        agents = read_text(root, "AGENTS.md")
+        skills_manifest = read_text(root, "manifests/ai_skills.yaml")
+        for skill in ("project-memory", "write-codex-handoff"):
+            if skill not in agents or skill not in skills_manifest:
+                fail(f"approved AI skill boundary is missing: {skill}")
+        if "GitHub Issues/Milestones" not in agents:
+            fail("AGENTS.md must identify the shared task-status system")
+        if "project_memory_git_tracking: forbidden" not in skills_manifest:
+            fail("ai_skills.yaml must keep project memory local-only")
 
         for relative in PORTABLE_FILES:
             content = read_text(root, relative)

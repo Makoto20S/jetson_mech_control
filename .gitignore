@@ -1,10 +1,11 @@
 # Repository policy: keep the main repository limited to reviewed source,
-# configuration, documentation, manifests, tests, and project memory.
+# configuration, documentation, manifests, and tests.
 
 # Nested supplier repository and supplier/experimental source bundles.
 /CubeMars/
 
 # Local AI/session state and temporary workspace material.
+/memory/
 /.codex/
 /.agents/
 /tmp/
