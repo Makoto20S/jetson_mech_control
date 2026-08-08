@@ -1,10 +1,10 @@
 # 事实基线与开源调研
 
-> 证据快照：主要盘点日期为 2026-07-28，CubeMars 补充审查日期为 2026-08-03。远程主机、仓库和硬件运行态均可能已经变化；本文件保留来源与历史观察，不作为当前运行状态。当前决策见 [ADR 索引](../adr/README.md)。
+> 证据快照：初始验证机盘点日期为 2026-07-28，CubeMars 补充审查日期为 2026-08-03，用户指定的实际目标机盘点日期为 2026-08-08。远程主机、仓库和硬件运行态均可能已经变化；本文件保留来源与历史观察，不作为当前运行状态。当前决策见 [ADR 索引](../adr/README.md)。
 
 ## 1. 调研边界与方法
 
-**已确认事实**：初始规划完整阅读了主提示词、四份本地 PDF 和此前汇报稿；2026-08-03 又审查了供应商 `CubeMars/` 仓库中与 AKE60-8、AK3.0、AK54 驱动板和双编码器有关的资料及 demo。对 Jetson 仍仅有此前的只读 SSH 检查；没有配置 CAN、设备、内核、服务或网络。[L01-L05][L07-L12][E01-E03]
+**已确认事实**：初始规划完整阅读了主提示词、四份本地 PDF 和此前汇报稿；2026-08-03 又审查了供应商 `CubeMars/` 仓库中与 AKE60-8、AK3.0、AK54 驱动板和双编码器有关的资料及 demo。2026-08-08 对用户后来指定的实际目标机完成了新的只读 SSH 盘点；两次 Jetson 盘点均没有配置 CAN、设备、内核、服务或网络。[L01-L05][L07-L12][E01-E04]
 
 **历史事实**：截至 2026-07-28，工作区根目录虽然存在名为 `.git` 的目录，但 `git status` 返回“not a git repository”；`docs/planning/` 在当时尚不存在。该状态已由 FND-001 建仓替代，当前仓库状态以 Git 为准。旧的 `/home/jetson/UAM_ROS` 只作为只读构建经验参考，不是新架构模板，也未被修改。[E02][E03]
 
@@ -54,7 +54,9 @@
 | 首期只定义节点职责、消息语义、采样时间、序号、状态、标定和诊断边界，不实现固件或 ADC 前端 | 项目要求 | 已确认事实 |
 | 混有经典 CAN 节点的物理段不应直接启用 CAN FD 数据帧；STM32 首版应支持经典 CAN 兼容配置 | 经典 CAN 节点对 FD 帧兼容性不能假设 | 有依据的推断 |
 
-## 3. 当前 Jetson 基线
+## 3. Jetson 证据快照
+
+### 3.1 早期验证机（历史快照）
 
 | 项目 | 2026-07-28 只读结果 | 性质 |
 |---|---|---|
@@ -71,11 +73,29 @@
 | 主要占用 | Ollama 约 36 GiB、workspaces 约 15 GiB、cache 约 13 GiB、旧 UAM 日志约 6.3 GiB | 已确认事实 |
 | 旧工程 | `/home/jetson/UAM_ROS` 有约 141 KB 单体硬件源文件、大量未版本化日志和用户修改 | 已确认事实 |
 
-**已确认事实**：NVIDIA 的 Jetson Linux 36.4.4 官方文档说明 Orin 系列可安装开发预览质量的 RT 内核；这不等于当前 36.4.7 主机已经使用 RT 内核，也不证明 36.4.4 的包可直接用于 36.4.7。[O06]
+**已确认事实**：NVIDIA 的 Jetson Linux 36.4.4 官方文档说明 Orin 系列可安装开发预览质量的 RT 内核；这不等于该历史验证机的 36.4.7 系统已经使用 RT 内核，也不证明 36.4.4 的包可直接用于 36.4.7。[O06]
 
 **有依据的推断**：MVP 先在当前内核上量化周期抖动、缺页和负载干扰。只有指标不达标且已排除应用层阻塞后，才建立单独的 PREEMPT_RT 变更计划、回滚启动项和兼容性测试；本轮不修改内核。
 
-**有依据的推断**：当前可用空间尚能支持开发，但 80% 使用率不适合无配额持续录包。任何录制任务必须先检查空间、分包、限额并把正式数据迁移到外部存储；不自动删除现有文件。
+**有依据的推断**：该历史验证机当时的可用空间尚能支持开发，但 80% 使用率不适合无配额持续录包。任何录制任务必须先检查空间、分包、限额并把正式数据迁移到外部存储；不自动删除现有文件。
+
+### 3.2 用户指定的实际目标机（2026-08-08 快照）
+
+| 项目 | 2026-08-08 只读结果 | 性质 |
+|---|---|---|
+| 模块与载板 | NVIDIA `P3767-0000 + P3768-0000` Orin NX 参考开发套件；约 15 GiB RAM | 已确认事实 |
+| 操作系统 | JetPack 5.1.5 / L4T 35.6.0 / Ubuntu 20.04.6 | 已确认事实 |
+| 内核 | `5.10.216-tegra`，配置包含 `CONFIG_PREEMPT=y`；不等于 PREEMPT_RT | 已确认事实 |
+| ROS | ROS 1 Noetic；没有 `/opt/ros/humble`，没有 `colcon` | 已确认事实 |
+| 存储 | 128 GB NVMe 原生 ext4 rootfs；约 52 GB 已用、59 GB 可用 | 已确认事实 |
+| Docker | Docker daemon 与 NVIDIA Container Toolkit 已安装；目标用户当时不能直接访问 Docker socket | 已确认事实 |
+| 实时权限 | 登录环境 `rtprio=0`，memlock 为 64 KiB | 已确认事实 |
+
+**已确认事实**：该实际目标机不满足 [FND-004A](../development/jetson_arm64_smoke_test.md) 已定义的原生 Ubuntu 22.04 / ROS 2 Humble 前置条件，因此尚未执行 clean clone、rosdep 或五包 build/test；没有启用 CAN、操作设备或修改系统。[E04]
+
+**资料事实**：JetPack 6.2.1 / Jetson Linux 36.4.4 是支持该 Orin NX/参考载板组合的 production release，提供 Ubuntu 22.04 rootfs 和 Linux 5.15。R35 到 R36 迁移涉及 Jetson BSP、QSPI/UEFI、分区和 rootfs，不能用通用 `do-release-upgrade` 替代 NVIDIA 支持的刷写/镜像升级路径。[O08-O13]
+
+**规划决定**：实际目标机选择迁移到 JetPack 6.2.1，并使用 Ubuntu 22.04 电脑运行 SDK Manager Direct Flash；执行前仍须确认该主机为受支持的 x86_64 环境、验证外部备份并另行取得破坏性系统变更授权。执行草案见 [Orin NX JetPack 6 升级评估与教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)。
 
 ## 4. 事实、推断与未知项基线
 
@@ -108,14 +128,14 @@
 
 | 项目 | 许可证 | 维护/发行版/ARM64 | API、线程与证据 | 结论 | 性质 |
 |---|---|---|---|---|---|
-| [ros2_control][G01] | Apache-2.0 | Humble 分支 2026-07-14 有提交；当前 Jetson 已有 ARM64 包 | Controller Manager 执行 `read -> update -> write`；主线程尝试 `SCHED_FIFO/50` | 采用；成本中，债务是 Humble 恢复限制 | 有依据的推断 |
-| [ros2_controllers][G02] | Apache-2.0 | Humble 分支 2026-07-22 有提交；Jetson 已装 | 提供状态/IMU 广播和通用控制器；不解决项目特有命令租约 | 选择性采用；成本低，需核对接口版本 | 有依据的推断 |
-| [ros2_control_demos][G03] | Apache-2.0 | Humble 分支 2026-07-14 有提交；C++ 跨平台，当前栈证明 ARM64 可构建 | 有生命周期、接口和测试样例，无本项目硬件证明 | 参考；成本低，不形成运行依赖 | 有依据的推断 |
-| [realtime_tools][G04] | BSD-3-Clause | Humble 分支 2026-07-21 有提交；Jetson 已装 | `RealtimeBuffer` 使用 mutex，RT 侧 `try_to_lock`；不能称为无锁 | 采用；成本低，债务是对象/锁基准 | 有依据的推断 |
+| [ros2_control][G01] | Apache-2.0 | Humble 分支 2026-07-14 有提交；早期验证机已有 ARM64 包，实际目标机尚未安装 | Controller Manager 执行 `read -> update -> write`；主线程尝试 `SCHED_FIFO/50` | 采用；成本中，债务是 Humble 恢复限制 | 有依据的推断 |
+| [ros2_controllers][G02] | Apache-2.0 | Humble 分支 2026-07-22 有提交；早期验证机已安装，实际目标机尚未安装 | 提供状态/IMU 广播和通用控制器；不解决项目特有命令租约 | 选择性采用；成本低，需核对接口版本 | 有依据的推断 |
+| [ros2_control_demos][G03] | Apache-2.0 | Humble 分支 2026-07-14 有提交；C++ 跨平台，早期验证栈提供 ARM64 旁证 | 有生命周期、接口和测试样例，无本项目硬件证明 | 参考；成本低，不形成运行依赖 | 有依据的推断 |
+| [realtime_tools][G04] | BSD-3-Clause | Humble 分支 2026-07-21 有提交；早期验证机已安装，实际目标机尚未安装 | `RealtimeBuffer` 使用 mutex，RT 侧 `try_to_lock`；不能称为无锁 | 采用；成本低，债务是对象/锁基准 | 有依据的推断 |
 | [ros2_socketcan][G05] | package.xml/源码头声明 Apache-2.0；Humble 根 LICENSE 未找到 | Humble 分支停在 2024-07-16；main 2026-03-19；Linux/ARM64 可行但 Jetson 未装 | 生命周期收发节点、接收线程和 ROS 发布；DDS 节点路径不适合作为电机确定性命令链 | 封装/基准；成本中，风险是分支陈旧和许可证复核 | 有依据的推断 |
 | [ros2_canopen][G06] | 各包声明 Apache-2.0；Humble 根 LICENSE 未找到 | Humble 2025-09-11；master 2026-06-01；无正式 Jetson/ARM64 matrix，需 CI；README 明示非生产就绪 | Lely 事件循环、master/driver/ros2_control 集成；有 CANopen 设备示例 | 条件封装；成本高，风险是线程所有权和成熟度 | 有依据的推断 |
 | [lely-core][G07] | Apache-2.0 | master 最近提交 2023-12-12；跨平台 C/C++，无正式 Jetson matrix | 成熟 CANopen 栈，但直接集成成本高、线程模型需统一 | 传递依赖；成本高，不单独维护 fork | 有依据的推断 |
-| [can-utils][G08] | 以 GPL-2.0-only 为主，按文件 SPDX | master 2026-05-12；当前 Jetson 已装旧版，证明 ARM64 可用 | `candump`、`canplayer`、`cangen`、`canbusload`、`canerrsim` 等外部 CLI | 采用；成本低，外部进程避免链接许可债务 | 有依据的推断 |
+| [can-utils][G08] | 以 GPL-2.0-only 为主，按文件 SPDX | master 2026-05-12；早期验证机已装旧版，提供 ARM64 可用旁证 | `candump`、`canplayer`、`cangen`、`canbusload`、`canerrsim` 等外部 CLI | 采用；成本低，外部进程避免链接许可债务 | 有依据的推断 |
 | [rosbag2][G09] | Apache-2.0 | Humble 2026-07-23；官方 ARM64 ROS 包可用 | ROS 级记录/回放；不是线速 CAN 故障仿真 | 采用；成本低，主要风险是磁盘/CPU | 有依据的推断 |
 
 **已确认事实**：Linux SocketCAN 允许同一接口上多个 socket 订阅相同 ID，匹配帧会复制给所有监听者；错误消息帧默认关闭，应用必须显式设置错误过滤；接口统计可报告 bus-off、error-passive、丢包等状态。[O01]

@@ -44,6 +44,7 @@ REQUIRED_FILES = {
     "docs/archive/codex_ultra_master_planning_prompt.md",
     "docs/development/ai_collaboration_workflow.md",
     "docs/development/jetson_arm64_smoke_test.md",
+    "docs/development/jetson_orin_nx_jetpack6_upgrade_guide.md",
     "docs/planning/07_framework_bootstrap_plan.md",
     "manifests/ai_skills.yaml",
     "manifests/dependencies.json",

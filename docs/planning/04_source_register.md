@@ -4,7 +4,7 @@
 
 ## 1. 登记规则
 
-**已确认事实**：除特别说明外，在线来源访问日期均为 2026-07-28；CubeMars 本地供应商资料复核日期为 2026-08-03。仓库“最近提交”来自公开 branch Atom feed 或本地只读 Git 检查，提交日期表示该分支活动，不等于发布、生产就绪或当前设备兼容。供应商原始文件不进入主仓库；链接仅表示受控外部资料索引，文件哈希见 `manifests/assets.yaml`。
+**已确认事实**：除特别说明外，初始在线来源访问日期为 2026-07-28；CubeMars 本地供应商资料复核日期为 2026-08-03；JetPack 6 迁移相关官方来源复核日期为 2026-08-09。仓库“最近提交”来自公开 branch Atom feed 或本地只读 Git 检查，提交日期表示该分支活动，不等于发布、生产就绪或当前设备兼容。供应商原始文件不进入主仓库；链接仅表示受控外部资料索引，文件哈希见 `manifests/assets.yaml`。
 
 **有依据的推断**：本规划引用来源用于做架构决策，不授权复制许可证不明代码。实施时仍需把实际采用 commit、许可证文本、补丁和 SBOM 固定到 release manifest。
 
@@ -62,11 +62,12 @@
 
 | ID | 检查 | 时间 | 结果范围 | 性质 |
 |---|---|---|---|---|
-| E01 | `ssh jetson@100.75.153.31` 只读系统盘点 | 2026-07-28，Asia/Shanghai | 型号、CPU/RAM、OS/L4T/kernel、ROS 包、CAN 接口、GPU 栈、工具链、磁盘 | 已确认事实 |
+| E01 | 早期 Jetson 验证机只读系统盘点 | 2026-07-28，Asia/Shanghai | 型号、CPU/RAM、OS/L4T/kernel、ROS 包、CAN 接口、GPU 栈、工具链、磁盘；不是后来指定的实际目标机 | 历史已确认事实 |
 | E02 | 工作区只读目录与 `git status` | 2026-07-28 | 当前目录不是有效 Git 仓库；规划目录此前不存在 | 已确认事实 |
 | E03 | `/home/jetson/UAM_ROS` 只读盘点 | 2026-07-28 | 单体源文件、未版本化日志、dirty 修改；未做任何改动 | 已确认事实 |
+| E04 | 用户指定的实际 Orin NX 目标机只读系统盘点 | 2026-08-08～09，Asia/Shanghai | `P3767-0000 + P3768-0000`、JetPack 5.1.5/L4T 35.6/Ubuntu 20.04、内核、ROS、NVMe、Docker 和登录实时权限；没有系统或设备修改 | 当前目标的已确认快照 |
 
-**已确认事实**：E01~E03 没有安装、卸载、清理、启用 CAN、启动电机/IMU、修改服务/网络/内核或写入 Jetson。
+**已确认事实**：E01~E04 没有安装、卸载、清理、启用 CAN、启动电机/IMU、修改服务/网络/内核或写入 Jetson。
 
 ## 4. 官方技术文档
 
@@ -79,21 +80,27 @@
 | O05 | [ROS 2 Humble Real-time Programming](https://docs.ros.org/en/humble/Tutorials/Demos/Real-Time-Programming.html) | 锁页、动态分配、调度基线 | 实时程序需避免缺页、动态分配和无界阻塞 | 已确认事实 |
 | O06 | [NVIDIA Jetson Linux 36.4.4 Real-Time Kernel](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/Kernel/RealTimeKernel.html) | Orin RT 内核能力和安装/切换方法 | Orin RT kernel 为 Developer-Preview；可在 generic/RT 间切换 | 已确认事实 |
 | O07 | [ros2_canopen Humble Manual](https://ros-industrial.github.io/ros2_canopen/manual/humble/) | CANopen master/driver/config/ros2_control | 文档覆盖 Lely 后端和 Humble 示例；不证明 HI12 交付为 CANopen | 已确认事实 |
+| O08 | [NVIDIA JetPack 6.2.1](https://developer.nvidia.com/embedded/jetpack-sdk-621) | 实际目标机候选平台 | Production release；Jetson Linux 36.4.4、Ubuntu 22.04 rootfs、Linux 5.15 | 已确认事实，2026-08-09 复核 |
+| O09 | [Jetson Linux 36.4.4 Quick Start](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/IN/QuickStart.html) | 支持组合与恢复模式 | 支持 Orin NX `P3767-0000` + `P3768-0000`；Force Recovery USB ID 为 `0955:7323` | 已确认事实，2026-08-09 复核 |
+| O10 | [Jetson Linux 36.4.4 Flashing Support](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/FlashingSupport.html) | QSPI/NVMe 刷写、备份与恢复 | 该模块/载板的外部 NVMe 路径使用 initrd flash；刷写同时涉及启动固件和系统盘 | 已确认事实，2026-08-09 复核 |
+| O11 | [Jetson Linux update mechanism](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/SoftwarePackagesAndTheUpdateMechanism.html) | OTA 和跨版本边界 | 提供 Debian OTA 与 image-based OTA；通用 `do-release-upgrade` 不是受支持的 Jetson Linux 跨代路径 | 已确认事实，2026-08-09 复核 |
+| O12 | [SDK Manager Direct Flash](https://docs.nvidia.com/sdk-manager/install-with-sdkm-jetson-direct-flash/index.html) | 推荐个人刷机流程 | Direct Flash 为推荐方法；支持 Recovery、NVMe、OEM 配置和刷后 target components | 已确认事实，2026-08-09 复核 |
+| O13 | [SDK Manager system requirements](https://docs.nvidia.com/sdk-manager/system-requirements/index.html) | 刷机主机能力和兼容矩阵 | 至少 8 GB RAM；Jetson 完整部署最低约 27 GB host + 16 GB target；具体 JetPack 仍须核对兼容矩阵 | 已确认事实，2026-08-09 复核 |
 
-**有依据的推断**：O06 针对 36.4.4 文档，当前主机是 36.4.7；任何包名/步骤必须先找到与 36.4.7 匹配的官方说明并建立回滚，不可直接照抄执行。
+**有依据的推断**：O06 针对 36.4.4 文档，不证明 2026-07-28 的 36.4.7 历史验证机使用 RT 内核。实际目标机当前仍是 R35；任何 RT 内核变更都应在完成平台迁移、建立版本匹配证据和回滚方案后另立任务，不可照抄 O06 执行。
 
 ## 5. ROS、Linux CAN 与记录组件仓库
 
 | ID | 项目与 URL | 分支快照 | 许可证证据 | 备注 | 性质 |
 |---|---|---|---|---|---|
-| G01 | [ros-controls/ros2_control](https://github.com/ros-controls/ros2_control) | Humble `e65ddd72804f`，2026-07-14 | Apache-2.0 根 LICENSE | 当前 Jetson 已安装 2.54.0 | 已确认事实 |
+| G01 | [ros-controls/ros2_control](https://github.com/ros-controls/ros2_control) | Humble `e65ddd72804f`，2026-07-14 | Apache-2.0 根 LICENSE | 早期验证机已安装 2.54.0；实际目标机尚未安装 Humble | 已确认事实 |
 | G02 | [ros-controls/ros2_controllers](https://github.com/ros-controls/ros2_controllers) | Humble `73177880c302`，2026-07-22 | Apache-2.0 | 选择性复用 broadcaster/controller | 已确认事实 |
 | G03 | [ros-controls/ros2_control_demos](https://github.com/ros-controls/ros2_control_demos) | Humble `5efdb018aef2`，2026-07-14 | Apache-2.0 | 生命周期和测试参考 | 已确认事实 |
 | G04 | [ros-controls/realtime_tools](https://github.com/ros-controls/realtime_tools) | Humble `3e85fba8f44e`，2026-07-21 | BSD-3-Clause | [RealtimeBuffer 源码](https://github.com/ros-controls/realtime_tools/blob/humble/include/realtime_tools/realtime_buffer.hpp)显示 mutex/try-lock | 已确认事实 |
 | G05 | [autowarefoundation/ros2_socketcan](https://github.com/autowarefoundation/ros2_socketcan) | Humble `a9204072121c`，2024-07-16；main `e16bb19c51f3`，2026-03-19 | package.xml 与源码头 Apache-2.0；Humble 根 LICENSE 未找到 | Humble 分支与 main 活跃度要分开评估 | 已确认事实 |
 | G06 | [ros-industrial/ros2_canopen](https://github.com/ros-industrial/ros2_canopen) | Humble `fef50e54b1c9`，2025-09-11；master `faa2a77551e2`，2026-06-01 | package.xml Apache-2.0；Humble 根 LICENSE 未找到 | README 明示 under development/not production ready | 已确认事实 |
 | G07 | [lely-industries/lely-core](https://github.com/lely-industries/lely-core) | master `620d1858eb85`，2023-12-12 | Apache-2.0 | ros2_canopen 后端候选，不单独直连 MVP | 已确认事实 |
-| G08 | [linux-can/can-utils](https://github.com/linux-can/can-utils) | master `95aae6bf83ac`，2026-05-12；release `v2025.01` | 以 GPL-2.0-only 为主，按文件 SPDX | 当前 Jetson 是 2020.11.0；作为外部 CLI | 已确认事实 |
+| G08 | [linux-can/can-utils](https://github.com/linux-can/can-utils) | master `95aae6bf83ac`，2026-05-12；release `v2025.01` | 以 GPL-2.0-only 为主，按文件 SPDX | 早期验证机是 2020.11.0；作为外部 CLI | 已确认事实 |
 | G09 | [ros2/rosbag2](https://github.com/ros2/rosbag2) | Humble `cd220c16a1f2`，2026-07-23 | Apache-2.0 | ROS 级记录/回放，非线速 CAN 仿真 | 已确认事实 |
 
 ## 6. CubeMars 候选仓库
@@ -129,7 +136,8 @@
 | AK2.0/L11 标准帧 MIT vs AK3.0 V3.2 扩展帧力控 | L07 明确列出 AKE60-8 且版本更新 | 当前 codec 采用 L07；标准帧只作为 legacy 独立 profile | 资料事实 + 规划决定 |
 | 旧手册 `0x29` 最高 500 Hz vs V3.2 最高 2000 Hz | L07 是更新且明确覆盖 AKE60-8 的版本 | 协议配置范围改为 1–2000 Hz；500 Hz 作为项目基线而非手册上限 | 资料事实 + 规划决定 |
 | motor-control-sdk 扩展帧 force vs 旧规划所称冲突 | L07 证明 AK3.0 本就采用扩展帧 force-control | 撤销“帧类型冲突”结论；SDK 仍因 WIP/硬编码/无实机证据而仅参考 | 有依据的推断 |
-| NVIDIA 36.4.4 RT 文档 vs 当前 36.4.7 | E01/O06 | 不安装；先找匹配版本并建立回滚 | 有依据的推断 |
+| NVIDIA 36.4.4 RT 文档 vs 历史验证机 36.4.7 | E01/O06 | 不安装；先找匹配版本并建立回滚 | 有依据的推断 |
+| 早期验证机已是 R36/Humble vs 实际目标机仍是 R35/Noetic | E01/E04 | 保留 E01 为历史旁证；FND-004A 绑定 E04 指向的实际目标机，按已选择的 JetPack 6.2.1/Ubuntu 22.04 刷机主机路线先完成平台准备 | 已确认事实 + 规划决定 |
 | ros2_canopen docs 标题 0.0.1 vs Humble package 0.2.13 | O07/G06 package.xml | 依赖锁定 package/commit，不依赖网页标题判断版本 | 有依据的推断 |
 
 ## 9. 证据保全建议

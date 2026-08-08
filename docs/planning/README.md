@@ -1,8 +1,8 @@
 # Jetson 通用机电控制框架规划索引
 
 > 规划基线：2026-07-28
-> 最近收敛：2026-08-07（FND-004 ADR 基线与活动文档收敛）
-> 当前状态：FND-000～FND-004 已完成；下一步执行 FND-004A Jetson ARM64 原生烟测；未启用 CAN、未控制设备、未修改 Jetson
+> 最近收敛：2026-08-09（实际目标机迁移路线与 Ubuntu 22.04 刷机主机确认）
+> 当前状态：FND-000～FND-004 已完成；已选择 JetPack 6.2.1 迁移和 Ubuntu 22.04 刷机主机，下一步先做备份与主机预检，再单独授权刷机；未启用 CAN、未控制设备、未修改 Jetson
 
 ## 1. 权威边界
 
@@ -22,6 +22,7 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 
 - 目标包络：NVIDIA Jetson、最多 6 台 CAN 电机、2 条 CAN/CAN FD 总线、2 台 HI12，以及未来 STM32 传感器节点。
 - 当前设备背景：两台基于 AKE60-8 的定制双编码器电机和两台 HI12；实际固件、配置、协议、节点和物理拓扑仍需逐台取证。
+- 实际目标机背景：标准 NVIDIA `P3767-0000 + P3768-0000` Orin NX 开发套件；2026-08-08 只读盘点为 JetPack 5.1.5 / L4T 35.6 / Ubuntu 20.04 / ROS 1 Noetic，尚不满足 FND-004A 的原生 Jammy/Humble 前置条件。
 - 当前阶段：先完成不依赖真实设备的 Foundation v0.1，再冻结 AdapterContract v1 并接入厂商适配器。
 - 当前安全边界：FND-004A 只做 clean clone、环境盘点、依赖解析和五包 build/test；不启用 CAN、不操作设备、不静默修改系统。
 - 当前实现入口：[Foundation v0.1 控制框架搭建计划](07_framework_bootstrap_plan.md)。
@@ -33,7 +34,8 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 |---|---|---|
 | FND-000～FND-004 | 已完成 | 仓库/依赖/五包 CI 基线和七份 ADR 已建立 |
 | 文档收敛 | 已完成 | 活动文档去重、历史输入归档、链接与状态检查通过 |
-| FND-004A | 下一闸门 | 目标 Jetson ARM64 clean-clone context、rosdep、五包 build/test 通过 |
+| 目标机平台准备 | 路线已确认，待非破坏性预检 | Ubuntu 22.04 刷机主机通过兼容性检查，完成并验证备份；另行授权后 Direct Flash，再安装 Jammy/Humble 和只读仓库访问 |
+| FND-004A | 下一闸门，当前被平台前置条件阻塞 | 目标 Jetson ARM64 clean-clone context、rosdep、五包 build/test 通过 |
 | 里程碑切换 | FND-004A 通过后 | 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，随后保护 `main` |
 | FND-005～FND-015 | 待开始 | 通过任务分支和 PR 完成 core、simulation、ros2_control、性能及 Foundation RC |
 | INT-001 以后 | Foundation RC 后 | 冻结 adapter 模板，再接入 CubeMars、HI12 与 HIL |
@@ -53,6 +55,7 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 | [07 Foundation 搭建计划](07_framework_bootstrap_plan.md) | 当前 FND/RSP 顺序、核心契约与 Definition of Done | 当前实施入口 |
 | [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md) | 仓库、许可证、资产、Memory 与分支治理 | 已确认政策 |
 | [FND-004 ADR 集合](../adr/README.md) | 架构与语义状态 | 规范入口 |
+| [Orin NX JetPack 6 升级评估与教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md) | 当前标准开发套件的备份、Direct Flash、首启验收和回滚 | 决策与执行草案；不代表刷机授权 |
 | [FND-004A 烟测](../development/jetson_arm64_smoke_test.md) | 目标机原生 smoke 清单与里程碑取证 | 当前验证步骤 |
 
 ## 5. 硬件闸门

@@ -29,7 +29,8 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 | HI12 | 当前有两台；标准 CAN 交付通常为 J1939，但每台交付协议、ID、位速率和输出 profile 尚未读取 | 用户提供 + 待确认 |
 | CAN | 四台设备计划共用 Jetson `can0`，暂无第二路接口 | 用户提供；ADR-006 仍 Proposed |
 | 断能 | 项目方说明已有遥控继电器断能并曾验证 | 用户提供；G3 前仍需当前书面证据 |
-| 目标平台 | 目标为 Jetson Orin ARM64 / Ubuntu 22.04 / ROS 2 Humble | 构建基线；FND-004A 尚未验证当前目标机 |
+| 项目平台基线 | 目标为 Jetson Orin ARM64 / Ubuntu 22.04 / ROS 2 Humble | 构建基线；FND-004A 尚未验证当前目标机 |
+| 实际目标机 | 标准 `P3767-0000 + P3768-0000` Orin NX；2026-08-08 只读盘点为 JetPack 5.1.5 / L4T 35.6 / Ubuntu 20.04 / ROS 1 Noetic | 已确认快照；已选择迁移到 JetPack 6.2.1，并使用 Ubuntu 22.04 电脑刷机；尚未授权执行 |
 
 供应商参数、Jetson 状态和硬件状态在本轮未重新读取时不得写成当前事实。
 
@@ -41,7 +42,7 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 - **频率：** 当前两电机候选正常目标为 500 Hz，HI12 初始 100 Hz；100～200 Hz 用于模拟/首次 bring-up；代码支持 1 kHz 控制循环实验。控制循环、命令、反馈和 IMU 是独立频率，重复快照不得伪装成新样本。
 - **标准 effort：** 标准 AKE60-8 的 `Kt = 0.7382 N*m/A` 与输出端公式只是定制实机候选。只有实机固件、方向、减速比、字段和配置证据闭合后才暴露标准 `effort`；否则使用明确的 current/raw 接口。
 - **设备扩展：** 新 CAN 设备优先只增加 codec、device session、capability、配置和测试，不为品牌修改 core/controller 公共语义。
-- **实施顺序：** 缺少实机配置不阻塞 Foundation；FND-004A 通过后才开始 FND-005，Foundation RC/AdapterContract v1 冻结后再接入真实 CubeMars/HI12 adapter。
+- **实施顺序：** 缺少实机配置不阻塞 Foundation；实际目标机已选择 JetPack 6.2.1 迁移，并使用 Ubuntu 22.04 电脑运行 SDK Manager。当前先完成备份和刷机主机预检，取得单独执行授权后再刷机和准备 Humble；随后执行 FND-004A。FND-004A 通过后才开始 FND-005，Foundation RC/AdapterContract v1 冻结后再接入真实 CubeMars/HI12 adapter。执行边界见 [升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)。
 
 架构上下文见 [02](02_architecture_and_interfaces.md)，量化验收与总线预算见 [03](03_mvp_delivery_plan.md)，当前任务顺序见 [07](07_framework_bootstrap_plan.md)。
 
@@ -62,8 +63,9 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 
 ## 5. 下一证据动作
 
-1. FND-004A 只验证目标 Jetson 上的 clean clone、context、依赖和五包 build/test，不读取或修改设备。
-2. Foundation 后的 G0 取证先分别只读保存两台电机的连接/版本页、基础设置、`.AppParams` 和 `.McParams`；不得执行参数识别、写入、恢复默认或升级。
-3. 两台 HI12 必须逐台记录身份、交付协议、节点、位速率和输出 profile，再评估合并总线。
-4. 配置证据仍不能回答编码器来源、watchdog、定制 Kt 或终端时，再向供应商提出精确问题。
-5. 任何证据与 ADR 冲突时，停止受影响的真实 profile，更新本表并按 ADR review trigger 重审；不得静默改写或继续激活。
+1. 按已确认路线，先验证 Ubuntu 22.04 刷机主机为受支持的 x86_64 环境，并确认备份范围和破坏性系统变更授权；未获授权前不得开始 Flash。
+2. 平台准备完成后，FND-004A 只验证目标 Jetson 上的 clean clone、context、依赖和五包 build/test，不读取或修改设备。
+3. Foundation 后的 G0 取证先分别只读保存两台电机的连接/版本页、基础设置、`.AppParams` 和 `.McParams`；不得执行参数识别、写入、恢复默认或升级。
+4. 两台 HI12 必须逐台记录身份、交付协议、节点、位速率和输出 profile，再评估合并总线。
+5. 配置证据仍不能回答编码器来源、watchdog、定制 Kt 或终端时，再向供应商提出精确问题。
+6. 任何证据与 ADR 冲突时，停止受影响的真实 profile，更新本表并按 ADR review trigger 重审；不得静默改写或继续激活。

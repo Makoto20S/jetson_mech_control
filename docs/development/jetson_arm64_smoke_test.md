@@ -13,6 +13,7 @@
 ## 前置条件
 
 - 目标机确认为 Jetson Orin ARM64，运行项目支持的 Ubuntu 22.04 / ROS 2 Humble 组合；
+- 若目标机仍为 JetPack 5 / Ubuntu 20.04，先单独评估并授权迁移；当前标准开发套件的建议路径见 [Orin NX JetPack 6 升级评估与教程](jetson_orin_nx_jetpack6_upgrade_guide.md)，该教程本身不构成刷机授权；
 - FND-004 [ADR 基线](../adr/README.md)已完成，并通过 `python3 tools/ci/check_adrs.py`（也由 context check 调用）；
 - 测试使用主仓库 clean clone，不复制 Windows/WSL 的 build、install 或 log；
 - 工作目录和输出目录位于 Jetson 原生 Linux 文件系统；

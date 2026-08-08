@@ -452,10 +452,11 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 当前下一步不是写 CAN 协议，也不是连接硬件，而是：
 
 1. FND-000～FND-004 与 post-FND-004 文档收敛已完成；
-2. 下一步执行 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行无 CAN/无设备烟测并记录版本与结果；
-3. 若发现问题，在 `main` 修复后对新 commit 重跑完整 FND-004A；旧烟测结果不得沿用；
-4. 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，推送 tag 后启用 `main` protection 和 required checks；
-5. FND-005 起从最新受保护 `main` 创建短生命周期任务分支并通过 PR 合并；仓库所有者使用同仓分支，外部成员可 fork；
-6. 从 FND-005 开始写第一行业务核心代码，不提前实现真实厂商 adapter。
+2. 实际目标机的 2026-08-08 快照仍为 JetPack 5.1.5 / Ubuntu 20.04 / ROS 1 Noetic；用户已选择 JetPack 6.2.1 迁移，并确认使用 Ubuntu 22.04 电脑作为 SDK Manager 刷机主机。按 [升级评估与教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)先验证主机为受支持的 x86_64 环境、完成备份并另行取得破坏性系统变更授权；
+3. 平台准备完成后执行 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行无 CAN/无设备烟测并记录版本与结果；
+4. 若发现问题，在 `main` 修复后对新 commit 重跑完整 FND-004A；旧烟测结果不得沿用；
+5. 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，推送 tag 后启用 `main` protection 和 required checks；
+6. FND-005 起从最新受保护 `main` 创建短生命周期任务分支并通过 PR 合并；仓库所有者使用同仓分支，外部成员可 fork；
+7. 从 FND-005 开始写第一行业务核心代码，不提前实现真实厂商 adapter。
 
-当前仍未授权启用 CAN、发送电机命令、修改 Jetson 系统或安装真实设备依赖；下一业务任务按计划进入 FND-004A。FND-004A 需要在 Jetson 上执行依赖解析和用户态 build/test，但不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，应另行取得明确授权。
+当前已确认迁移路线和 Ubuntu 22.04 刷机主机，但仍未授权启用 CAN、发送电机命令、修改 Jetson 系统、执行刷机或安装真实设备依赖。平台准备完成后，FND-004A 需要在 Jetson 上执行依赖解析和用户态 build/test，但不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，应另行取得明确授权。
