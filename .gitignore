@@ -14,6 +14,7 @@
 # local attachments; retain locally until its claims and references are
 # reconciled with the authoritative planning documents.
 /presentation/
+/company/
 
 # Build, install, test, coverage, and generated output.
 /build/
