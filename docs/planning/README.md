@@ -1,8 +1,8 @@
 # Jetson 通用机电控制框架规划索引
 
 > 规划基线：2026-07-28
-> 最近收敛：2026-08-23（供应商资料全面审查：L02 深读、通用盒子事实收口、失控保护发现、拓扑意向确认；此前 2026-08-19 收敛 L02 双 profile 与 HighTorque transport 规划）
-> 当前状态：FND-000～FND-004 已完成；**目标机平台迁移已于 2026-08-23 完成**（HZHY 镜像刷写 JetPack 6.2 / Ubuntu 22.04.5，加固与 ROS 2 Humble 安装完毕）；下一闸门为 FND-004A 烟测；未启用 CAN、未控制设备
+> 最近收敛：2026-08-24（FND-005 合并；USB2CAN/HighTorque USB-CDC 运输路径与 RSP 顺序已同步）
+> 当前状态：FND-000～FND-005 已完成；FND-004 已完成且 FND-004A 已通过；**目标机平台迁移已于 2026-08-23 完成**（HZHY 镜像刷写 JetPack 6.2 / Ubuntu 22.04.5，加固与 ROS 2 Humble 安装完毕）；下一任务为 FND-006；未启用 CAN、未控制设备
 
 ## 1. 权威边界
 
@@ -33,12 +33,15 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 
 | 阶段 | 状态 | 出口 |
 |---|---|---|
-| FND-000～FND-004 | 已完成 | 仓库/依赖/五包 CI 基线和七份 ADR 已建立 |
+| FND-000～FND-005 | 已完成 | 仓库/依赖/五包 CI、七份 ADR 和 ROS-independent frame/time/status 核心类型已建立 |
 | 文档收敛 | 已完成 | 活动文档去重、历史输入归档、链接与状态检查通过 |
 | 目标机平台准备 | **已完成（2026-08-23）** | HZHY 镜像 + `l4t_initrd_flash` 刷写 JetPack 6.2 / Ubuntu 22.04.5，首启验收、加固（L4T 包锁定）与 ROS 2 Humble 安装完毕；记录见升级教程 §12.0/§14.0 |
-| FND-004A | **当前下一闸门，已无阻塞** | 目标 Jetson ARM64 clean-clone context、rosdep、五包 build/test 通过 |
-| 里程碑切换 | FND-004A 通过后 | 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，随后保护 `main` |
-| FND-005～FND-015 | 待开始 | 通过任务分支和 PR 完成 core、simulation、ros2_control、性能及 Foundation RC |
+| FND-004A | 已完成 | 目标 Jetson ARM64 clean-clone context、rosdepc/rosdep、五包 build/test 通过；tag `fnd-004a-passed` 已建立 |
+| 里程碑切换 | 已完成 | `main` 已启用 PR 保护；FND-005 起使用短生命周期任务分支和 PR |
+| FND-005 | 已完成 | frame/time/status 核心类型和边界测试已合并（PR #1） |
+| FND-006～FND-009 | 已完成 | config/capability/schema、fake clock/transport、router、snapshot/lease/BusRuntime 均已通过纯 C++ 确定性测试 |
+| RSP-001 | 已完成 | SocketCAN RAW socket 与 HighTorque USB-CDC/USB2CAN 离线评估记录已完成；真实 backend 仍需后续实现/证据 |
+| FND-010～FND-015 | 待开始 | 通过任务分支和 PR 完成 SocketCAN、模拟链路、ros2_control、性能及 Foundation RC |
 | INT-001 以后 | Foundation RC 后 | 冻结 adapter 模板，再接入 CubeMars、HI12 与 HIL |
 
 如果烟测后需要修复，必须在新 commit 上重新完整执行 FND-004A；里程碑 tag 不得指向未实际通过的 commit。
@@ -54,6 +57,7 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 | [05 决策与待确认项](05_decisions_and_open_questions.md) | ADR 导航、现场上下文和 OQ-01～OQ-10 | 状态概览；ADR 优先 |
 | [06 CubeMars 资料审查](06_cubemars_material_review.md) | L02 双 profile、AK3.0/AKE60-8 交叉资料、HighTorque transport 边界和实机缺口 | 供应商证据层 |
 | [07 Foundation 搭建计划](07_framework_bootstrap_plan.md) | 当前 FND/RSP 顺序、核心契约与 Definition of Done | 当前实施入口 |
+| [RSP-001 transport 评估](rsp-001-transport-evaluation.md) | SocketCAN 与 HighTorque USB-CDC/USB2CAN 的离线取舍和能力证据 | 已完成离线评估；不授权真实激活 |
 | [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md) | 仓库、许可证、资产、Memory 与分支治理 | 已确认政策 |
 | [FND-004 ADR 集合](../adr/README.md) | 架构与语义状态 | 规范入口 |
 | [Orin NX JetPack 6 升级评估与教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md) | 当前标准开发套件的备份、Direct Flash、首启验收和回滚 | 决策与执行草案；不代表刷机授权 |

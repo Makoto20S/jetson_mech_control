@@ -8,6 +8,8 @@ namespace mech::mech_control_core {
 // Host monotonic time is the only time domain used for freshness and TTL.
 class MonotonicTime final {
  public:
+  constexpr MonotonicTime() noexcept : nanoseconds_(0) {}
+
   [[nodiscard]] static std::optional<MonotonicTime> from_nanoseconds(
       std::int64_t nanoseconds) noexcept {
     if (nanoseconds < 0) {
@@ -30,6 +32,11 @@ class MonotonicTime final {
     return lhs.nanoseconds_ < rhs.nanoseconds_;
   }
 
+  friend constexpr bool operator<=(MonotonicTime lhs,
+                                   MonotonicTime rhs) noexcept {
+    return lhs.nanoseconds_ <= rhs.nanoseconds_;
+  }
+
  private:
   explicit constexpr MonotonicTime(std::int64_t nanoseconds) noexcept
       : nanoseconds_(nanoseconds) {}
@@ -39,6 +46,8 @@ class MonotonicTime final {
 
 class MonotonicDuration final {
  public:
+  constexpr MonotonicDuration() noexcept : nanoseconds_(0) {}
+
   [[nodiscard]] static std::optional<MonotonicDuration> from_nanoseconds(
       std::int64_t nanoseconds) noexcept {
     if (nanoseconds < 0) {
@@ -49,6 +58,16 @@ class MonotonicDuration final {
 
   [[nodiscard]] constexpr std::int64_t nanoseconds() const noexcept {
     return nanoseconds_;
+  }
+
+  friend constexpr bool operator==(MonotonicDuration lhs,
+                                   MonotonicDuration rhs) noexcept {
+    return lhs.nanoseconds_ == rhs.nanoseconds_;
+  }
+
+  friend constexpr bool operator<=(MonotonicDuration lhs,
+                                   MonotonicDuration rhs) noexcept {
+    return lhs.nanoseconds_ <= rhs.nanoseconds_;
   }
 
  private:

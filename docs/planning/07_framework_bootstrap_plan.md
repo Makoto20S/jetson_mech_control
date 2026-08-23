@@ -1,7 +1,7 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
-> 最近收敛：2026-08-19（纳入 L02 双 profile 与 HighTorque USB-CDC transport 规划；活动文档、历史归档与 FND-004A 后治理切换仍有效）
+> 最近收敛：2026-08-24（FND-006～FND-009 core/runtime 实现与 RSP-001 transport 离线评估完成）
 > 当前实施入口：本文件
 > 当前状态：FND-000～FND-004 已完成；下一步是在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
@@ -229,7 +229,7 @@ bash tools/ci/build_workspace.sh
 | FND-007 | 实现 fake clock 和 fake transport | FND-005 | deterministic test doubles | 无 sleep 控制时间和帧顺序 |
 | FND-008 | 实现 FrameRouter 和 filter 校验 | FND-006/007 | route registry/tests | 重叠、标准/扩展和 fan-out 测试通过 |
 | FND-009 | 实现 snapshot、lease 和 BusRuntime | FND-007/008 | 单写者 runtime/tests | stale/TTL/queue/fault 状态可重复验证 |
-| RSP-001 | 评估多 transport backend（SocketCAN 与 HighTorque USB-CDC） | FND-004/005 | transport ADR + 两个离线 PoC | backend 的 license/API/thread/time/error/bitrate/ARM64 六项有证据；无硬件副作用 |
+| RSP-001 | 评估多 transport backend（SocketCAN 与 HighTorque USB-CDC） | FND-004/005 | [离线 transport 评估记录](rsp-001-transport-evaluation.md) | SocketCAN 直接 RAW socket 作为 FND-010 目标；HighTorque USB-CDC 保留候选并显式记录缺失能力；无硬件副作用 |
 | FND-010 | 实现选定 Linux SocketCAN transport | FND-009/RSP-001 | non-blocking adapter + vcan tests | filter、error frame、timestamp、queue 结果通过 |
 | RSP-002 | 实现/评估 HighTorque USB-CDC raw-frame transport | FND-009/RSP-001 | injected serial + CDC golden/negative tests | CRC、批量帧、标准/扩展/Classic/FD/BRS、断连/队列/版本失败语义通过；不直接依赖 `canport` |
 | FND-011 | 实现 loopback codec 和模拟设备 | FND-009 | reference session/simulator | 命令产生可预测反馈和故障 |

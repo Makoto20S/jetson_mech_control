@@ -33,7 +33,11 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
-  ament_add_gtest(${PROJECT_NAME}_test test/test_package_marker.cpp)
+  ament_add_gtest(${PROJECT_NAME}_test
+    test/test_package_marker.cpp
+    test/test_fake_clock_transport.cpp
+    test/test_router_runtime.cpp
+  )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_lint_cmake()
   ament_xmllint()
