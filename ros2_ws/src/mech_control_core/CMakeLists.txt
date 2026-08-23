@@ -10,7 +10,11 @@ add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
 find_package(ament_cmake REQUIRED)
 
-add_library(${PROJECT_NAME} src/package_marker.cpp)
+add_library(${PROJECT_NAME}
+  src/package_marker.cpp
+  src/socketcan_transport.cpp
+  src/usb_cdc_transport.cpp
+)
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -33,6 +37,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_frame_time_status.cpp
     test/test_config_router.cpp
+    test/test_transport_backends.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})

@@ -11,7 +11,10 @@ add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 find_package(ament_cmake REQUIRED)
 find_package(mech_control_core REQUIRED)
 
-add_library(${PROJECT_NAME} src/package_marker.cpp)
+add_library(${PROJECT_NAME}
+  src/package_marker.cpp
+  src/loopback.cpp
+)
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -37,6 +40,8 @@ if(BUILD_TESTING)
     test/test_package_marker.cpp
     test/test_fake_clock_transport.cpp
     test/test_router_runtime.cpp
+    test/test_usb_cdc_transport.cpp
+    test/test_loopback.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_lint_cmake()

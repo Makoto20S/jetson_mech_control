@@ -60,26 +60,31 @@ struct RawCanFrame final {
   std::array<std::uint8_t, kMaxCanPayloadBytes> payload;
   MonotonicTime host_arrival;
   std::optional<SourceTimestamp> source_timestamp;
+  bool error_frame{false};
+  bool bitrate_switch{false};
 
   [[nodiscard]] static std::optional<RawCanFrame> create(
       std::uint16_t logical_bus, CanId id, CanFrameType type,
       FrameDirection direction, std::uint8_t payload_size,
       const std::array<std::uint8_t, kMaxCanPayloadBytes>& payload,
       MonotonicTime host_arrival,
-      std::optional<SourceTimestamp> source_timestamp = std::nullopt) noexcept {
+      std::optional<SourceTimestamp> source_timestamp = std::nullopt,
+      bool bitrate_switch = false) noexcept {
     const auto maximum = type == CanFrameType::Classic ? 8U
                                                         : kMaxCanPayloadBytes;
-    if (!id.is_valid() || payload_size > maximum) {
+    if (!id.is_valid() || payload_size > maximum ||
+        (bitrate_switch && type != CanFrameType::FlexibleDataRate)) {
       return std::nullopt;
     }
     return RawCanFrame{logical_bus, id, type, direction, payload_size, payload,
-                       host_arrival, source_timestamp};
+                       host_arrival, source_timestamp, false, bitrate_switch};
   }
 
   [[nodiscard]] constexpr bool is_valid() const noexcept {
     const auto maximum = type == CanFrameType::Classic ? 8U
                                                         : kMaxCanPayloadBytes;
-    return id.is_valid() && payload_size <= maximum;
+    return id.is_valid() && payload_size <= maximum &&
+           (!bitrate_switch || type == CanFrameType::FlexibleDataRate);
   }
 };
 
