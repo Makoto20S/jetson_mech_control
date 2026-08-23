@@ -2,6 +2,7 @@
 #include "mech_control_core/usb_cdc_transport.hpp"
 
 #include <array>
+#include <cstdlib>
 
 #include <gtest/gtest.h>
 
@@ -83,6 +84,45 @@ TEST(SocketCanTransport, RejectsInvalidCapabilityBeforeSocketCall) {
   SocketCanTransport transport(options);
   EXPECT_FALSE(transport.capabilities().is_valid());
   EXPECT_FALSE(transport.open());
+}
+
+TEST(SocketCanTransport, VcanRoundTripPreservesFrameAndTimestamp) {
+  if (std::getenv("MECH_RUN_VCAN_TESTS") == nullptr) {
+    GTEST_SKIP() << "set MECH_RUN_VCAN_TESTS=1 after creating vcan0";
+  }
+  SocketCanOptions options;
+  options.interface_name = "vcan0";
+  options.logical_bus = 1U;
+  options.nominal_bitrate_hz = 1000000U;
+  options.filters = {
+      FrameFilter{CanFrameFormat::Standard, 0x321U, kMaxStandardCanId,
+                  std::nullopt}};
+  SocketCanTransport sender(options);
+  SocketCanTransport receiver(options);
+  ASSERT_TRUE(sender.open());
+  ASSERT_TRUE(receiver.open());
+
+  auto outgoing = frame(FrameDirection::Tx, CanFrameType::Classic,
+                        CanFrameFormat::Standard, 8U);
+  outgoing.id = *CanId::create(0x321U, CanFrameFormat::Standard);
+  ASSERT_EQ(sender.try_send(outgoing), TransportResult::Ok);
+
+  RawCanFrame incoming{};
+  TransportResult result = TransportResult::WouldBlock;
+  for (int attempt = 0; attempt < 1000 && result == TransportResult::WouldBlock;
+       ++attempt) {
+    result = receiver.try_receive(incoming);
+  }
+  ASSERT_EQ(result, TransportResult::Ok);
+  EXPECT_EQ(incoming.direction, FrameDirection::Rx);
+  EXPECT_EQ(incoming.id.value, 0x321U);
+  EXPECT_EQ(incoming.id.format, CanFrameFormat::Standard);
+  EXPECT_EQ(incoming.type, CanFrameType::Classic);
+  EXPECT_EQ(incoming.payload_size, 8U);
+  EXPECT_EQ(incoming.payload[7], 8U);
+  EXPECT_TRUE(incoming.source_timestamp.has_value());
+  EXPECT_EQ(sender.stats().tx_frames, 1U);
+  EXPECT_EQ(receiver.stats().rx_frames, 1U);
 }
 
 }  // namespace

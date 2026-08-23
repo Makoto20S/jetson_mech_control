@@ -42,7 +42,22 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
    and fails if a host cycle exceeds 2 ms. This is a host benchmark, not a
    real-time or device-performance claim.
 
-5. ARM64 clean build and 30-minute simulated stability run must be executed on
+5. Linux vcan round-trip (software-only, requires network administration):
+
+   ```bash
+   sudo modprobe vcan
+   sudo ip link add dev vcan0 type vcan
+   sudo ip link set up vcan0
+   MECH_RUN_VCAN_TESTS=1 ctest \
+     --test-dir /tmp/mech-foundation-rc/build/mech_control_core \
+     --output-on-failure -R mech_control_core_test
+   sudo ip link delete vcan0
+   ```
+
+   The test opens only `vcan0`, sends one Classic standard frame, and verifies
+   filter matching, payload, host/source timestamps, and RX/TX counters.
+
+6. ARM64 clean build and 30-minute simulated stability run must be executed on
    the target Jetson for the exact RC commit:
 
    ```bash
