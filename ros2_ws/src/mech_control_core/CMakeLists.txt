@@ -37,6 +37,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_frame_time_status.cpp
     test/test_config_router.cpp
+    test/test_adapter_contract.cpp
     test/test_transport_backends.cpp
     test/test_package_marker.cpp
   )

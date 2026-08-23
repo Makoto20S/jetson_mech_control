@@ -14,7 +14,10 @@ find_package(mech_simulation REQUIRED)
 find_package(mech_hardware_ros2_control REQUIRED)
 find_package(mech_controllers REQUIRED)
 
-add_library(${PROJECT_NAME} src/package_marker.cpp)
+add_library(${PROJECT_NAME}
+  src/package_marker.cpp
+  src/foundation_harness.cpp
+)
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -34,6 +37,10 @@ install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION bin
 )
 install(DIRECTORY include/ DESTINATION include)
+install(FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../docs/development/foundation_validation.md
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../docs/development/adapter_contract_v1.md
+  DESTINATION share/${PROJECT_NAME}/docs)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   mech_control_core mech_simulation mech_hardware_ros2_control mech_controllers)
@@ -42,7 +49,10 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
-  ament_add_gtest(${PROJECT_NAME}_test test/test_package_marker.cpp)
+  ament_add_gtest(${PROJECT_NAME}_test
+    test/test_foundation_integration.cpp
+    test/test_package_marker.cpp
+  )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_lint_cmake()
   ament_xmllint()
