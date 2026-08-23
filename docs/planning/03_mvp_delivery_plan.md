@@ -2,9 +2,11 @@
 
 > 2026-08-03 实施顺序更新：本文件保留完整 MVP、硬件闸门和月度验收总路线；当前无硬件 `Foundation v0.1` 的具体执行以 [07_framework_bootstrap_plan.md](07_framework_bootstrap_plan.md) 为准。实机身份和配置不阻塞 Foundation，只阻塞真实设备激活。
 >
-> 2026-08-07 FND-004 更新：当前架构规范和状态以 [ADR 索引](../adr/README.md) 为准；ADR-001/002/003/004/005/009 已 Accepted，ADR-006 在单 `can0` 实机/总线证据完成前保持 Proposed。本文件中的早期推荐不得提升 ADR 状态。
+> 2026-08-07 FND-004 更新（2026-08-19 澄清）：当前架构规范和状态以 [ADR 索引](../adr/README.md) 为准；ADR-001/002/003/004/005/009 已 Accepted，ADR-006 在单物理通道、所选 transport backend 和实机/总线证据完成前保持 Proposed。本文件中的早期推荐不得提升 ADR 状态。
 >
 > 2026-08-07 文档收敛：本文件只保留完整 MVP、硬件闸门、带宽与量化验收；FND-004A 之后的任务顺序以 [07](07_framework_bootstrap_plan.md) 为准。初始规划输入已移入 [非规范归档](../archive/README.md)。
+>
+> 2026-08-19 规划修订：用户确认 L02 V1.0.18 CAN 协议/参数适用于当前电机；伺服扩展帧为第一实现 profile，运控/MIT 标准帧为第二实现 profile。HighTorque ROS2 SDK/FDCAN 示例只作为集成与 USB-CDC raw transport 参考，不改变 Foundation 的 core/BusRuntime/codec 边界。
 
 ## 1. 需求分解与完成口径
 
@@ -80,7 +82,8 @@
 | 包/目录 | 职责 | 依赖边界 | 性质 |
 |---|---|---|---|
 | `mech_control_core` | BusRuntime、router、快照、时间、command lease、故障状态 | Linux/标准 C++，不依赖 ROS | 有依据的推断 |
-| `mech_protocol_cubemars` | AK V3 servo/force-control、legacy MIT codec 与 device session | 依赖 core 抽象，不打开 socket；协议代际不共用打包函数 | 有依据的推断 |
+| `mech_protocol_cubemars` | L02 servo-extended、L02 motion-control/MIT-standard codec 与 device session；AK V3 作为补充 profile | 依赖 core 抽象，不打开 socket；协议 profile 不共用有歧义的打包函数 | 有依据的推断 |
+| `mech_transport_hightorque`（Foundation 后按 spike 决定） | HighTorque USB CDC raw CAN/CAN-FD transport backend | 只实现受控 framing/CRC/队列/能力边界；不拥有 motor codec 或 ros2_control 生命周期 | 有依据的推断 |
 | `mech_protocol_hipnuc` | J1939/CANopen profile codec、坐标/质量 | CANopen 后端条件依赖 | 有依据的推断 |
 | `mech_hardware_ros2_control` | 复合 SystemInterface、接口与 lifecycle | 依赖 core，不含协议位域 | 有依据的推断 |
 | `mech_controllers` | 有界测试、PID/阻抗/滑模等 C++ plugins | 只依赖标准接口和 command contract | 有依据的推断 |
@@ -101,7 +104,7 @@
 |---|---|---|---|---|---|---|
 | 完成 FND-004A、里程碑 tag 与保护分支切换 | FND-004/目标 Jetson | 项目负责人 | C | B | clean clone ARM64 smoke 通过；`fnd-004a-passed` 指向实测 commit；main protection 生效 | 规划决定 |
 | G0 设备身份清单 | 可接触设备但先不发运动命令 | B | 项目负责人、A | 项目负责人 | 所有第 13 节必填项有证据或明确 no-go | 待确认项 |
-| 第二 CAN 接口/拓扑验收 | 采购/现有适配器 | B | A | 项目负责人 | 原生 SocketCAN、ARM64、隔离、序列号、时间戳能力记录 | 待确认项 |
+| CAN transport/拓扑验收 | 采购/现有适配器 | B | A | 项目负责人 | SocketCAN 或 HighTorque CDC 的准确型号/固件/通道、ARM64、隔离、稳定身份、bitrate、时间戳/错误能力记录；必要时验收第二通道 | 待确认项 |
 | 协议事实表和 golden frames | 本地手册、供应商资料 | 项目负责人 | B | 另一名非作者 | 每种选定 profile 至少正/负/边界帧，来源可追溯 | 有依据的推断 |
 | 配置 schema 与 capability 模型 | 设备身份最小字段 | 项目负责人 | B | C | 缺字段、重 ID、路由重叠和超负载配置可拒绝 | 有依据的推断 |
 | 纯 C++ 包边界、vcan CI | 仓库和工具链 | 项目负责人 | C | B | x86 clean build、unit test、vcan smoke test | 有依据的推断 |
@@ -116,8 +119,8 @@
 
 | 任务 | 依赖 | 负责人 | 协作者 | 评审者 | 交付/验收 | 性质 |
 |---|---|---|---|---|---|---|
-| SocketCAN transport、router、错误帧/统计 | W1 schema/vcan | 项目负责人 | B | C | 多设备 filter、fan-out、单写者、队列满测试通过 | 有依据的推断 |
-| CubeMars 与 HI12 codec | G0 协议选择 | 项目负责人 | B | 另一名非作者 | golden、边界、DLC/ID/字节序、fuzz 全通过 | 有依据的推断 |
+| 多 transport backend、router、错误帧/统计 | W1 schema/vcan；HighTorque CDC spike | 项目负责人 | B | C | SocketCAN/vcan 与注入式 CDC 的 raw-frame/filter/fan-out/单写者/队列满测试通过 | 有依据的推断 |
+| L02 CubeMars 两套 codec 与 HI12 codec | G0 协议选择 | 项目负责人 | B | 另一名非作者 | L02 servo extended 先通过；MIT standard 随后；各自 golden、边界、DLC/ID/字节序、fuzz 全通过 | 有依据的推断 |
 | 设备模拟器和故障脚本 | codec | B | C | 项目负责人 | drop/duplicate/reorder/stale/fault/重启可复现 | 有依据的推断 |
 | 两台 HI12 逐台只读 bring-up | G1、台架接线 | B | 项目负责人 | A | PNAME/APP_VER/协议/ID/位速率与抓包归档 | 待确认项 |
 | 两台 HI12 联合 30 min 接收 | 唯一 ID、正确终端 | B | 项目负责人 | C | 第 6 节 IMU 指标通过 | 待确认项 |
@@ -242,10 +245,10 @@
 
 | Profile | 每更新帧 | 每设备每更新最坏 bit | 性质 |
 |---|---|---:|---|
-| AK V3 servo 电流命令 + `0x29` 反馈 | 扩展 4B + 扩展 8B | 280 | 资料事实 |
-| AK V3 8B 命令 + `0x29` 反馈 | 扩展 8B + 扩展 8B | 320 | 资料事实 |
-| AK V3 可选 `0x2A` 增量 | 额外扩展 4B | 120 | 资料事实 |
-| legacy MIT 命令 + 8B 反馈 | 标准 8B + 标准 8B | 270 | 旧代际参考，不用于当前预算 |
+| L02 servo 电流命令 + `0x29` 反馈 | 扩展 4B + 扩展 8B | 280 | 当前第一实现 profile 的资料事实 |
+| L02 servo 8B 命令 + `0x29` 反馈 | 扩展 8B + 扩展 8B | 320 | 当前第一实现 profile 的保守预算 |
+| AK V3 可选 `0x2A` 增量 | 额外扩展 4B | 120 | 补充资料事实；不默认用于 L02 profile |
+| L02 motion-control/MIT 命令 + 8B 反馈 | 标准 8B + 标准 8B | 270 | 当前第二实现 profile；实际频率/ID 仍以逐台配置为准 |
 | HI12 J1939 accel+gyro+quaternion | 3 × 扩展 8B | 480 | 已确认事实 |
 | HI12 J1939 出厂常见四组数据 | 4 × 扩展 8B | 640 | 已确认事实 |
 | HI12 CANopen accel+gyro+quaternion | 标准 6B + 6B + 8B | 365 | 已确认事实 |
@@ -254,21 +257,21 @@
 
 | 场景 | 位速率 | 最坏流量 | 占用 | 判断 | 性质 |
 |---|---:|---:|---:|---|---|
-| 1 AK V3 电机，servo current + `0x29`，200 Hz | 1 Mbit/s | 56 kbit/s | 5.6% | bring-up 有充足余量 | 有依据的推断 |
-| 1 AK V3 电机，8B 命令 + `0x29`，200 Hz | 1 Mbit/s | 64 kbit/s | 6.4% | force-control/保守预算 | 有依据的推断 |
-| 2 AK V3，servo current + `0x29`，500 Hz | 1 Mbit/s | 280 kbit/s | 28.0% | 当前两电机 servo 候选 | 有依据的推断 |
-| 2 AK V3，8B 命令 + `0x29`，500 Hz | 1 Mbit/s | 320 kbit/s | 32.0% | 当前两电机 force/保守候选 | 有依据的推断 |
-| 上述 2 电机 500 Hz + 2 HI12 J1939 三帧 100 Hz | 1 Mbit/s | 416 kbit/s | 41.6% | 单 `can0` 候选；仍需同位速率、ID 和时序证据 | 有依据的推断 |
-| 上述设备 + 两电机 `0x2A` @500 Hz | 1 Mbit/s | 536 kbit/s | 53.6% | 超出平均 50% 目标，不默认启用 `0x2A` | 有依据的推断 |
-| 2 AK V3 1 kHz + 2 HI12 J1939 三帧 100 Hz | 1 Mbit/s | 736 kbit/s | 73.6% | 不作为当前单 `can0` 默认值 | 有依据的推断 |
-| 上述 1 kHz 设备 + 两电机 `0x2A` @1 kHz | 1 Mbit/s | 976 kbit/s | 97.6% | 拒绝该单总线 profile | 有依据的推断 |
+| 1 L02 servo 电机，current + `0x29`，200 Hz | 1 Mbit/s | 56 kbit/s | 5.6% | bring-up 有充足余量 | 有依据的推断 |
+| 1 L02 servo 电机，8B 命令 + `0x29`，200 Hz | 1 Mbit/s | 64 kbit/s | 6.4% | 伺服 8B 命令保守预算 | 有依据的推断 |
+| 2 L02 servo，current + `0x29`，500 Hz | 1 Mbit/s | 280 kbit/s | 28.0% | 当前两电机第一 profile 候选 | 有依据的推断 |
+| 2 L02 servo，8B 命令 + `0x29`，500 Hz | 1 Mbit/s | 320 kbit/s | 32.0% | 当前两电机保守候选 | 有依据的推断 |
+| 上述 2 电机 500 Hz + 2 HI12 J1939 三帧 100 Hz | 1 Mbit/s | 416 kbit/s | 41.6% | 单物理通道候选；仍需同位速率、ID、backend 和时序证据 | 有依据的推断 |
+| 补充 AK3.0 假设：2 电机 8B 命令 + `0x29` + `0x2A` @500 Hz，再加上述 HI12 | 1 Mbit/s | 536 kbit/s | 53.6% | 非当前 L02 profile；若逐台另证 AK3.0，仍超出平均 50% 目标 | 补充资料 + 有依据的推断 |
+| 补充 AK3.0 假设：2 电机 8B 命令 + `0x29` @1 kHz，再加上述 HI12 | 1 Mbit/s | 736 kbit/s | 73.6% | 非当前 L02 profile；不作为单通道默认值 | 补充资料 + 有依据的推断 |
+| 补充 AK3.0 假设：上一场景再加 `0x2A` @1 kHz | 1 Mbit/s | 976 kbit/s | 97.6% | 非当前 L02 profile；拒绝该单总线配置 | 补充资料 + 有依据的推断 |
 | 2 HI12，J1939 三帧，100 Hz | 500 kbit/s | 96 kbit/s | 19.2% | 推荐最小输出 profile | 有依据的推断 |
 | 2 HI12，J1939 默认四帧，100 Hz | 500 kbit/s | 128 kbit/s | 25.6% | 可行但多发姿态帧 | 有依据的推断 |
 | 2 HI12，CANopen 三 TPDO，100 Hz | 500 kbit/s | 73 kbit/s | 14.6% | 只适用于确认 CANopen 固件 | 有依据的推断 |
-| 1 AK V3 servo @200 Hz + 2 J1939 三帧 @100 Hz，共享 500 kbit/s | 500 kbit/s | 152 kbit/s | 30.4% | 带宽可行，不解决实际位速率/ID 问题 | 有依据的推断 |
-| 6 AK V3，8B+8B，200 Hz | 1 Mbit/s | 384 kbit/s | 38.4% | 设计包络首选基线 | 有依据的推断 |
-| 6 AK V3，8B+8B，250 Hz | 1 Mbit/s | 480 kbit/s | 48.0% | 接近平均预算上限，需实测 | 有依据的推断 |
-| 6 AK V3，8B+8B，500 Hz | 1 Mbit/s | 960 kbit/s | 96.0% | 拒绝作为通用配置 | 有依据的推断 |
+| 1 L02 servo @200 Hz + 2 J1939 三帧 @100 Hz，共享 500 kbit/s | 500 kbit/s | 152 kbit/s | 30.4% | 纯带宽示例，不解决电机资料值 1 Mbps 与实际共同位速率问题 | 有依据的推断 |
+| 6 L02 servo，8B+8B，200 Hz | 1 Mbit/s | 384 kbit/s | 38.4% | 设计包络首选基线 | 有依据的推断 |
+| 6 L02 servo，8B+8B，250 Hz | 1 Mbit/s | 480 kbit/s | 48.0% | 接近平均预算上限，需实测 | 有依据的推断 |
+| 6 L02 servo，8B+8B，500 Hz | 1 Mbit/s | 960 kbit/s | 96.0% | 拒绝作为通用配置 | 有依据的推断 |
 | 2 HI12 默认 + STM32 假设 4 扩展帧@200 Hz | 500 kbit/s | 256 kbit/s | 51.2% | 仅规划示例，表明 STM32 profile 必须先预算 | 有依据的推断 |
 
 **待确认项**：最后一行不是 STM32 已定协议。成员 B 在传感器数量/采样率确定后重算 Classic/FD 帧成本、最坏响应时间和分片，最迟在 STM32 协议 ADR 评审前完成；在此之前不分配 CAN ID 或固定 payload。
@@ -282,9 +285,9 @@
 | 阶段 | controller_manager | 电机命令/反馈 | HI12 | 条件 | 性质 |
 |---|---:|---:|---:|---|---|
 | 模拟与首次硬件 bring-up | 100~200 Hz | 100~200 Hz | 100 Hz simulated/actual | 功能、方向、时间和故障字段正确 | 有依据的推断 |
-| 当前两电机 MVP 候选 | **500 Hz** | 目标 **500 Hz** | 100 Hz actual，必要时 200 Hz | 基础 `0x29` profile、第 6 节指标和 ADR-006 的单总线证据全部通过 | 规划目标；部署仍 Proposed |
+| 当前两电机 MVP 候选 | **500 Hz** | 目标最高 **500 Hz** | 100 Hz actual，必要时 200 Hz | L02 servo `0x29` profile、第 6 节指标和 ADR-006 的单通道/backend 证据全部通过 | 规划目标；部署仍 Proposed |
 | 1 kHz 控制实验 | 1 kHz | 先保持 500 Hz | 100/200 Hz | 状态 age、实际 `dt`、抖动和控制收益通过 | 有依据的推断 |
-| 1 kHz 电机 I/O | 1 kHz | 1 kHz | 100/200 Hz | 第二总线或单总线完整负载/响应时间 ADR 通过 | 待确认项 |
+| 未来另证 profile 的 1 kHz 电机 I/O | 1 kHz | 1 kHz | 100/200 Hz | 非当前 L02 目标；协议/固件证据、第二总线或单总线完整负载/响应时间 ADR 通过 | 待确认项 |
 | 六电机扩展 | 按控制需求配置 | 200~250 Hz 起测 | 独立预算 | 不沿用当前两电机 profile | 有依据的推断 |
 
 ### 8.2 测量矩阵
@@ -403,8 +406,10 @@
 | R04 | 两 HI12 均为节点 8 或协议不同 | 高 | 中 | 抓包冲突/无输出 | 逐台识别和配置，保存前后证据 | B | 有依据的推断 |
 | R05 | 只有 `can0` 且默认位速率不同 | 高 | 高 | 第二接口未到/驱动不支持 | 采购隔离 SocketCAN 适配器；禁止盲目共总线 | B | 有依据的推断 |
 | R06 | USB-CAN 延迟/断连 | 中 | 高 | p99.9 或 disconnect 不达标 | 选主线驱动、稳定序列号、HIL 压测；必要时换接口 | B | 有依据的推断 |
+| R21 | HighTorque USB-CDC 示例能力或许可不足 | 中 | 高 | 板卡/固件、bitrate、错误/时间戳、队列或许可证证据缺失 | reference-only；注入式离线 spike；保留 SocketCAN backend；未闭合前禁止真实激活 | 项目负责人 | 规划决定 |
+| R22 | L02 两种 profile 被误混发/热切换 | 低 | 极高 | 同一 ACTIVE session 接受两种 codec 或自动探测 | 配置期固定；独立 codec/session；negative cross-profile tests；切换需停用/neutral/断能和重新 configure | 项目负责人 | 规划决定 |
 | R07 | 非 PREEMPT_RT 抖动超标 | 中 | 高 | 第 6 节周期失败 | 清除 RT 路径阻塞；再评估官方 RT 内核与回滚 | 项目负责人 | 有依据的推断 |
-| R08 | 六电机、高频或 `0x2A` 导致拥塞 | 中 | 高 | 平均 >50% 或 queue/drop | 当前两电机 500 Hz 与六电机 200~250 Hz 使用独立 profile；高分辨率位置按需启用；必要时分总线 | 项目负责人 | 有依据的推断 |
+| R08 | 六电机、高频或补充 AK3.0 `0x2A` 导致拥塞 | 中 | 高 | 平均 >50% 或 queue/drop | 当前 L02 两电机 500 Hz 与六电机 200~250 Hz 使用独立 profile；`0x2A` 仅在另证 AK3.0 后评估；必要时分总线 | 项目负责人 | 有依据的推断 |
 | R09 | 多帧 IMU 被误当同步样本 | 高 | 中 | 无序号却发布 coherent | 字段级 age；SYNC_IN 实测；质量标志 | B | 有依据的推断 |
 | R10 | 坐标、安装方向或 yaw 约定错误 | 中 | 高 | 静态/转台方向测试失败 | 四元数为事实源；安装变换校准；协议专用缩放 | B + A | 有依据的推断 |
 | R11 | 第三方代码许可证不清 | 中 | 中 | 根 LICENSE 缺失/复制代码 | 仅参考；依赖前 legal/SPDX scan 和 commit lock | 项目负责人 | 有依据的推断 |
@@ -426,8 +431,8 @@
 |---|---|---|---|---|
 | 基型 AKE60-8、完整定制件号、序列号 | 基型已由用户确认；补两台实机连接/版本记录或订单/BOM | 项目负责人 | W1D2 | 部分确认 |
 | 驱动板 HW、FW、构建/发布日期 | 上位机/启动输出只读、供应商固件包哈希 | B | W1D2 | 待确认项 |
-| 当前 AK3.0/legacy 代际、command profile、CAN ID、位速率、反馈频率、`0x2A` | 每台 CubeMarsTool 基础设置截图、只读导出 + 后续抓包 | B | W1D3 | 待确认项 |
-| `0x29/0x2A` 的编码器来源、方向与零位 | 供应商帧说明 + 配置记录 + 后续手动方向校验 | 项目负责人 + A | G2 前 | 待确认项 |
+| 当前 L02 servo/MIT active profile、驱动板/固件、CAN ID、位速率和反馈设置；是否另属 AK3.0 | 每台上位机/供应商工具基础设置截图、只读导出 + 后续被动证据 | B | G0 | 待确认项 |
+| L02 `0x29`（以及实机若另属 AK3.0 时的 `0x2A`）编码器来源、方向与零位 | 供应商帧说明 + 配置记录 + 后续手动方向校验 | 项目负责人 + A | G2 前 | 待确认项 |
 | 定制版 Kt、减速比、允许电流/速度/温度 | 对比标准 V3.2、两台 `.AppParams`/`.McParams` 和供应商确认 | 项目负责人 | G3 前 | 部分确认 |
 | 命令超时、neutral、故障复位、上电行为 | 固件说明 + G3 后断包测试 | B | 真实电机最小 demo 前 | 待确认项 |
 | 机械连续/峰值力矩与夹具安全上限 | 准确型号数据 + 结构计算 + 计量 | A | G3 | 待确认项 |
@@ -447,7 +452,7 @@
 
 | 必须信息 | 确认方法 | 负责人 | 最迟 | 性质 |
 |---|---|---|---|---|
-| 第二 CAN 适配器型号、序列号、隔离、Classic/FD、主线驱动 | 采购/BOM、`ip`/driver 只读、loopback | B | W1D3 | 待确认项 |
+| transport 型号、序列号/稳定 USB 身份、板卡固件、Classic/FD、nominal/data bitrate、时间戳/错误能力 | 采购/BOM、版本化供应商资料；HighTorque CDC 与 SocketCAN 分别验收 | B | G0/G1 | 待确认项 |
 | 每段拓扑、线长、终端、共地/隔离、连接器 pinout | 现场图和电气检查 | B + A | G1 | 待确认项 |
 | 电源电压、限流、保险/断能、急停 | 原理图和实操断能演练 | A + B | G3 | 待确认项 |
 | 刚性夹具、机械限位、防护、允许方向/角度 | CAD/照片/检查表 | A | G3 | 待确认项 |
@@ -465,13 +470,13 @@
 
 ## 14. 推荐的下一步行动顺序
 
-1. **已完成/待证据**：FND-004 已接受 ADR-001/002/003/004/005/009；[ADR-006](../adr/ADR-006-conditional-can0-deployment.md) 继续等待逐台配置、共同位速率、ID、终端、负载、仲裁和错误证据，未转为 Accepted 前不得激活当前单 `can0` profile。
+1. **已完成/待证据**：FND-004 已接受 ADR-001/002/003/004/005/009；[ADR-006](../adr/ADR-006-conditional-can0-deployment.md) 继续等待逐台配置、所选 backend 能力、共同位速率、ID、终端、负载、仲裁和错误证据，未转为 Accepted 前不得激活当前单物理通道 profile。
 2. **规划决定**：执行 FND-004A；通过后给实际测试的 commit 创建 `fnd-004a-passed` annotated tag，并保护 `main`。FND-005 起所有人通过任务分支和 PR 开发；外部成员可 fork。
 3. **待确认项**：Foundation 后由 B 与项目负责人完成电机和两台 HI12 的身份表；任何未知保留为空，不补默认值。
 4. **待确认项**：A 在 W1D2 前给出台架接口、机械限位、急停/断能和力矩计量交付计划。
-5. **待确认项**：B 在 W1D3 前提交当前单 `can0` 的共同位速率、ID、终端和负载证据；不通过时再验收第二个隔离 SocketCAN 接口或修改 profile。
-6. **有依据的推断**：从 AK V3.2 分别建立 servo extended、force-control extended golden frame，把旧标准帧 MIT 放入 legacy 测试集；再与第三方实现和现场抓包交叉比较。
-7. **有依据的推断**：先实现/验证配置 schema、capability、纯 codec 和 vcan，不连接真实命令路径。
+5. **待确认项**：B 在 G0/G1 提交候选 transport 的准确型号/固件/通道能力，以及单物理通道的共同位速率、ID、终端和负载证据；不通过时验收第二个隔离通道、改用合格 backend 或修改 profile。
+6. **规划决定**：先从用户确认适用的 L02 建立 servo extended golden/negative/boundary vectors，再建立 motion-control/MIT standard vectors；跨 profile 帧必须被拒绝。AK V3.2 与第三方实现只作交叉比较。
+7. **有依据的推断**：先实现/验证配置 schema、capability、纯 codec、fake/vcan 与注入式 HighTorque CDC framing，不连接真实命令路径。
 8. **有依据的推断**：完成单总线 BusRuntime、错误帧、统计、最新命令槽和模拟设备；用压力/故障测试验证边界。
 9. **待确认项**：通过 G1 后由成员 B 在 Week 2 逐台只读接入 HI12，随后双设备运行 30 min；不在同一步同时改 ID、位速率和输出 profile。
 10. **有依据的推断**：建立复合 SystemInterface 和 mock 电机，完成生命周期、命令租约及 STRICT 切换 100 次。

@@ -41,7 +41,7 @@ SocketCAN 允许多个监听者接收匹配帧，但多个可写组件会分别�
 ### Positive / 正面
 
 - 命令租约、TTL、neutral、队列覆盖和错误统计只有一个权威 owner。
-- 可以在 fake、vcan 和未来 SocketCAN 后端之间复用同一上层行为契约。
+- 可以在 fake、vcan、SocketCAN 和 HighTorque USB-CDC 后端之间复用同一上层行为契约。
 - 多设备路由和总线负载预算在 configure/activation 阶段集中检查。
 
 ### Negative / 负面与代价
@@ -55,7 +55,7 @@ SocketCAN 允许多个监听者接收匹配帧，但多个可写组件会分别�
 - `python3 tools/ci/check_adrs.py` 通过，并确认本 ADR 在 planning 入口有反向链接。
 - FND-008 配置测试必须拒绝两个 writer 对同一物理接口或同一可写命令路由的声明。
 - FND-009 fake runtime 测试必须覆盖最新命令覆盖、TTL 到期、queue-full、drop/error 计数和 bus fault 状态转移，且无 sleep。
-- FND-010 vcan 测试必须证明一个写 owner 可接收过滤帧和错误帧，多个只读监听者不会消费或篡改控制队列。
+- FND-010 vcan 测试必须证明一个写 owner 可接收过滤帧和错误帧，多个只读监听者不会消费或篡改控制队列；RSP-002 injected-serial 测试必须证明 CDC backend 仍由同一 `BusRuntime` 独占写权限，并对断连/queue-full 失败关闭。
 - 后续 G1/G4 记录 `canbusload`、仲裁延迟、TX/RX drop 和 bus 状态；通过条件由 ADR-006 与 Foundation 验收共同约束。
 
 ## Review triggers / 重审触发

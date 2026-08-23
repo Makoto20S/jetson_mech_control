@@ -1,6 +1,6 @@
 # 证据与来源登记
 
-> 本表记录规划阶段使用过的来源及当时快照，不表示外部链接、远程仓库或硬件状态仍然当前。初始规划提示词已移入 [非规范归档](../archive/README.md)；当前决策见 [ADR 索引](../adr/README.md)。
+> 本表记录规划阶段使用过的来源及当时快照，不表示外部链接、远程仓库或硬件状态仍然当前。2026-08-19 用户新增确认已纳入本轮证据修订；它不替代逐台固件/配置取证。初始规划提示词已移入 [非规范归档](../archive/README.md)；当前决策见 [ADR 索引](../adr/README.md)。
 
 ## 1. 登记规则
 
@@ -13,7 +13,7 @@
 | ID | 来源 | 版本/页数 | 本规划使用的证据 | 性质 |
 |---|---|---|---|---|
 | L01 | [归档的主规划提示词](../archive/codex_ultra_master_planning_prompt.md) | 2026-07-28 工作区版本 | 历史任务输入：项目目标、MVP、规模、边界和交付清单；非当前规范 | 历史来源 |
-| L02 | CubeMars AK2.0 旧版驱动手册（受控外部文件，见 `manifests/assets.yaml`） | V1.0.18，47 页 | 仅用于 AK2.0/旧标准帧 MIT 代际对照，不作为当前 AKE60-8 实现依据 | 已确认事实 |
+| L02 | CubeMars AK 系列驱动手册（受控外部文件，见 `manifests/assets.yaml`；用户确认副本位于 `company/`） | AK2.0 V1.0.18，47 页 | 用户确认其 CAN 协议和 CAN 参数适用于当前两台电机；提供伺服扩展帧与运控/MIT 标准帧两条互斥 profile 的直接实现依据 | 用户确认事实 + 资料事实 |
 | L03 | HI12 系列规格书（受控外部文件，见 `manifests/assets.yaml`） | Rev 1.5，30 页 | 型号/接口、SYNC_IN/PPS、CAN 500 kbit/s、0~200 Hz、采样与环境规格 | 已确认事实 |
 | L04 | HiPNUC IMU 指令与编程手册（受控外部文件，见 `manifests/assets.yaml`） | Rev 1.7.2，63 页 | J1939/CANopen、PGN/TPDO、缩放、时间、同步、默认配置 | 已确认事实 |
 | L05 | DM-MC-Board02 手册（受控外部文件，见 `manifests/assets.yaml`） | V1.1 | STM32H723、3 路 CAN FD、外设与引脚图 | 已确认事实 |
@@ -26,6 +26,9 @@
 | L12 | AK CAN demo（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | 供应商仓库版本 | 历史 STM32/DJI/CMESC 混合工程，不绑定 AKE60-8 固件 | 拒绝作为协议依据 |
 | L13 | AK V3.2.0 CubeMarsTool（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | 压缩包内仅 `cubemarstool_v3.2.0.exe` | 后续逐台只读版本/配置读取与参数导出 | 工具候选 |
 | L14 | AKE60-8 驱动板归档（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | 压缩包内仅 STEP | 证明供应商把标准 AKE60-8 与 AK54 配套；结构文件不参与实现 | 范围外 |
+| L15 | `company/Panthera-HT_ROS2` 供应商 ROS2 工作区 | `humble@b08633d`；根 LICENSE 为 MIT | ROS2/ros2_control 集成、配置组织和 HighTorque 电机语义参考；未发现 HI12 codec；不作为项目核心依赖 | 参考源码 |
+| L16 | `company/hightorque_fdcan(2)/hightorque_fdcan` | 本地压缩包 SHA-256 `4aa51fd6...c3a860`；示例版本 `1.0.0` | USB CDC 原始 CAN/CAN-FD 透传参考：`MODE_FDCAN_PASS=0x12`、标准/扩展标志、Classic/FD/BRS、长度和 payload；不作为未经版本确认的直接依赖。2026-08-23 复核：自有代码**无 LICENSE/版权头**（内嵌 wjwwood/serial v1.2.1 为 MIT）；协议定义报错命令 `0x0F/0x11` 但示例未解析；无时间戳字段；无设置 CAN 波特率命令；要求板卡固件 ≥4.8.8 | 参考源码，**许可缺失已确认**（再分发/复制前必须取得高擎书面许可，见 05 §5.2 问题 5） |
+| L17 | `company/7路CAN主控盒子资料/`（说明书、SDK-ROS1/python 文档、环境配置、SDK 压缩包、STEP；哈希见 `manifests/assets.yaml`） | 飞书 wiki 2026-08-10 前后导出快照；SDK zip 为 ros1 v4.6.2 / python v4.5.4 | 通用盒子（7路CAN功率板）硬件与部署事实：7 通道=7×`/dev/ttyACM`、Type-C、XT60(2+4)/XT30(2+2)、板载 YESENSE IMU、"FDCAN波特率：5Mbps"（数据段）、CDC 串口 4 Mbps；说明书协议章节为空占位，权威协议在 L16 源码；SDK 面向高擎自家电机，无 CubeMars/L02 型号 | 资料事实；`00 文档说明.txt` 明示本地 PDF 会滞后于在线 wiki，引用时注意时效 |
 
 **已确认事实**：`CubeMars/` 本身是干净的嵌套 Git 仓库，来源为 `git@gitee.com:CubeMars/software.git`，复核快照为 `master@15885db`。当前资料树中没有 `.AppParams`、`.McParams`、DBC、EDS、AKE60-8 专用固件或 Linux/SocketCAN SDK。
 
@@ -39,7 +42,10 @@
 | AK3.0 力控/MIT-like 扩展帧和 AKE60-8 Kt/范围 | L07 第 36~40 页 | 资料事实 |
 | AK3.0 `0x29` 反馈/1~2000 Hz 与可选 `0x2A` | L07 第 41~42 页 | 资料事实 |
 | 双编码器 UART 字段 | L07 第 43 页附近 | 资料事实 |
-| AK2.0/legacy MIT 标准帧 | L02 第 40~42 页附近；L11 demo | 旧代际参考 |
+| L02 伺服扩展帧（ID/功能/`0x29` 反馈） | L02 第 27~40 页附近 | 当前首个实现 profile 的协议依据；实际固件仍需逐台核对 |
+| L02 运控/MIT 标准帧（进入/退出/零位及 8 字节反馈） | L02 第 41~45 页附近 | 当前第二实现 profile 的协议依据；ACTIVE 期间不与伺服 profile 混发 |
+| L02 标准帧 MIT | L02 第 40~42 页附近；L11 demo | 当前电机的用户确认适用 profile；不再标记为仅 legacy |
+| HighTorque USB CDC 透传 framing | L15/L16 及本地源码 | transport backend 参考；CDC header/CRC/版本/bitrate/错误语义仍需独立验证 |
 | HI12 CAN 和同步硬件 | L03 第 11~13、20 页 | 已确认事实 |
 | HI12 J1939 参数/PGN/周期 | L04 第 45~50、60 页 | 已确认事实 |
 | HI12 CANopen TPDO/SDO/SYNC | L04 第 51~55 页 | 已确认事实 |
@@ -65,7 +71,9 @@
 | E01 | 早期 Jetson 验证机只读系统盘点 | 2026-07-28，Asia/Shanghai | 型号、CPU/RAM、OS/L4T/kernel、ROS 包、CAN 接口、GPU 栈、工具链、磁盘；不是后来指定的实际目标机 | 历史已确认事实 |
 | E02 | 工作区只读目录与 `git status` | 2026-07-28 | 当前目录不是有效 Git 仓库；规划目录此前不存在 | 已确认事实 |
 | E03 | `/home/jetson/UAM_ROS` 只读盘点 | 2026-07-28 | 单体源文件、未版本化日志、dirty 修改；未做任何改动 | 已确认事实 |
-| E04 | 用户指定的实际 Orin NX 目标机只读系统盘点 | 2026-08-08～09，Asia/Shanghai | `P3767-0000 + P3768-0000`、JetPack 5.1.5/L4T 35.6/Ubuntu 20.04、内核、ROS、NVMe、Docker 和登录实时权限；没有系统或设备修改 | 当前目标的已确认快照 |
+| E04 | 用户指定的实际 Orin NX 目标机只读系统盘点 | 2026-08-08～09，Asia/Shanghai；2026-08-23 只读复核 | `P3767-0000` 模组、L4T 35.6.0（JetPack 5.1.4；早期记录 5.1.5 有误，2026-08-23 按 `jetson_release` 更正）/Ubuntu 20.04、内核、ROS、NVMe、Docker 和登录实时权限；设备树报 `p3768-0000` 后经 E05 证明为镜像产物；没有系统或设备修改 | 当前目标的已确认快照 |
+| E05 | 目标机载板实物核验与 HZHY 供应商资料核读 | 2026-08-23，Asia/Shanghai | 现场实物照片丝印 `HYAI-311UAV_O_V12`，与 `company/用户手册/` 的 HZHY HYAI-311UAV 用户手册接口逐项吻合（XT30/J8、SW1 REC、J7 Type-C 烧录口、J2 CAN、Micro HDMI）；**推翻此前"标准 P3768 参考载板"结论**；HZHY 刷机教程 2025-07-11 版含 JetPack 6.2 命令；仅阅读本地资料与照片，未接触设备。照片为临时现场文件，按项目负责人 2026-08-23 决定**不登记为持久资产**；丝印核验结论以本条文字记录为准 | 当前目标的已确认事实（实物证据优先于软件字符串） |
+| E06 | 通用盒子（7路CAN功率板）实物照片辨认 | 2026-08-23，Asia/Shanghai | 现场照片（临时文件，不登记）与 L17 说明书逐项吻合：XT60(2+4) 输入、7×XT30(2+2) 电源+CAN 输出、Type-C、YESENSE IMU 模块丝印、调试口；确认项目所称"USB2CAN 通信板"即该板的通信功能；项目负责人同日确认电机将接入该板通道 | 已确认事实 + 用户确认拓扑意向 |
 
 **已确认事实**：E01~E04 没有安装、卸载、清理、启用 CAN、启动电机/IMU、修改服务/网络/内核或写入 Jetson。
 
@@ -86,6 +94,9 @@
 | O11 | [Jetson Linux update mechanism](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/SoftwarePackagesAndTheUpdateMechanism.html) | OTA 和跨版本边界 | 提供 Debian OTA 与 image-based OTA；通用 `do-release-upgrade` 不是受支持的 Jetson Linux 跨代路径 | 已确认事实，2026-08-09 复核 |
 | O12 | [SDK Manager Direct Flash](https://docs.nvidia.com/sdk-manager/install-with-sdkm-jetson-direct-flash/index.html) | 推荐个人刷机流程 | Direct Flash 为推荐方法；支持 Recovery、NVMe、OEM 配置和刷后 target components | 已确认事实，2026-08-09 复核 |
 | O13 | [SDK Manager system requirements](https://docs.nvidia.com/sdk-manager/system-requirements/index.html) | 刷机主机能力和兼容矩阵 | 至少 8 GB RAM；Jetson 完整部署最低约 27 GB host + 16 GB target；具体 JetPack 仍须核对兼容矩阵 | 已确认事实，2026-08-09 复核 |
+| O14 | [JetPack 6.2.3 / Jetson Linux 36.5.2 公告](https://forums.developer.nvidia.com/t/jetpack-6-2-3-jetson-linux-36-5-2-is-now-live/379872)、[JetPack 6.2.2 / 36.5 公告](https://forums.developer.nvidia.com/t/jetpack-6-2-2-jetson-linux-36-5-is-now-live/359622) | 目标平台小版本更新 | 6.2.2/6.2.3 为 6.2.1 后的缺陷与安全修复 production release，仍为 Ubuntu 22.04 / 内核 5.15，支持全部 Orin；JetPack 7.x 为 Ubuntu 24.04，不满足本项目 Humble 基线 | 已确认事实，2026-08-23 核对 |
+| O15 | [ROS signing key migration guide](https://discourse.openrobotics.org/t/ros-signing-key-migration-guide/43937) | 目标机 ROS 2 Humble 安装 | 2025 年起 ROS APT 仓库与签名 key 改由 `ros2-apt-source` 包管理；旧手工 keyring 方式的 key 已过期 | 已确认事实，2026-08-23 核对 |
+| O16 | 鱼香ROS 一键安装脚本 `http://fishros.com/install`（`sha256 10cbba5e…315d`）及主体 `http://mirror.fishros.com/install/install.py`（`a5e7d6bc…9e63`）、`tools/{base,tool_install_ros,tool_config_system_source}.py` | 目标机 ROS 2 Humble 的实际安装路线 | 源码审计确认：**不执行** `apt upgrade`；但「更换系统源并清理第三方源」选项会 `sudo rm -rf /etc/apt/sources.list.d`；`AptUtils.checkapt()` 遇证书错误会永久写入 `99verify-peer.conf` 关闭 apt TLS 校验；主体经明文 HTTP 拉取后以 root 执行且无签名校验 | 已确认事实（仅限上述两个哈希对应的版本），2026-08-23 审计。脚本每次运行现拉，结论不自动延伸到后续版本 |
 
 **有依据的推断**：O06 针对 36.4.4 文档，不证明 2026-07-28 的 36.4.7 历史验证机使用 RT 内核。实际目标机当前仍是 R35；任何 RT 内核变更都应在完成平台迁移、建立版本匹配证据和回滚方案后另立任务，不可照抄 O06 执行。
 
@@ -133,11 +144,13 @@
 | 早期汇报 AKE60-8 vs 现场只知 AKE60 | 用户于 2026-08-03 明确确认基型 AKE60-8 | 基型冲突已解决；定制件号、固件和配置仍逐台确认 | 用户确认事实 |
 | 早期汇报 HI12 CANopen vs 标准交付 J1939 | L04 Rev 1.7.2 | 逐台识别交付固件，不自动转换 | 已确认事实 |
 | HiPNUC GitHub parser vs Rev 1.7.2 yaw/环境字段 | L04 字段表优先，G15 仅参考 | 为交付固件建立 golden frame；冲突上报供应商 | 有依据的推断 |
-| AK2.0/L11 标准帧 MIT vs AK3.0 V3.2 扩展帧力控 | L07 明确列出 AKE60-8 且版本更新 | 当前 codec 采用 L07；标准帧只作为 legacy 独立 profile | 资料事实 + 规划决定 |
-| 旧手册 `0x29` 最高 500 Hz vs V3.2 最高 2000 Hz | L07 是更新且明确覆盖 AKE60-8 的版本 | 协议配置范围改为 1–2000 Hz；500 Hz 作为项目基线而非手册上限 | 资料事实 + 规划决定 |
+| L02/L11 标准帧 MIT vs AK3.0 V3.2 扩展帧力控 | 用户确认 L02 的 CAN 协议/参数适用于当前电机；L07 是另一代补充资料 | 当前分别实现 L02 servo-extended 与 L02 MIT-standard，先做前者；AK V3 profile 保留为独立补充，不用版本号自动覆盖用户适用性证据 | 用户确认事实 + 规划决定 |
+| L02 `0x29` 最高 500 Hz vs V3.2 最高 2000 Hz | 两者属于不同资料/profile 范围；用户确认 L02 当前适用 | L02 当前 profile 上限保持 500 Hz；AK V3 profile 若以后被逐台证明适用，再独立使用 1–2000 Hz/`0x2A`，不得跨代覆盖 | 用户确认事实 + 规划决定 |
 | motor-control-sdk 扩展帧 force vs 旧规划所称冲突 | L07 证明 AK3.0 本就采用扩展帧 force-control | 撤销“帧类型冲突”结论；SDK 仍因 WIP/硬编码/无实机证据而仅参考 | 有依据的推断 |
 | NVIDIA 36.4.4 RT 文档 vs 历史验证机 36.4.7 | E01/O06 | 不安装；先找匹配版本并建立回滚 | 有依据的推断 |
-| 早期验证机已是 R36/Humble vs 实际目标机仍是 R35/Noetic | E01/E04 | 保留 E01 为历史旁证；FND-004A 绑定 E04 指向的实际目标机，按已选择的 JetPack 6.2.1/Ubuntu 22.04 刷机主机路线先完成平台准备 | 已确认事实 + 规划决定 |
+| 早期验证机已是 R36/Humble vs 实际目标机仍是 R35/Noetic | E01/E04 | **已解决（2026-08-23）**：实际目标机完成迁移（JetPack 6.2 / Ubuntu 22.04.5 / Humble），两机平台差异消除；E01 保留为历史旁证 | 已确认事实 |
+| L02 V1.0.18 编码器 14-bit vs AK V3.2 双编码器 21/15-bit | 两份手册针对不同代产品 | 定制双编码器实机以哪套规格为准列入供应商问题（05 §5.1 问题 3）；未确认前不得据任一值设计分辨率相关逻辑 | 资料矛盾，待确认 |
+| L02 MIT 示例归一化常量（T ±18 N·m 等） vs 第 42 页型号物理极限表 | 手册自身不一致（示例代码不按型号切换常量），且型号表不含 AKE60-8 | MIT codec 归一化常量必须来自逐台设备证据（05 §5.1 问题 2），禁止硬编码示例值 | 资料矛盾，安全相关 |
 | ros2_canopen docs 标题 0.0.1 vs Humble package 0.2.13 | O07/G06 package.xml | 依赖锁定 package/commit，不依赖网页标题判断版本 | 有依据的推断 |
 
 ## 9. 证据保全建议

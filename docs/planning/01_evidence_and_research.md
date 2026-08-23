@@ -4,7 +4,7 @@
 
 ## 1. 调研边界与方法
 
-**已确认事实**：初始规划完整阅读了主提示词、四份本地 PDF 和此前汇报稿；2026-08-03 又审查了供应商 `CubeMars/` 仓库中与 AKE60-8、AK3.0、AK54 驱动板和双编码器有关的资料及 demo。2026-08-08 对用户后来指定的实际目标机完成了新的只读 SSH 盘点；两次 Jetson 盘点均没有配置 CAN、设备、内核、服务或网络。[L01-L05][L07-L12][E01-E04]
+**已确认事实**：初始规划完整阅读了主提示词、四份本地 PDF 和此前汇报稿；2026-08-03 又审查了供应商 `CubeMars/` 仓库中与 AKE60-8、AK3.0、AK54 驱动板和双编码器有关的资料及 demo。2026-08-19 根据用户确认，补充复核了 `company/Panthera-HT_ROS2`、`company/hightorque_fdcan(2)` 和 AK2.0 V1.0.18 手册的适用边界。2026-08-08 对用户后来指定的实际目标机完成了新的只读 SSH 盘点；两次 Jetson 盘点均没有配置 CAN、设备、内核、服务或网络。[L01-L05][L07-L16][E01-E04]
 
 **历史事实**：截至 2026-07-28，工作区根目录虽然存在名为 `.git` 的目录，但 `git status` 返回“not a git repository”；`docs/planning/` 在当时尚不存在。该状态已由 FND-001 建仓替代，当前仓库状态以 Git 为准。旧的 `/home/jetson/UAM_ROS` 只作为只读构建经验参考，不是新架构模板，也未被修改。[E02][E03]
 
@@ -28,6 +28,7 @@
 | 标准 AKE60-8 的 Kt 为 `0.7382 N*m/A`、速度范围 `-40..40 rad/s`、扭矩范围 `-15..15 N*m`；手册把 `T = Kt * Iq` 中的 T 定义为输出端输出扭矩 | L07 第 37~38 页 | 资料事实 |
 | V3.2 称 AK3.0 servo 与力控使用无需切换，但两者 ID、payload 和 command claim 不同；实机固件未核对前，ACTIVE 期间仍固定一个命令 profile | L07 第 5、21、30~40 页；架构约束 | 资料事实 + 规划决定 |
 | `joint/effort` 可按标准 AKE60-8 参数建立候选映射，但必须先确认定制版仍使用相同 Kt、范围、方向和固件参数 | 标准资料与定制边界 | 有依据的推断 |
+| 用户确认 L02 V1.0.18 的 CAN 协议和参数适用于当前电机；伺服扩展帧与运控/MIT 标准帧均纳入目标，先做伺服扩展帧 | 2026-08-19 用户确认；L02 第 27~45 页 | 用户确认事实 + 规划决定 |
 
 ### 2.2 HI12
 
@@ -83,32 +84,34 @@
 
 | 项目 | 2026-08-08 只读结果 | 性质 |
 |---|---|---|
-| 模块与载板 | NVIDIA `P3767-0000 + P3768-0000` Orin NX 参考开发套件；约 15 GiB RAM | 已确认事实 |
-| 操作系统 | JetPack 5.1.5 / L4T 35.6.0 / Ubuntu 20.04.6 | 已确认事实 |
+| 模块与载板 | NVIDIA Orin NX 16GB 模组（`P3767-0000`）+ **HZHY HYAI-311UAV 第三方载板**（2026-08-23 实物照片核验，丝印 `HYAI-311UAV_O_V12`；设备树报 `p3768-0000+p3767-0000` 是厂商基于 devkit 配置构建镜像的产物，早期"参考开发套件"记录据此更正）；约 15 GiB RAM | 已确认事实（实物核验） |
+| 操作系统 | JetPack 5.1.4 / L4T 35.6.0 / Ubuntu 20.04.6（2026-08-23 复核更正：L4T 35.6.0 对应 JetPack 5.1.4，早期记录的 5.1.5 有误） | 已确认事实 |
 | 内核 | `5.10.216-tegra`，配置包含 `CONFIG_PREEMPT=y`；不等于 PREEMPT_RT | 已确认事实 |
 | ROS | ROS 1 Noetic；没有 `/opt/ros/humble`，没有 `colcon` | 已确认事实 |
 | 存储 | 128 GB NVMe 原生 ext4 rootfs；约 52 GB 已用、59 GB 可用 | 已确认事实 |
 | Docker | Docker daemon 与 NVIDIA Container Toolkit 已安装；目标用户当时不能直接访问 Docker socket | 已确认事实 |
 | 实时权限 | 登录环境 `rtprio=0`，memlock 为 64 KiB | 已确认事实 |
 
-**已确认事实**：该实际目标机不满足 [FND-004A](../development/jetson_arm64_smoke_test.md) 已定义的原生 Ubuntu 22.04 / ROS 2 Humble 前置条件，因此尚未执行 clean clone、rosdep 或五包 build/test；没有启用 CAN、操作设备或修改系统。[E04]
+**已确认事实（历史快照，已被 2026-08-23 迁移取代）**：上表为迁移前状态。该机当时不满足 FND-004A 的 Jammy/Humble 前置条件。[E04]
 
-**资料事实**：JetPack 6.2.1 / Jetson Linux 36.4.4 是支持该 Orin NX/参考载板组合的 production release，提供 Ubuntu 22.04 rootfs 和 Linux 5.15。R35 到 R36 迁移涉及 Jetson BSP、QSPI/UEFI、分区和 rootfs，不能用通用 `do-release-upgrade` 替代 NVIDIA 支持的刷写/镜像升级路径。[O08-O13]
+**已确认事实（2026-08-23 迁移完成）**：目标机已使用 HZHY 厂商镜像 `flash-300BV12_311UAV_ONX_Jp6.2_SC` 经 `l4t_initrd_flash.sh` 刷写为 **JetPack 6.2 / L4T R36.4.3 / Ubuntu 22.04.5 / 内核 5.15.148-tegra**（rootfs NVMe 全盘 116 GiB），首启验收通过；刷机后加固（`nvidia-l4t-*` 全部 apt-mark hold、禁用无人值守升级）与 ROS 2 Humble（`ros-humble-ros-base` + rosdepc，经审计的鱼香ROS 路线）已完成。**FND-004A 的平台前置条件已满足**，烟测本身尚未执行。过程记录见[升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md) §12.0/§14.0。迁移过程未启用 CAN、未操作设备。
 
-**规划决定**：实际目标机选择迁移到 JetPack 6.2.1，并使用 Ubuntu 22.04 电脑运行 SDK Manager Direct Flash；执行前仍须确认该主机为受支持的 x86_64 环境、验证外部备份并另行取得破坏性系统变更授权。执行草案见 [Orin NX JetPack 6 升级评估与教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)。
+**资料事实**：JetPack 6.2.x（2026-08-09 核对时为 6.2.1 / Jetson Linux 36.4.4；2026-08-23 复核已有 6.2.2 / 36.5.0 与 6.2.3 / 36.5.2）是支持该 Orin NX/参考载板组合的 production release 系列，提供 Ubuntu 22.04 rootfs 和 Linux 5.15。R35 到 R36 迁移涉及 Jetson BSP、QSPI/UEFI、分区和 rootfs，不能用通用 `do-release-upgrade` 替代 NVIDIA 支持的刷写/镜像升级路径。[O08-O13]
+
+**规划决定（已执行完毕，2026-08-23）**：迁移目标 JetPack 6.2.x、禁止 JetPack 7.x 的决定已按计划执行。实际路线为 HZHY 适配镜像 + `l4t_initrd_flash.sh`（早先设想的 SDK Manager Direct Flash 因载板为第三方 HYAI-311UAV 而被否定，见升级教程 §2.2 的载板更正）；备份经双介质哈希验证后授权刷写。完整执行记录与结果见[升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)。
 
 ## 4. 事实、推断与未知项基线
 
 | 主题 | 当前结论 | 确认/验证方式 | 负责人和期限 | 性质 |
 |---|---|---|---|---|
 | 电机身份 | 基型 AKE60-8 已确认；定制件号、每台序列号、驱动板和固件仍未知 | 两台实机的连接/版本截图与只读参数导出 | 项目负责人 + B，W1D2 | 部分确认 |
-| 电机协议 | AK3.0 V3.2 servo 与力控协议已明确；两台实机是否属于该固件代际未验证 | 读取固件版本、CAN 配置并与 V3.2 golden frame 交叉验证 | 项目负责人，W1D2 | 部分确认 |
+| 电机协议 | L02 V1.0.18 的伺服扩展帧与运控/MIT 标准帧是当前实现目标；L02 适用性由用户确认，但每台实际 profile/固件/ID 仍未知 | 读取固件版本、CAN 配置并与两套 L02 golden frame 交叉验证；AK3.0 V3.2 作为补充参考而非强制假设 | 项目负责人，G0 | 部分确认 |
 | 输出力矩 | 标准 AKE60-8 有输出端 Kt/范围候选；定制版是否不变以及物理精度未知 | 对比 `.AppParams`/`.McParams`、供应商确认；需要时做外部计量 | 项目负责人 + A，G3 前 | 部分确认 |
-| 电机失联行为 | 未知是否有 CAN 命令看门狗 | 固件资料；低能量台架断包测试 | 项目负责人 + B，G3 后 | 待确认项 |
+| 电机失联行为 | L02 V1.0.18 第 18 页证实存在"失控保护"（失控时间 ms + 失控刹车电流 A，上位机配置）；出厂默认值与启用状态未知，截图字段为 0 疑似默认关闭 | 逐台读取"应用功能"页参数并截图；低能量台架断包测试验证实际行为 | 项目负责人 + B，G0 读取 / G3 验证 | 资料部分解决 |
 | 两台 HI12 | 使用 CAN 已知；准确型号/固件/协议/ID/位速率未知 | 读取 PNAME、APP_VER；逐台只读抓包；断电持久化复核 | B，W1D2 | 待确认项 |
 | HI12 同步 | 手册有 SYNC_IN/PPS；现场引脚/固件支持未知 | 订购码、引脚、配置读取；逻辑分析仪测量 | B + A，W2 | 待确认项 |
-| 总线拓扑 | 当前只有 `can0`；默认设备位速率可能不同 | 第二适配器验收或同速兼容性证明；拓扑/终端检查 | B，W1D3 | 待确认项 |
-| 控制频率 | 当前两电机正常目标为 500 Hz；100~200 Hz 是 bring-up 档；代码支持 1 kHz 测试 | 周期直方图、command-to-wire、单 `can0` 最坏负载、闭环性能和长稳 | 项目负责人，W3~W4 | 有依据的推断 |
+| 总线拓扑 | 用户确认（2026-08-23）电机将接入高擎通用盒子（7路CAN功率板）的 XT30(2+2) 通道；两台 HI12 接盒子通道或独立适配器均为候选。盒子通道=7×`/dev/ttyACM` 已由资料证实；**每通道 nominal 波特率固件固定且数值未知**，与电机 1 Mbps / HI12 500 kbps 的兼容性是当前最关键拓扑未知项 | 高擎书面答复（05 §5.2）+ 实物板卡/固件 G0 核对 + 抓包 | B，G0/G1 | 部分收口，关键项待供应商答复 |
+| 控制频率 | 当前 L02 两电机正常目标为最高 500 Hz；100~200 Hz 是 bring-up 档；代码支持 1 kHz 主机循环测试 | 周期直方图、command-to-wire、单物理通道最坏负载、闭环性能和长稳 | 项目负责人，W3~W4 | 有依据的推断 |
 | PREEMPT_RT | 当前未证实 | `uname`、内核配置、调度基准；需要时另立变更 | 项目负责人，W3 决策 | 待确认项 |
 | STM32 传感器 | 数量、信号形式、采样率、模拟前端未知 | 传感器 BOM、量程/带宽/接口评审 | B + A，MVP 后 | 待确认项 |
 
@@ -154,7 +157,18 @@
 | [tmotor-ak-actuators-driver][G13] | MIT；2022-10-11 | 非 ros2_control；ARM64 matrix 缺失；小型 MIT 编解码，主要面向 AK10-9 | 型号覆盖窄、维护停滞、无本项目固件证据 | 参考；成本低但型号债务高 | 有依据的推断 |
 | [cubemars_servo_can][G14] | MIT；2026-07-27 | Python/SocketCAN，非确定性 ros2_control；无正式 ARM64 matrix；mock 测试但无 AKE60 确证 | Python 和动态对象不适合确定性 C++ 路径 | 参考；只作 golden 对照，运行集成成本为零 | 有依据的推断 |
 
-**有依据的推断**：不直接采用任何现成 CubeMars 驱动作为核心。项目应以 AK3.0 V3.2 为当前主要资料源，分别实现扩展帧 servo 与 force-control codec；旧标准帧 MIT 必须作为独立 legacy codec。每个 codec 以手册报文、至少一个外部实现和后续实机帧交叉测试，设备能力和缩放按准确固件配置，不继承第三方库中的型号常量。
+**规划决定（2026-08-19）**：不直接采用任何现成 CubeMars/HighTorque 驱动作为核心。电机协议以用户确认适用的 L02 V1.0.18 为当前首要实现依据，先实现伺服 29 位扩展帧，再实现运控/MIT 11 位标准帧；两套 codec/session 共享 canonical 接口但不共享会混淆位域的打包逻辑。AK3.0 V3.2、ROS2 SDK 和其他示例只作交叉参考，不能覆盖 L02 的适用性确认。HighTorque FDCAN 示例只作为 USB CDC raw-CAN transport 参考；每个 backend、codec 和 session 均需以离线 golden/negative/boundary 测试和后续逐台证据闭合，设备能力和缩放按准确配置，不继承第三方库中的型号常量。
+
+**资料事实与边界**：`hightorque_fdcan` 的 `MODE_FDCAN_PASS (0x12)` 记录了 CAN ID、标准/扩展标志、Classic/FD/BRS 标志、长度和 payload，并通过 USB CDC CRC 帧批量收发；它不是电机协议实现。其示例构造函数会打开 `/dev/ttyACM*`、查询板卡版本并在失败时退出，因此只能提炼受控 transport contract，不能原样成为生产 `BusRuntime`。
+
+**资料事实（2026-08-23，`7路CAN主控盒子资料` 与 fdcan 源码交叉审查，SDK 日志截图人工复核）**——通信板此前的多项未知已收口：
+
+- 目标硬件为高擎"通用盒子"（7路CAN功率板，`company/4.png` 实物照片；主控盒子 = 该板 + RK3588 主机装壳）。XT60(2+4) 48V 输入，**7 个 XT30(2+2) 电源+CAN 输出通道**，Type-C USB，板载 YESENSE IMU 模块。
+- **7 路通道枚举为 7 个独立 `/dev/ttyACM0~6` CDC 设备**（SDK 日志"Serial Port0~6"截图证实），USB VID/PID `0xCAF1:0xFFFF`，CDC 串口 4 Mbps；每通道一个串口设备，与"每物理通道一个 `BusRuntime` 写者"（ADR-002）天然映射。
+- USB 协议：帧头 `0xF7` + cmd + len + CRC8(头) + CRC16(数据体)，命令码 0x00~0x12；权威定义只在 `serial_struct.h` 源码——**说明书协议章节为空占位**，本地 PDF 是飞书 wiki 导出快照（`00 文档说明.txt` 明示会过时）。
+- 协议**定义了**报错命令 `MODE_FDCAN_MOTOR_STATE (0x0F)` / `0x11`，但示例库未实现解析（能力可自行实现，语义需向供应商索取）；协议**无时间戳字段**；**无设置 CAN 波特率的命令**——总线速率由板卡固件固定，说明书唯一表述为"FDCAN波特率：5Mbps"（应为数据段；仲裁段速率未记载）。每通道 nominal 速率与第三方 Classic CAN 设备（电机 1 Mbps、HI12 默认 500 kbps）兼容性成为当前最关键的通信板未知项，已列入 [05 §5.2](05_decisions_and_open_questions.md) 问题清单。
+- 示例库要求板卡固件 ≥`4.8.8`，而 SDK 文档截图显示 v4.6 板——版本体系混乱，交付板实际固件属 G0 取证项。
+- 盒子 SDK（ROS1/python）面向高擎自家电机（型号 4538/4438 等，机器人 "mini pai"），无任何 CubeMars/L02 型号，仅 raw 透传与本项目相关；`hightorque_fdcan` 自有代码**无 LICENSE 与版权头**（内嵌 wjwwood/serial 为 MIT）。
 
 ## 8. HI12、STM32 与通用机器人参考
 

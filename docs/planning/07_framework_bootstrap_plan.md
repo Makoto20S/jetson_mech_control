@@ -1,7 +1,7 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
-> 最近收敛：2026-08-07（活动文档、历史归档与 FND-004A 后治理切换）
+> 最近收敛：2026-08-19（纳入 L02 双 profile 与 HighTorque USB-CDC transport 规划；活动文档、历史归档与 FND-004A 后治理切换仍有效）
 > 当前实施入口：本文件
 > 当前状态：FND-000～FND-004 已完成；下一步是在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
@@ -26,13 +26,14 @@
 | 项目 | 当前状态 | 对启动工作的含义 |
 |---|---|---|
 | 总体架构 | 已确定“纯 C++ 核心 + 薄 ros2_control 适配层” | 可以开始编码核心边界 |
-| CubeMars 资料 | AK3.0 V3.2 协议足以做离线 codec 设计；实机配置仍缺 | 不阻塞接口和模拟器；阻塞真实激活 |
+| 电机协议资料 | 用户确认 L02 V1.0.18 CAN 协议/参数适用于当前电机；目标是伺服扩展帧 + 运控/MIT 标准帧，先实现扩展帧 | 不阻塞接口、golden vectors 和模拟器；阻塞真实激活 |
+| HighTorque 资料 | `hightorque_fdcan` 提供 USB CDC raw CAN/CAN-FD 透传示例 | 只提炼 transport contract 和离线 framing/parser；不原样使用会打开串口/`exit(1)` 的 `canport` |
 | HI12 | 通用 J1939/CANopen 资料存在，交付固件未知 | Foundation 只保留 sensor capability，不选现场 profile |
 | 控制频率 | 当前两电机正常目标 500 Hz；框架支持 1 kHz 测试 | 测试和配置从第一天支持多速率，不承诺真实硬件性能 |
 | Git | `main` 已建立并推送；FND-000～FND-004 已完成 | FND-004A 前继续完成 smoke 准备；通过后按 D5 打里程碑 tag 并保护 `main` |
 | 供应商资料 | `CubeMars/` 是独立嵌套 Git 仓库 | 主仓库必须忽略它，避免误提交为 gitlink 或复制供应商资产 |
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context/ADR 检查脚本已存在 | 先完成 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
-| 目标平台 | Jetson Ubuntu 22.04 / ROS 2 Humble；当前编辑工作区是 Windows | 构建与 vcan 测试必须在 Ubuntu 22.04 环境执行，Windows 不作为 ROS 运行目标 |
+| 目标平台 | 目标 Jetson 已于 2026-08-23 迁移为 Ubuntu 22.04.5 / JetPack 6.2 并装好 ROS 2 Humble；当前主开发工作区为 Ubuntu 22.04 x86_64 | 构建与 vcan 测试在 Ubuntu 22.04 环境执行；ARM64 结论只来自目标 Jetson |
 
 `03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件取代它作为当前 Foundation 阶段的具体执行顺序。
 
@@ -63,7 +64,7 @@ C++ demo controller
 - 纯 C++17 核心库，不依赖 ROS 消息、rclcpp 或 pluginlib；
 - 可替换 transport、clock、codec/session 和 device registry 边界；
 - fake transport + virtual clock，支持无 sleep 的确定性单元测试；
-- Linux SocketCAN/vcan 集成路径；
+- Linux SocketCAN/vcan 集成路径，以及可替换的 HighTorque USB-CDC raw-frame transport backend；
 - 一个配置驱动的复合 ros2_control `SystemInterface`；
 - 一个只用于模拟的 reference motor/device profile；
 - 一个可配置、有界、带 slew 和 TTL 的最小 C++ demo controller；
@@ -76,7 +77,7 @@ C++ demo controller
 - 把标准 AKE60-8 参数硬编码为定制实机事实；
 - 最终 PID、滑模、阻抗、学习控制或人体实验控制器；
 - PREEMPT_RT 安装、Jetson 系统改动或真实 CAN 配置；
-- 六电机实机集成、自动固件更新、自动协议探测；
+- 六电机实机集成、自动固件更新、自动协议探测或 ACTIVE 期间 profile 切换；
 - Web UI、数据库、云端服务或复杂微服务拆分。
 
 ## 4. 依赖方向和模块边界
@@ -91,6 +92,7 @@ flowchart TB
     HIP[mech_protocol_hipnuc - post Foundation] --> CORE
     CORE --> TRANSPORT[transport interface]
     SOCKET[SocketCAN implementation] --> TRANSPORT
+    HTCDC[HighTorque USB CDC implementation] --> TRANSPORT
     FAKE[fake/vcan transport] --> TRANSPORT
 ```
 
@@ -101,7 +103,8 @@ flowchart TB
 | `mech_hardware_ros2_control` | lifecycle、接口导出、claim、非阻塞 `read/write`、core 配置映射 | 不编解码厂商帧；不在 `read/write` 阻塞 socket |
 | `mech_controllers` | 最小有界 demo controller；后续控制器模板 | 不打开 CAN；不分支判断电机型号 |
 | `mech_bringup` | xacro/URDF、launch、模拟部署配置、controller 配置 | 不保存秘密；不把未知实机参数补成默认值 |
-| vendor protocol packages | Foundation 后实现纯 codec + device session + golden frames | 不拥有 SocketCAN；不得修改上层控制器以适配品牌 |
+| transport backends | SocketCAN 与注入式 HighTorque USB-CDC 实现同一 `RawCanFrame` 契约 | 不含电机/HI12 位域；不在构造函数中退出进程 |
+| vendor protocol packages | Foundation 后实现纯 codec + device session + golden frames | 不拥有 transport/串口/socket；不得修改上层控制器以适配品牌 |
 
 ### 4.1 “薄 SystemInterface”的准确含义
 
@@ -184,7 +187,8 @@ bash tools/ci/build_workspace.sh
 3. 实现最新状态快照、command generation/deadline 和有界 command slot；
 4. 实现单写者 BusRuntime 的 start/stop/RX/TX 基本状态机；
 5. 完成 `ros2_socketcan` 与直接 Linux RAW SocketCAN 的复用对比，形成 ADR；
-6. 用虚拟时间跑 drop/duplicate/reorder/stale/queue-full/bus-off 状态测试。
+6. 对 `hightorque_fdcan` 做独立 transport spike：CDC header/CRC、`MODE_FDCAN_PASS` 批量帧、标准/扩展/Classic/FD/BRS 标志、长度边界、版本/VID-PID/端口身份、队列/错误/时间戳和 bitrate 配置能力；只用 fake serial/golden vectors，不打开真实 `/dev/ttyACM*`；
+7. 用虚拟时间跑 drop/duplicate/reorder/stale/queue-full/bus-off 状态测试。
 
 **Week 2 出口**：无 ROS 的测试可确定性重放相同事件并产生相同状态/计数；无 sleep 测试不依赖真实 CAN。
 
@@ -225,16 +229,17 @@ bash tools/ci/build_workspace.sh
 | FND-007 | 实现 fake clock 和 fake transport | FND-005 | deterministic test doubles | 无 sleep 控制时间和帧顺序 |
 | FND-008 | 实现 FrameRouter 和 filter 校验 | FND-006/007 | route registry/tests | 重叠、标准/扩展和 fan-out 测试通过 |
 | FND-009 | 实现 snapshot、lease 和 BusRuntime | FND-007/008 | 单写者 runtime/tests | stale/TTL/queue/fault 状态可重复验证 |
-| RSP-001 | 评估 SocketCAN 代码复用 | FND-004/005 | transport ADR + PoC | license/API/thread/time/error/ARM64 六项有证据 |
-| FND-010 | 实现选定 SocketCAN transport | FND-009/RSP-001 | non-blocking adapter + vcan tests | filter、error frame、timestamp、queue 结果通过 |
+| RSP-001 | 评估多 transport backend（SocketCAN 与 HighTorque USB-CDC） | FND-004/005 | transport ADR + 两个离线 PoC | backend 的 license/API/thread/time/error/bitrate/ARM64 六项有证据；无硬件副作用 |
+| FND-010 | 实现选定 Linux SocketCAN transport | FND-009/RSP-001 | non-blocking adapter + vcan tests | filter、error frame、timestamp、queue 结果通过 |
+| RSP-002 | 实现/评估 HighTorque USB-CDC raw-frame transport | FND-009/RSP-001 | injected serial + CDC golden/negative tests | CRC、批量帧、标准/扩展/Classic/FD/BRS、断连/队列/版本失败语义通过；不直接依赖 `canport` |
 | FND-011 | 实现 loopback codec 和模拟设备 | FND-009 | reference session/simulator | 命令产生可预测反馈和故障 |
 | FND-012 | 实现薄复合 SystemInterface | FND-006/009/011 | lifecycle plugin/tests | `read/write` 非阻塞且无厂商字段 |
 | FND-013 | 实现最小 C++ demo controller | FND-012 | controller plugin/tests | 可配置目标、限幅、slew、TTL 和回零通过 |
-| FND-014 | 完整 lifecycle/switch/fault 测试 | FND-010/012/013 | integration suite | 重复生命周期和 STRICT switch 指标通过 |
+| FND-014 | 完整 lifecycle/switch/fault 测试 | FND-010/RSP-002/012/013 | integration suite | 重复生命周期、STRICT switch、backend capability/断连指标通过 |
 | FND-015 | 性能、ARM64 和 Foundation RC | FND-014 | benchmark/report/tag candidate | Definition of Done 全部有实际证据 |
 | INT-001 | 冻结新 device adapter 模板 | FND-015 | template/checklist/example | 新 adapter 无需修改 controller/core 公共语义 |
 
-严格执行顺序不是“先写 CubeMars driver”，而是 `FND-000 -> FND-001/002 -> FND-003 -> FND-004 -> FND-004A -> core -> simulation -> ros2_control -> adapter template`。
+严格执行顺序不是“先写 CubeMars driver”。共享主线仍按 `FND-000 -> FND-001/002 -> FND-003 -> FND-004 -> FND-004A -> FND-005...015 -> INT-001`；Foundation 内含 simulation 与 transport spikes。`INT-001` 冻结 adapter 模板后，依次实现 L02 servo codec/session，再实现 L02 MIT codec/session；真实设备始终受 G0-G3 约束。
 
 ### 8.1 FND-004 完成结果
 
@@ -247,7 +252,7 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 | [ADR-003](../adr/ADR-003-composite-system-interface.md) | Accepted | Foundation/MVP 复合 `SystemInterface` 的生命周期与拆分触发条件 |
 | [ADR-004](../adr/ADR-004-fixed-protocol-profile.md) | Accepted | 协议代际和 active command profile 在 ACTIVE 期间不可自动猜测或混发 |
 | [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) | Accepted | 单调时钟、源时间、到达时间和 freshness/TTL 的语义 |
-| [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 当前单 `can0` 只是等待逐台配置和总线证据的条件式 profile；架构保留双总线 |
+| [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 当前单物理通道及其 backend 只是等待逐台配置、能力和总线证据的条件式 profile；架构保留双总线 |
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort` 的物理语义闸门，框架 demo 与力矩精度分开验收 |
 
 七份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
@@ -268,7 +273,7 @@ FND-004 后的独立文档收敛已执行：
 
 ### 9.1 CAN frame 与 transport
 
-`CanFrame`/等价类型至少表达：logical bus、11/29-bit ID、Classic/FD、DLC、固定容量 payload、RX/TX 方向、kernel timestamp、host monotonic arrival 和错误标志。类型自身拒绝非法 ID/DLC，不把标准/扩展信息藏在 ID 高位魔数中。
+`RawCanFrame`/等价类型至少表达：logical bus、11/29-bit ID、Classic/FD、DLC、固定容量 payload、RX/TX 方向、transport/source timestamp（若 backend 提供）、host monotonic arrival、时间戳 capability 和错误标志。类型自身拒绝非法 ID/DLC，不把标准/扩展信息藏在 ID 高位魔数中，也不把 CDC header/CRC 混进设备 payload。
 
 Transport 契约至少支持：
 
@@ -277,7 +282,7 @@ Transport 契约至少支持：
 - filter 和 error-mask 配置；
 - RX/TX/overflow/drop/error/bus state 统计；
 - 可选 kernel/hardware timestamp capability；
-- fake 和 SocketCAN 使用相同上层契约。
+- fake、SocketCAN 和 HighTorque USB-CDC 使用相同上层契约；backend 不具备的 filter/timestamp/error 能力必须显式报告，不能伪造。
 
 Transport 不负责协议缩放、设备生命周期、重发历史命令或 ROS 发布。
 
@@ -287,7 +292,7 @@ Transport 不负责协议缩放、设备生命周期、重发历史命令或 ROS
 - DeviceSession 持有设备状态：配置 profile、反馈聚合、新鲜度、序号、错误、命令 capability 和 neutral 语义。
 - 实例在 configure 阶段由 registry/factory 创建；ACTIVE 期间不动态发现类型。
 - 周期路径使用预分配固定容量对象；初始化阶段可以进行配置解析和分配。
-- vendor codec 的 golden frame 必须能脱离 ROS、SocketCAN 和真实硬件运行。
+- vendor codec 的 golden frame 必须能脱离 ROS、SocketCAN、USB CDC 和真实硬件运行。
 
 ### 9.3 Canonical state/command
 
@@ -312,7 +317,7 @@ Canonical state 至少保存 value、valid、quality、source time、host RX tim
 
 1. `device profile`：协议代际、capability、单位映射和允许范围；
 2. `robot config`：实例、关节/传感器命名、方向、零位和约束；
-3. `deployment`：logical bus 到 `can0/can1/vcan/fake` 的映射、位速率、频率和线程策略。
+3. `deployment`：logical bus 到 `can0/can1/vcan/fake` 或 HighTorque USB CDC 设备/通道的映射、位速率、频率、transport capability 和线程策略。
 
 模拟 profile 可以有完整默认值；真实设备关键字段缺失时 configure 必须失败。配置必须带 `schema_version`，升级通过显式迁移，不静默改变语义。
 
@@ -332,22 +337,24 @@ Canonical state 至少保存 value、valid、quality、source time、host RX tim
 
 ### 10.2 必须先做 spike 再决定
 
-`ros2_socketcan` 只评估其底层 sender/receiver API 或实现思路，不采用“独立 ROS 节点 + DDS”作为电机闭环。RSP-001 必须回答：
+RSP-001 同时评估 SocketCAN 与 HighTorque USB-CDC 两类 backend；`ros2_socketcan` 只评估其底层 sender/receiver API 或实现思路，不采用“独立 ROS 节点 + DDS”作为电机闭环。它必须回答：
 
 1. Humble 分支实际许可证和依赖能否进入私有/未来开源项目；
 2. API 是否支持 non-blocking、精确 filter、error frame 和 timestamp；
 3. 线程由谁拥有，能否嵌入单一 `BusRuntime`；
 4. ACTIVE 路径是否发生动态分配、日志或无界阻塞；
 5. Ubuntu 22.04/Humble/ARM64 能否构建；
-6. wrapper PoC 是否比直接 Linux RAW socket 更小、更可测。
+6. wrapper PoC 是否比直接 Linux RAW socket 更小、更可测；USB-CDC backend 还必须回答板卡/固件矩阵、稳定端口身份、nominal/data bitrate 所有权、CDC CRC/批量帧边界、断连、时间戳和错误语义。
 
-只有六项通过才封装使用；否则实现最小 Linux SocketCAN RAII adapter，并继续用上游项目做行为对照。
+SocketCAN 只有前六项通过才封装使用，否则实现最小 Linux RAW socket RAII adapter。HighTorque backend 只能依据 L16 重新实现可注入 transport；在独立许可证、准确板卡/固件和缺失能力闭合前，不复制或直接依赖原 `canport` 类。
 
 ### 10.3 设备协议项目只作参考
 
 - `cubemars_hardware`：参考 ros2_control 映射和硬件经验；型号/生命周期/许可边界不足以直接依赖；
 - `motor-control-sdk`：参考 AK V3 force-control 字段，不能继承硬编码 AKE60-8 参数或 C++23/Bazel 体系；
-- `mini-cheetah-tmotor-can`、`tmotor-ak-actuators-driver`：只作 legacy MIT golden frame 旁证；
+- `mini-cheetah-tmotor-can`、`tmotor-ak-actuators-driver`：只作 MIT golden frame 交叉旁证，当前实现仍以用户确认适用的 L02 为准；
+- `Panthera-HT_ROS2`：参考 ros2_control/配置组织和 HighTorque 厂家电机语义，不作为 core 或 HI12 实现；
+- `hightorque_fdcan`：只参考 USB CDC raw-frame protocol/behavior；不复用构造即开设备、进程退出和自有线程所有权；
 - `cubemars_servo_can`：只作 servo 报文对照，不进入 C++ RT 路径；
 - `hipnuc/products`：只作 HI12 字段/DBC 对照，交付固件和手册冲突必须逐项解决。
 
@@ -370,6 +377,7 @@ Canonical state 至少保存 value、valid、quality、source time、host RX tim
 | Property/fuzz | DLC/ID/字节边界、随机无效帧、parser 不崩溃 | 无 |
 | Deterministic simulation | virtual clock、drop/duplicate/reorder/stale/fault | 无 |
 | vcan integration | SocketCAN filter、fan-out、error/queue、进程内 BusRuntime | Linux vcan |
+| USB-CDC contract | CDC header/CRC、批量 raw frames、标准/扩展、Classic/FD/BRS、malformed length、断连和 queue-full | fake/injected serial，无真实设备 |
 | ros2_control integration | lifecycle、interface claim、controller switch、TTL | fake/vcan |
 | Performance | 500 Hz/1 kHz 配置的 loop dt、command-to-transport、state age | 无真实设备 |
 | ARM64 | clean build、unit、模拟 smoke | Jetson/ARM64，无 CAN |
@@ -388,7 +396,7 @@ Canonical state 至少保存 value、valid、quality、source time、host RX tim
 - lifecycle configure/activate/deactivate/cleanup 连续 100 次无失败或资源增长；
 - STRICT controller switch 100 次不越过配置 slew/limit；
 - drop/duplicate/reorder/stale/queue-full/bus fault 均有明确计数和状态转移；
-- vcan round-trip 和 SocketCAN filter/error/timestamp smoke 通过；
+- vcan round-trip 和 SocketCAN filter/error/timestamp smoke 通过；HighTorque CDC framing/CRC/批量/断连离线测试通过，缺失 capability 明确失败；
 - 500 Hz 模拟 nominal/stress 30 min 无 command backlog、状态伪刷新或未解释 drop；
 - 1 kHz 能配置并记录实际表现，但不要求优于 500 Hz，也不宣称真实硬件可用；
 - ASan/UBSan、ARM64 build、Markdown/ADR/schema 检查通过；
@@ -401,7 +409,7 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 | 工作流 | 主要职责 | 不能修改的边界 | 交付 |
 |---|---|---|---|
 | Core/ros2_control owner | 维护 core、SystemInterface、CI 和 schema | 不加入厂商 if/else | API review、release、集成测试 |
-| CubeMars owner | AK V3 servo/force codec、session、golden、sim | 不直接打开 socket，不改 controller | `mech_protocol_cubemars` + evidence |
+| CubeMars owner | L02 servo-extended（先）、L02 MIT-standard（后）的 codec/session/golden/sim；AK V3 补充 profile | 不直接打开 socket，不改 controller，不混发 profile | `mech_protocol_cubemars` + evidence |
 | HI12 owner | 识别交付协议、J1939/CANopen codec、坐标/时间/质量 | 不用 host now 替代 sample time | `mech_protocol_hipnuc` + evidence |
 | Integration/HIL owner | CAN 拓扑、配置、抓包、性能和故障试验 | 不跳过 G0~G3，不改协议常量 | deployment profile、原始证据和验收报告 |
 
@@ -430,7 +438,7 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 |---|---|
 | 没有实机资料导致停工 | 只把真实 profile 激活设为阻塞，Foundation 使用 reference profile |
 | 过度抽象 | 每个抽象必须由 fake + 至少一个未来 vendor 用例验证；不提前创建空包 |
-| 重写成熟基础设施 | ros2_control/ament/gtest/can-utils 直接复用；SocketCAN 先 spike |
+| 重写成熟基础设施 | ros2_control/ament/gtest/can-utils 直接复用；SocketCAN 与 HighTorque CDC 都先 spike |
 | 直接复制不匹配 driver | 第三方设备代码只作参考，手册/golden/evidence 优先 |
 | Windows 与目标环境差异 | build/test 事实只来自 Ubuntu 22.04/Humble 和 ARM64 job |
 | 根仓库误包含供应商资产 | `.gitignore` 和 asset manifest 先于首次 `git add` |
@@ -452,11 +460,11 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 当前下一步不是写 CAN 协议，也不是连接硬件，而是：
 
 1. FND-000～FND-004 与 post-FND-004 文档收敛已完成；
-2. 实际目标机的 2026-08-08 快照仍为 JetPack 5.1.5 / Ubuntu 20.04 / ROS 1 Noetic；用户已选择 JetPack 6.2.1 迁移，并确认使用 Ubuntu 22.04 电脑作为 SDK Manager 刷机主机。按 [升级评估与教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)先验证主机为受支持的 x86_64 环境、完成备份并另行取得破坏性系统变更授权；
-3. 平台准备完成后执行 FND-004A：在 Jetson ARM64 原生环境从 clean clone 执行无 CAN/无设备烟测并记录版本与结果；
+2. ~~目标机平台迁移~~ **已于 2026-08-23 完成**：HZHY 适配镜像 + `l4t_initrd_flash` 刷写 JetPack 6.2 / L4T R36.4.3 / Ubuntu 22.04.5，首启验收、`nvidia-l4t-*` 锁定加固与 ROS 2 Humble 安装完毕（记录见[升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md) §12.0/§14.0）；
+3. **当前下一步是执行 FND-004A**：在 Jetson ARM64 原生环境从 clean clone 执行无 CAN/无设备烟测并记录版本与结果；
 4. 若发现问题，在 `main` 修复后对新 commit 重跑完整 FND-004A；旧烟测结果不得沿用；
 5. 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，推送 tag 后启用 `main` protection 和 required checks；
 6. FND-005 起从最新受保护 `main` 创建短生命周期任务分支并通过 PR 合并；仓库所有者使用同仓分支，外部成员可 fork；
 7. 从 FND-005 开始写第一行业务核心代码，不提前实现真实厂商 adapter。
 
-当前已确认迁移路线和 Ubuntu 22.04 刷机主机，但仍未授权启用 CAN、发送电机命令、修改 Jetson 系统、执行刷机或安装真实设备依赖。平台准备完成后，FND-004A 需要在 Jetson 上执行依赖解析和用户态 build/test，但不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，应另行取得明确授权。
+平台迁移与 ROS 2 Humble 安装已完成，但仍未授权启用 CAN、发送电机命令或操作真实设备。FND-004A 在 Jetson 上执行依赖解析和用户态 build/test 时不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，遵守目标机"只 `apt update` + `apt install`、禁止 `apt upgrade`"的纪律（升级教程 §12.1）。

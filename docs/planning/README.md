@@ -1,8 +1,8 @@
 # Jetson 通用机电控制框架规划索引
 
 > 规划基线：2026-07-28
-> 最近收敛：2026-08-09（实际目标机迁移路线与 Ubuntu 22.04 刷机主机确认）
-> 当前状态：FND-000～FND-004 已完成；已选择 JetPack 6.2.1 迁移和 Ubuntu 22.04 刷机主机，下一步先做备份与主机预检，再单独授权刷机；未启用 CAN、未控制设备、未修改 Jetson
+> 最近收敛：2026-08-23（供应商资料全面审查：L02 深读、通用盒子事实收口、失控保护发现、拓扑意向确认；此前 2026-08-19 收敛 L02 双 profile 与 HighTorque transport 规划）
+> 当前状态：FND-000～FND-004 已完成；**目标机平台迁移已于 2026-08-23 完成**（HZHY 镜像刷写 JetPack 6.2 / Ubuntu 22.04.5，加固与 ROS 2 Humble 安装完毕）；下一闸门为 FND-004A 烟测；未启用 CAN、未控制设备
 
 ## 1. 权威边界
 
@@ -14,7 +14,7 @@
 4. 证据文档保存资料来源、推断边界和待确认项；
 5. [历史归档](../archive/README.md)仅用于追溯，不是当前规范。
 
-ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-can0-deployment.md)保持 Proposed。后者表示当前单 `can0` 部署尚未取得逐台位速率、ID、profile、终端、负载、仲裁和错误证据，不能激活。
+ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-can0-deployment.md)保持 Proposed。后者表示当前单物理通道及其 transport backend 尚未取得逐台位速率、ID、profile、终端、backend 能力、负载、仲裁和错误证据，不能激活。
 
 文档中的结论使用“已确认事实/资料事实”“规划决定/有依据的推断”“用户提供（待独立确认）”或“待确认项”标记。供应商参数、Jetson 运行态和硬件状态未经本轮复核均视为过期或未知。
 
@@ -22,7 +22,8 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 
 - 目标包络：NVIDIA Jetson、最多 6 台 CAN 电机、2 条 CAN/CAN FD 总线、2 台 HI12，以及未来 STM32 传感器节点。
 - 当前设备背景：两台基于 AKE60-8 的定制双编码器电机和两台 HI12；实际固件、配置、协议、节点和物理拓扑仍需逐台取证。
-- 实际目标机背景：标准 NVIDIA `P3767-0000 + P3768-0000` Orin NX 开发套件；2026-08-08 只读盘点为 JetPack 5.1.5 / L4T 35.6 / Ubuntu 20.04 / ROS 1 Noetic，尚不满足 FND-004A 的原生 Jammy/Humble 前置条件。
+- 实际目标机背景：NVIDIA Orin NX 16GB 模组（`P3767-0000`）+ **合众恒跃 HZHY HYAI-311UAV 第三方载板**（2026-08-23 实物照片核验；软件设备树报 `p3768-0000` 是厂商基于 devkit 配置构建镜像的产物）。**2026-08-23 已完成平台迁移**：JetPack 6.2 / L4T R36.4.3 / Ubuntu 22.04.5 / 内核 5.15.148-tegra，`nvidia-l4t-*` 已锁定、ROS 2 Humble 已安装——FND-004A 的原生 Jammy/Humble 前置条件**已满足**。
+- CAN 拓扑意向（2026-08-23 用户确认）：电机接入高擎通用盒子（7路CAN功率板）的电源+CAN 通道，Jetson 经 USB CDC 收发；HI12 接入方案待定。激活仍受 ADR-006 证据闸门约束。
 - 当前阶段：先完成不依赖真实设备的 Foundation v0.1，再冻结 AdapterContract v1 并接入厂商适配器。
 - 当前安全边界：FND-004A 只做 clean clone、环境盘点、依赖解析和五包 build/test；不启用 CAN、不操作设备、不静默修改系统。
 - 当前实现入口：[Foundation v0.1 控制框架搭建计划](07_framework_bootstrap_plan.md)。
@@ -34,8 +35,8 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 |---|---|---|
 | FND-000～FND-004 | 已完成 | 仓库/依赖/五包 CI 基线和七份 ADR 已建立 |
 | 文档收敛 | 已完成 | 活动文档去重、历史输入归档、链接与状态检查通过 |
-| 目标机平台准备 | 路线已确认，待非破坏性预检 | Ubuntu 22.04 刷机主机通过兼容性检查，完成并验证备份；另行授权后 Direct Flash，再安装 Jammy/Humble 和只读仓库访问 |
-| FND-004A | 下一闸门，当前被平台前置条件阻塞 | 目标 Jetson ARM64 clean-clone context、rosdep、五包 build/test 通过 |
+| 目标机平台准备 | **已完成（2026-08-23）** | HZHY 镜像 + `l4t_initrd_flash` 刷写 JetPack 6.2 / Ubuntu 22.04.5，首启验收、加固（L4T 包锁定）与 ROS 2 Humble 安装完毕；记录见升级教程 §12.0/§14.0 |
+| FND-004A | **当前下一闸门，已无阻塞** | 目标 Jetson ARM64 clean-clone context、rosdep、五包 build/test 通过 |
 | 里程碑切换 | FND-004A 通过后 | 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，随后保护 `main` |
 | FND-005～FND-015 | 待开始 | 通过任务分支和 PR 完成 core、simulation、ros2_control、性能及 Foundation RC |
 | INT-001 以后 | Foundation RC 后 | 冻结 adapter 模板，再接入 CubeMars、HI12 与 HIL |
@@ -51,7 +52,7 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 | [03 MVP 执行、验证与治理](03_mvp_delivery_plan.md) | 完整 MVP、硬件闸门、量化验收和发布路线 | 当前总路线 |
 | [04 证据与来源登记](04_source_register.md) | 本地资料、哈希、官方文档、仓库快照与冲突 | 证据登记 |
 | [05 决策与待确认项](05_decisions_and_open_questions.md) | ADR 导航、现场上下文和 OQ-01～OQ-10 | 状态概览；ADR 优先 |
-| [06 CubeMars 资料审查](06_cubemars_material_review.md) | AK3.0/AKE60-8 采用矩阵、协议事实和实机缺口 | 供应商证据层 |
+| [06 CubeMars 资料审查](06_cubemars_material_review.md) | L02 双 profile、AK3.0/AKE60-8 交叉资料、HighTorque transport 边界和实机缺口 | 供应商证据层 |
 | [07 Foundation 搭建计划](07_framework_bootstrap_plan.md) | 当前 FND/RSP 顺序、核心契约与 Definition of Done | 当前实施入口 |
 | [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md) | 仓库、许可证、资产、Memory 与分支治理 | 已确认政策 |
 | [FND-004 ADR 集合](../adr/README.md) | 架构与语义状态 | 规范入口 |

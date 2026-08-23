@@ -3,8 +3,9 @@
 - **Decision ID:** ADR-004
 - **Status:** Accepted
 - **Date:** 2026-08-07
+- **Last clarified:** 2026-08-19
 - **Owner:** 项目负责人（Foundation core reviewer；后续 device adapter owner 提交设备证据）
-- **Scope:** 所有 vendor device session；当前重点为 CubeMars AK V3/legacy MIT 与 HI12 J1939/CANopen
+- **Scope:** 所有 vendor device session；当前重点为 L02 V1.0.18 的 CubeMars servo/MIT profiles、补充 AK V3 profiles 与 HI12 J1939/CANopen
 
 ## Status rationale / 状态依据
 
@@ -12,14 +13,14 @@
 
 ## Context / 上下文
 
-现有资料同时出现 AK V3 servo extended、AK V3 force-control extended 和 legacy MIT standard-frame；它们的帧格式、功能 ID、payload 和能力声明不同。HI12 的 J1939 与 CANopen 也取决于交付固件。按第一帧外观猜设备、在 ACTIVE 期间自动切换 codec，或为“兼容”而混发命令，会使 resource claim、缩放、neutral、watchdog 和故障归因失去确定语义。
+当前已确认适用的 L02 V1.0.18 同时定义伺服 29 位扩展帧和运控/MIT 11 位标准帧；AK V3 资料还提供另一代 servo/force-control 扩展帧；它们的帧格式、功能 ID、payload 和能力声明不同。HI12 的 J1939 与 CANopen 也取决于交付固件。按第一帧外观猜设备、在 ACTIVE 期间自动切换 codec，或为“兼容”而混发命令，会使 resource claim、缩放、neutral、watchdog 和故障归因失去确定语义。
 
 ## Decision / 决策
 
 1. 每个设备实例在 `on_configure` 时绑定不可变的 `protocol_profile`、codec/session 版本、允许的帧格式、反馈集合、active command profile 和 capability。
 2. 真实 profile 的关键字段（准确型号/固件兼容范围、ID/位速率、命令与反馈语义、缩放、neutral/watchdog）缺失或冲突时，configure 必须失败；不得选择“最接近型号”的默认值。
-3. ACTIVE 期间禁止通过收到的帧自动改变协议代际、codec、command profile 或 ros2_control claim，禁止混发互不兼容的 servo/force/legacy 命令族。
-4. CubeMars adapter 至少把 `AK V3 servo extended`、`AK V3 force-control extended` 和 `legacy MIT standard-frame` 作为不同 codec/profile；前两者只是在实机身份确认后的当前候选，legacy 仅用于明确匹配的旧代际。
+3. ACTIVE 期间禁止通过收到的帧自动改变协议代际、codec、command profile 或 ros2_control claim，禁止混发互不兼容的 servo/MIT/force 命令族。
+4. CubeMars adapter 至少把用户确认适用的 `L02 servo extended (29-bit)` 与 `L02 motion-control/MIT standard (11-bit)` 作为不同 codec/profile；第一阶段先实现 L02 servo extended，第二阶段实现 L02 motion-control/MIT standard。AK V3 servo/force-control 可作为经证据标记的补充 profile；任何 profile 都不得共享会混淆帧格式、ID 或位域的打包函数。
 5. HI12 只有在交付固件身份、节点、位速率和帧证据确认后才选择 J1939 或 CANopen session。需要改变 profile 时，先停用 controller/hardware，重新 configure 并走相应设备闸门。
 
 ## Alternatives considered / 替代方案
@@ -48,7 +49,7 @@
 
 - 初次 bring-up 前必须逐台读取身份、版本和配置，不能即插即用。
 - 同一供应商不同代际需要维护明确的 profile/codec 集合和迁移说明。
-- 在线 mode switch 若未来确实需要，必须设计显式 controller/hardware mode-switch 事务，不能沿用自动探测。
+- 在线 mode switch 若未来确实需要，必须设计显式 controller/hardware mode-switch 事务，不能沿用自动探测；L02 手册警告运行中切换控制方式可能损坏驱动板，因此默认只允许停用、neutral/断能后重新 configure。
 
 ## Validation / 验证
 
@@ -71,3 +72,4 @@
 - [CubeMars 供应商资料审查](../planning/06_cubemars_material_review.md)。
 - [Foundation 搭建计划](../planning/07_framework_bootstrap_plan.md)，第 8.1、9.2、9.5 节。
 - [FND-004 ADR index](README.md)。
+- 用户 2026-08-19 对 L02 V1.0.18 CAN 协议和参数适用性的确认（记录于来源登记与资料审查）。

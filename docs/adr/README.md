@@ -13,7 +13,7 @@
 | [ADR-003](ADR-003-composite-system-interface.md) | Accepted | [Composite SystemInterface](ADR-003-composite-system-interface.md) | Foundation/MVP 的复合硬件组件生命周期 | lifecycle、claim、STRICT switch 和非阻塞 `read/write` 测试 |
 | [ADR-004](ADR-004-fixed-protocol-profile.md) | Accepted | [Fixed protocol profile](ADR-004-fixed-protocol-profile.md) | 配置期固定协议代际和 active command profile | golden/negative frame、capability 和 profile 冲突测试 |
 | [ADR-005](ADR-005-monotonic-time-freshness.md) | Accepted | [Monotonic time and freshness](ADR-005-monotonic-time-freshness.md) | 源时间、到达时间、单调时钟和 TTL/freshness | virtual-clock 边界、重复读取不刷新时间戳、stale/TTL 测试 |
-| [ADR-006](ADR-006-conditional-can0-deployment.md) | Proposed | [Conditional single-`can0` deployment](ADR-006-conditional-can0-deployment.md) | 当前单 `can0` profile 的证据闸门与双总线扩展边界 | 逐台设备配置、ID/位速率、负载、仲裁和错误证据；G0/G1/G4 评审 |
+| [ADR-006](ADR-006-conditional-can0-deployment.md) | Proposed | [Conditional single-channel deployment](ADR-006-conditional-can0-deployment.md) | 当前单物理通道、多 transport backend 的证据闸门与双总线扩展边界 | 逐台设备配置、backend 能力、ID/位速率、负载、仲裁和错误证据；G0/G1/G4 评审 |
 | [ADR-009](ADR-009-effort-semantic-gate.md) | Accepted | [Effort semantic gate](ADR-009-effort-semantic-gate.md) | `effort [N*m]` 的物理语义闸门与最小 demo 边界 | 匹配固件/参数、机械映射、校准和受控台架证据；G0–G3 评审后才可启用设备映射 |
 
 ## Reading and status rules / 阅读与状态规则

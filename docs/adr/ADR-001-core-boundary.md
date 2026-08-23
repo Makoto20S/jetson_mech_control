@@ -12,7 +12,7 @@
 
 ## Context / 上下文
 
-控制器需要同时服务 fake、vcan 和未来多品牌设备。若把 SocketCAN、厂商位域、协议状态机和阻塞式 I/O 直接写进一个或多个 hardware plugin，协议就会依赖 ROS 生命周期，多个组件还可能争夺同一条总线。这样的实现难以脱离 ROS 做确定性单测，也会让供应商差异渗入控制器。
+控制器需要同时服务 fake、vcan、HighTorque USB-CDC 和未来多品牌设备。若把 SocketCAN/串口 framing、厂商位域、协议状态机和阻塞式 I/O 直接写进一个或多个 hardware plugin，协议就会依赖 ROS 生命周期，多个组件还可能争夺同一条总线。这样的实现难以脱离 ROS 做确定性单测，也会让供应商差异渗入控制器。
 
 候选方案包括：把协议全部放进 `SystemInterface`；建立独立 CAN 网关并通过 DDS 发送闭环命令；或把传输、协议、时间和状态核心保持为不依赖 ROS 的 C++ 库，再用薄适配层接入标准生命周期。
 
@@ -60,7 +60,7 @@
 
 - `python3 tools/ci/check_adrs.py` 通过，并确认本 ADR 与 planning 入口链接有效。
 - FND-005 之后，核心公共头的依赖检查不得发现 ROS headers；核心目标可在无 ROS 消息的单元测试中构建。
-- FND-010～FND-014 的 fake/vcan 纵向测试证明 controller → canonical command → transport → state 的链路，且 controller/适配层不含厂商 CAN 位域。
+- FND-010/RSP-002～FND-014 的 fake/vcan/injected-serial 纵向测试证明 controller → canonical command → transport → state 的链路，且 controller/适配层不含厂商 CAN 位域或 CDC framing。
 - 适配层测试证明 `read()`/`write()` 不等待 CAN 帧、不执行文件/DDS/字符串格式化；失败时按生命周期契约返回可解释状态。
 
 ## Review triggers / 重审触发

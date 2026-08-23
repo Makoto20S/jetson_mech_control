@@ -1,5 +1,5 @@
 schema_version: 1
-last_reviewed: "2026-08-06"
+last_reviewed: "2026-08-23"
 
 # This manifest records excluded or externally controlled material without
 # copying it into the main repository. Hashes are supplied only for files
@@ -7,6 +7,8 @@ last_reviewed: "2026-08-06"
 policy:
   supplier_repository: "CubeMars/"
   supplier_repository_tracking: excluded_nested_repository
+  local_supplier_materials: "company/"
+  local_supplier_materials_tracking: excluded
   default_binary_and_large_data_tracking: excluded
   approved_small_vectors_require: source_license_and_redistribution_review
   secret_values_allowed: false
@@ -15,6 +17,10 @@ excluded_paths:
   - path: "CubeMars/"
     category: supplier_repository
     reason: independent supplier materials repository; keep outside the main repository
+    observed: true
+  - path: "company/"
+    category: supplier_materials
+    reason: local supplier SDKs, manuals, archives, and nested workspaces; keep outside the main repository
     observed: true
   - path: ".codex/"
     category: local_session_state
@@ -41,28 +47,28 @@ observed_external_or_excluded_files:
     sha256: "B793B298A334755B46F821AFF52E13CEB85F73A30FF76EF90DB2F89BEB425E44"
     bytes: 1334196
     tracking: excluded
-  - path: "docs/ak-series-driver-manual-v1-0-18-for-ak-2-0-robotic-actuator-cn.pdf"
+  - path: "company/ak-series-driver-manual-v1-0-18-for-ak-2-0-robotic-actuator-cn.pdf"
     category: supplier_document
     source_version: "AK2.0 V1.0.18"
     source_uri: null
     sha256: "E091DD4748F9B0E33E8495F7340399B820E863C46276CDBE0C860C2147DFDE4E"
     bytes: 2310053
     tracking: excluded_by_default
-  - path: "docs/hi12_datasheet_cn.pdf"
+  - path: "company/hi12_datasheet_cn.pdf"
     category: supplier_document
     source_version: unknown
     source_uri: null
     sha256: "94563A0A9939C9B870C0820DB405BC8B6FA77316628E2B98FE79729553ED14B9"
     bytes: 2164401
     tracking: excluded_by_default
-  - path: "docs/imu_cum_cn.pdf"
+  - path: "company/imu_cum_cn.pdf"
     category: supplier_document
     source_version: unknown
     source_uri: null
     sha256: "1028C02E4C6C7AD21198D6ED2714B9BDD14C5D8A048F0A5B13D8EF43297FA51E"
     bytes: 12773156
     tracking: excluded_by_default
-  - path: "docs/stm32.pdf"
+  - path: "company/stm32.pdf"
     category: reference_document
     source_version: unknown
     source_uri: null
@@ -132,6 +138,117 @@ observed_external_or_excluded_files:
     sha256: "87508F2B61C578A07195F7F5859B55417AD43A4B0EB9C15C10A86F8DCF86A94C"
     bytes: 2661641
     tracking: excluded_nested_repository
+  - path: "company/hightorque_fdcan(2).zip"
+    category: supplier_transport_archive
+    source_version: unknown
+    source_uri: null
+    sha256: "4AA51FD6ACA1C819090F3E89027F409595357E06198187F87D3E703CB8C3A860"
+    bytes: 44436
+    license_status: "no standalone license marker observed; reference-only until provenance is confirmed"
+    tracking: excluded
+  - path: "company/Panthera-HT_ROS2/"
+    category: supplier_ros2_workspace
+    source_version: "humble@b08633d"
+    source_uri: null
+    observed_nested_status: "934 paths differ from nested checkout by line-ending-only comparison"
+    license_status: "MIT at nested workspace root; review per copied file before reuse"
+    tracking: excluded
+  - path: "company/用户手册/HYAI-311UAV 用户手册.pdf"
+    category: supplier_carrier_board_manual
+    source_version: "v2.0 2023-04-14 (HZHY / Beijing Hezhong Hengyue, hzhytech.com)"
+    source_uri: null
+    sha256: "09B6F47E674255BDE9F7285A3DF2600D9720337DF70CC3E3B410963E406AC4EB"
+    bytes: 1022109
+    notes: "HYAI-311UAV carrier pinout; SW1 REC key, J7 Type-C flashing port, J8 XT30 12-36V, J2 CAN GH1.25; matched to target photos on 2026-08-23 (evidence E05)"
+    tracking: excluded
+  - path: "company/用户手册/HZHY NVIDIA 系列产品 快速刷机教程20250711.pdf"
+    category: supplier_flashing_guide
+    source_version: "v6.0 2025-07-11"
+    source_uri: null
+    sha256: "423017EFCD9508BFA117ACDF53C1FD5DB2A5B52DCF91CA92CED4CDC9BFCD8824"
+    bytes: 4454681
+    notes: "adds JetPack 6.2 flash commands for Orin series; REC key table (311UAV=SW1); red-letter constraints incl. no apt upgrade on adapted images"
+    tracking: excluded
+  - path: "company/用户手册/HZHY NVIDIA Orin NX 快速刷机教程.pdf"
+    category: supplier_flashing_guide
+    source_version: "v4.0 (JP5.1.1 flow)"
+    source_uri: null
+    sha256: "953230487F03262961DB1F2B6F4FC5D2945D5706F8C11F1085215AE8FCC1A786"
+    bytes: 1352406
+    notes: "SW1/J7 recovery photos, l4t_initrd_flash example, l4t_backup_restore full-disk backup/restore flow"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/文档资料/00 文档说明.txt"
+    category: supplier_document
+    source_version: "feishu wiki export snapshot, ~2026-08-10"
+    source_uri: "https://lingdongfangcheng.feishu.cn/wiki/space/7539498339620913154"
+    sha256: "C33E44305062805FB2110F73571347ABE0B4CE0C5D908568430EA7BDF56465BF"
+    bytes: 295
+    notes: "states the local PDFs are exports of a live feishu wiki and may lag behind it (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/文档资料/01 主控盒子说明书.pdf"
+    category: supplier_document
+    source_version: "feishu wiki export snapshot, ~2026-08-10"
+    source_uri: null
+    sha256: "BA78C8E5E85BDEC5899563985A331FA23928002CED80F607A366C402801E1AB9"
+    bytes: 8184273
+    notes: "7-channel CAN control box manual: XT60(2+4) input, 7x XT30(2+2) power+CAN outputs, Type-C, onboard IMU, 'FDCAN 5Mbps'; protocol chapters are empty placeholders (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/文档资料/02 python-SDK环境配置.pdf"
+    category: supplier_document
+    source_version: "feishu wiki export snapshot, ~2026-08-10"
+    source_uri: null
+    sha256: "2D42681A2D0CEE7AC7A411CA1818B170D37F076B4812E7D204AF15BD173E0FE9"
+    bytes: 2000277
+    notes: "python SDK environment setup guide (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/文档资料/03 SDK-ROS1 版.pdf"
+    category: supplier_document
+    source_version: "feishu wiki export snapshot, ~2026-08-10; shows SDK v4.4.6, board v4.6"
+    source_uri: null
+    sha256: "599DE787C2BAEF8698FDF6D879415CFEB78B7E6412EF92638507ECB7BC3EF1EA"
+    bytes: 1350244
+    notes: "ROS1 SDK doc; log screenshots prove 7 channels enumerate as /dev/ttyACM0-6 and Serial_baudrate 4000000 (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/文档资料/04 SDK-python 版.pdf"
+    category: supplier_document
+    source_version: "feishu wiki export snapshot, ~2026-08-10"
+    source_uri: null
+    sha256: "E97AB41C073B5DB3632FA5A17499B1412001FECE0D999B2248688DBBE37865C1"
+    bytes: 964707
+    notes: "python SDK doc; motor-level API only, mentions LCM (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/ROS1 版本程序/motor_sdk_ros1_v4.6.2.zip"
+    category: supplier_sdk_archive
+    source_version: "v4.6.2"
+    source_uri: null
+    sha256: "FFB9A454C78956D881FEFF6A994BA92D9E8086B598E7846597FAF4E492094814"
+    bytes: 266628
+    notes: "HighTorque motor SDK for ROS1; reference only, targets HighTorque motors (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/python 版本程序/motor_sdk_python_v4.5.4.zip"
+    category: supplier_sdk_archive
+    source_version: "v4.5.4"
+    source_uri: null
+    sha256: "B69029CCFBB13A6131B4545B63A1096F2F1902ADB41321A46828C1768DE7317E"
+    bytes: 7213172
+    notes: "HighTorque motor SDK for python; reference only (L17)"
+    tracking: excluded
+  - path: "company/7路CAN主控盒子资料/3D图纸/HT 主控盒子-02B-总装.STEP"
+    category: supplier_cad
+    source_version: "02B assembly"
+    source_uri: null
+    sha256: "9966A545B1F0D129386673FA57812F3A675BD67DEEF9F41C31E595CE48F7C6B9"
+    bytes: 183075471
+    notes: "box mechanical assembly; out of software scope (L17)"
+    tracking: excluded
+  - path: "company/flash-300BV12_311UAV_ONX_Jp6.2_SC_v1.0.0_20250210.tar.gz"
+    category: supplier_flash_image_package
+    source_version: "HZHY 311UAV + Orin NX, JetPack 6.2 / L4T R36.4.3 (rootfs nv_tegra_release verified), v1.0.0 2025-02-10"
+    source_uri: null
+    sha256: "7B2227DCB22E1EBCC8A868E629308B896FF3BD01761DA647035E4E0CF6D1429E"
+    bytes: 3742482561
+    notes: "Linux_for_Tegra tree with l4t_initrd_flash/prerequisites/create_default_user/backup_restore tools, jetson-orin-nano-devkit-super-nvme.conf, both flash XMLs, and vendor test flash logs from 2025-02-11/12; the authoritative flash source for the JetPack 6 migration"
+    tracking: excluded
 
 rules:
   - "Track source, version, hash, and a credential-free controlled URI instead of raw supplier archives or large experiment data."

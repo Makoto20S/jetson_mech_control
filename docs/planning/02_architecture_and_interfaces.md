@@ -36,6 +36,8 @@ flowchart TB
             ROUTER[FrameRouter and device sessions]
             B0[BusRuntime motor_bus]
             B1[BusRuntime sensor_bus]
+            T0[Transport backend A]
+            T1[Transport backend B]
             CM --> CTRL
             CM --> HW
             HW <--> CORE
@@ -54,8 +56,10 @@ flowchart TB
         CM --> BAG
         DIAG --> BAG
     end
-    B0 <--> CAN0[(physical CAN bus A)]
-    B1 <--> CAN1[(physical CAN bus B)]
+    B0 <--> T0
+    T0 <--> CAN0[(physical CAN bus A)]
+    B1 <--> T1
+    T1 <--> CAN1[(physical CAN bus B)]
     CAN0 <--> MOTORS[1 to 6 CubeMars devices]
     CAN1 <--> IMUS[2 HI12 devices]
     CAN1 <--> STM[future STM32 node in Classical CAN mode]
@@ -63,13 +67,15 @@ flowchart TB
     TOOLS -. read-only observation .-> CAN1
 ```
 
-**ADR-006 Proposed 边界**：图中的第二物理接口是未来扩展边界，当前硬件只有 `can0`。首个两电机、两 HI12 profile 仅把一个 `BusRuntime` 映射到 `can0` 作为待证候选；只有四台设备位速率一致、ID 无冲突且负载/仲裁/故障测试通过并将 ADR-006 转为 Accepted 后才可激活。不通过时必须增加第二接口或降低/调整 profile，不能在软件中假装存在 `can1`。
+**ADR-006 Proposed 边界**：图中的物理通道均为逻辑映射目标，不预设 backend。2026-08-23 用户确认电机将接入高擎通用盒子（7路CAN功率板）的 XT30(2+2) 通道，Jetson 经 USB CDC 收发——**每盒子通道枚举为一个独立 `/dev/ttyACM` 设备，与"一通道一 `BusRuntime` 写者"一一对应**；两台 HI12 接盒子通道或独立 SocketCAN 适配器均为候选。该拓扑意向不改变 ADR-006 的 Proposed 状态：任何真实通道激活仍需逐台位速率（含盒子每通道固件固定的 nominal 速率数值，当前未知）、ID、profile、backend capability、负载、仲裁与故障证据。不通过时必须换通道、换 backend 或调整 profile，不能在软件中假装通道可用。
 
 ## 4. 分层与所有权
 
 | 层 | 核心职责 | 明确不负责 | 所有者 | 性质 |
 |---|---|---|---|---|
-| `SocketCanTransport` | 非阻塞 RAW socket、过滤、`recvmsg` 时间戳、错误帧、接口统计、发送结果 | 设备缩放、ROS 消息 | 每条 BusRuntime | 有依据的推断 |
+| `Transport` interface | configure/open/close、non-blocking raw-frame RX/TX、capability 查询、可选 filter/timestamp/error 与队列统计 | 设备缩放、ROS 消息、协议 profile；不伪造 backend 不具备的能力 | 每条 BusRuntime | 规划决定 |
+| `SocketCanTransport` | Linux RAW socket、过滤、`recvmsg` 时间戳、错误帧、接口统计、发送结果 | 设备缩放、ROS 消息 | 每条 BusRuntime | 有依据的推断 |
+| `HighTorqueUsbCdcTransport` | 受控 USB CDC framing/CRC、raw CAN frame 映射、连接/断开状态和有界 RX/TX 队列 | 电机协议、自动 profile、串口设备枚举副作用 | 每条 BusRuntime | 规划决定；待 transport spike |
 | `BusRuntime` | 一个 RX 线程、一个定相 TX 调度、最新命令槽、总线状态、计数器 | 控制算法、DDS | ControlCore | 有依据的推断 |
 | `FrameRouter` | 按 bus、帧格式、ID/mask、方向、设备实例路由；启动时检查重叠 | 靠标准/扩展标志猜设备 | ControlCore | 有依据的推断 |
 | Protocol codec | 字节序、位域、缩放、范围、错误码；纯函数和 golden frame | socket、线程、生命周期 | 协议包 | 有依据的推断 |
@@ -84,7 +90,7 @@ flowchart TB
 
 **已确认事实**：SocketCAN 支持多个匹配监听 socket，多个接收者不会互相消费同一帧。[O01]
 
-**有依据的推断**：控制进程内仍只允许一个可写 `BusRuntime`。它使用一个经过精确过滤的接收 socket，显式订阅错误帧，并维护唯一的 TX 调度。`candump` 等工具可只读并行；任何第二写者必须在配置期被禁止。
+**有依据的推断**：控制进程内每个物理通道仍只允许一个可写 `BusRuntime`，并由它拥有唯一的 TX 调度。SocketCAN backend 使用经过精确过滤的接收 socket并显式订阅错误帧；HighTorque CDC backend 使用受控 parser、软件路由和有界队列，其示例未提供的错误/时间戳能力保持 unavailable。`candump` 只适用于 SocketCAN 可见接口；其他 backend 的只读观察必须经过显式 fan-out。任何第二写者都在配置期被禁止。
 
 **有依据的推断**：TX 不保存周期命令历史，而是每设备一个“最新有效命令”槽。过时周期命令直接覆盖/丢弃，配置和诊断请求走有界低频队列；这样拥塞后不会补发一串已经失效的力矩命令。
 
@@ -101,7 +107,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     DEV[CAN devices] -->|CAN frame| RX[non-blocking RX]
-    RX -->|kernel timestamp plus monotonic arrival| RT[frame routing]
+    RX -->|backend timestamp if available plus monotonic arrival| RT[frame routing]
     RT --> CODEC[protocol codec]
     CODEC --> SESSION[device session and sample quality]
     SESSION --> SNAP[preallocated latest-state snapshot]
@@ -128,7 +134,7 @@ flowchart LR
 
 | 配置对象 | 必填字段 | 校验 | 性质 |
 |---|---|---|---|
-| Bus | 逻辑名、部署接口映射、Classic/FD、nominal/data bitrate、预期负载、发送相位 | 接口存在；模式一致；总负载预算 | 有依据的推断 |
+| Bus | 逻辑名、transport backend、稳定设备标识/接口映射、Classic/FD、nominal/data bitrate、预期负载、发送相位 | backend 能力与配置一致；物理通道唯一；总负载预算 | 有依据的推断 |
 | Device | 实例名、类型、bus、协议、节点 ID、帧过滤、固件兼容范围、关键性 | 路由无未授权重叠；协议与帧格式匹配 | 有依据的推断 |
 | Motor | 基础机型、定制件号、驱动板/固件、command profile、编码器来源、方向、零位、减速比、状态/命令缩放、软限位、速率、超时策略 | 未确认项不得用猜测默认；effort 需匹配实机参数证据 | 有依据的推断 |
 | IMU | PNAME/APP_VER、J1939/CANopen、ID、输出 profile、坐标系、安装变换、时间域、freshness | 两台 ID 唯一；缩放按协议；输出帧可达 | 有依据的推断 |
@@ -137,21 +143,21 @@ flowchart LR
 
 **有依据的推断**：配置使用版本化 schema。任何缺少关键电机参数、重复节点、重叠路由、未知协议或超过带宽预算的配置在 `on_configure` 阶段失败；错误信息进入非 RT 诊断，不以隐式回退继续运行。
 
-**有依据的推断**：代码只使用逻辑总线名。部署清单把 `motor_bus`/`sensor_bus` 映射到 `can0` 或经 USB 序列号稳定命名的接口；未来 Jetson 的接口数量和名称不写死在协议或控制器中。
+**有依据的推断**：代码只使用逻辑总线名。部署清单把 `motor_bus`/`sensor_bus` 映射到 SocketCAN 接口，或映射到经 USB 身份/端口唯一定位的 HighTorque CDC 通道；未来 Jetson 的接口数量、`can0` 名称或 `/dev/ttyACM*` 枚举顺序不写死在协议或控制器中。
 
 ### 6.2 路由键
 
 **有依据的推断**：接收路由键至少由 `(logical_bus, Classic/FD, standard/extended, can_id & mask, direction, device_instance)` 组成。J1939 PGN/SA、CANopen COB-ID 和 CubeMars 功能 ID 在协议层进一步解码；禁止仅以“标准帧=电机、扩展帧=IMU”分类。
 
-**有依据的推断**：配置期生成最窄 SocketCAN filter 并做两两交集检查。允许同一帧同时进入设备会话与只读诊断观察者，但这个 fan-out 必须显式声明；任何两个可写设备对相同命令 ID 的所有权冲突都拒绝激活。
+**有依据的推断**：配置期生成 backend 能表达的最窄硬件/软件 filter，并在统一路由层做两两交集检查。允许同一帧同时进入设备会话与只读诊断观察者，但这个 fan-out 必须显式声明；任何两个可写设备对相同命令 ID 的所有权冲突都拒绝激活。
 
 ## 7. 协议选择与设备能力模型
 
 ### 7.1 配置期固定协议
 
-AK3.0 V3.2 的 servo 与 force-control 命令族虽然可能由同代固件接受，但功能 ID、payload 和 command capability 不同；legacy MIT 又属于不同协议代际。HI12 J1939/CANopen 取决于交付固件。正式失败关闭规则见 [ADR-004](../adr/ADR-004-fixed-protocol-profile.md)，协议证据和三 codec 边界见 [06](06_cubemars_material_review.md)。
+用户确认适用的 L02 V1.0.18 同时定义 servo extended 与 motion-control/MIT standard，两者帧类型、ID、payload 和 command capability 不同；AK3.0 V3.2 又提供补充的另一代命令族。HI12 J1939/CANopen 取决于交付固件。正式失败关闭规则见 [ADR-004](../adr/ADR-004-fixed-protocol-profile.md)，协议证据和 codec 边界见 [06](06_cubemars_material_review.md)。
 
-实现必须在 `on_configure` 验证固件范围、帧格式、codec、反馈集合和命令集合并绑定 profile；ACTIVE 期间不得改变 profile、claim 或混发。需要设备写入或刷固件的变化先停用、断能并走独立 bring-up。
+实现必须在 `on_configure` 验证固件范围、帧格式、codec、反馈集合和命令集合并绑定 profile；ACTIVE 期间不得改变 profile、claim 或混发。当前电机目标至少包括 L02 `servo_extended`（29 位）和 `motion_control_mit_standard`（11 位），先实现前者；HighTorque transport 只搬运 RawCanFrame，不决定 profile。需要设备写入或刷固件的变化先停用、断能并走独立 bring-up。
 
 ### 7.2 capability 描述
 
@@ -187,7 +193,7 @@ AK3.0 V3.2 的 servo 与 force-control 命令族虽然可能由同代固件接�
 | 字段 | 含义 | 用途 | 不能替代 | 性质 |
 |---|---|---|---|---|
 | `device_sample_time` | 设备在采集处产生的时间/计数 | 跨传感器对齐、延迟估计 | 无该字段时不能伪造 | 有依据的推断 |
-| `kernel_rx_time` | SocketCAN 内核时间戳 | 到达链路分析 | 不必等于采样时刻 | 有依据的推断 |
+| `kernel_rx_time` | SocketCAN 内核时间戳；其他 backend 无等价证据时为空 | SocketCAN 到达链路分析 | 不必等于采样时刻，也不能由 USB read 完成时刻伪造 | 有依据的推断 |
 | `host_rx_mono` | RX 线程收到帧时的 `CLOCK_MONOTONIC` | 新鲜度、超时、处理延迟 | 不用于绝对 UTC | 有依据的推断 |
 | `control_time_mono` | controller_manager 本周期时刻 | `dt`、命令租约、抖动 | 不覆盖源时间 | 有依据的推断 |
 | `ros_stamp` | 映射后的 ROS 时间 | 记录和跨节点关联 | 时钟域未知时需附质量标志 | 有依据的推断 |
@@ -228,7 +234,7 @@ AK3.0 V3.2 的 servo 与 force-control 命令族虽然可能由同代固件接�
 
 **有依据的推断**：自研 PID、阻抗、滑模和有界 effort 测试控制器只依赖标准 SI interface 与独立的状态质量/命令租约契约，不包含 CAN ID 或型号分支。标准 `joint_state_broadcaster` 和合适的 IMU broadcaster 可选择性复用。
 
-最小框架 demo 由专用 C++ ros2_control 控制器持续写入可配置、有界、带 slew/TTL 的目标；控制器不打开 SocketCAN 或构造厂商帧。`SystemInterface::write()`、device session 与 `BusRuntime` 负责最终校验和提交。标准 `effort` 与 current/raw fallback 的规范边界见 [ADR-009](../adr/ADR-009-effort-semantic-gate.md)；demo 只验证纵向链路，物理输出精度另验收。
+最小框架 demo 由专用 C++ ros2_control 控制器持续写入可配置、有界、带 slew/TTL 的目标；控制器不打开 transport backend 或构造厂商帧。`SystemInterface::write()`、device session 与 `BusRuntime` 负责最终校验和提交。标准 `effort` 与 current/raw fallback 的规范边界见 [ADR-009](../adr/ADR-009-effort-semantic-gate.md)；demo 只验证纵向链路，物理输出精度另验收。
 
 ## 10. 控制器切换、claim、连续性和回滚
 
@@ -252,7 +258,7 @@ AK3.0 V3.2 的 servo 与 force-control 命令族虽然可能由同代固件接�
 
 | 项目 | C++ 确定性层 | Python 非实时层 | 性质 |
 |---|---|---|---|
-| 设备 I/O | SocketCAN、codec、状态快照 | 禁止 | 已确认事实 |
+| 设备 I/O | transport backend、codec、状态快照 | 禁止 | 规划决定 |
 | 控制 | PID、阻抗、滑模、限幅、slew、fallback | 神经网络、规划、低频策略 | 已确认事实 |
 | 时间 | monotonic age/TTL、控制 dt | 源时间、模型推理时间记录 | 有依据的推断 |
 | 数据交换 | 固定上限、预分配、最新值 | ROS topic/service/action | 有依据的推断 |
@@ -280,7 +286,7 @@ sequenceDiagram
     participant N as Non-RT diagnostics
 
     D->>RX: feedback frame
-    RX->>RX: timestamp, filter, decode, validate
+    RX->>RX: mark arrival, apply available filter, decode, validate
     RX->>S: publish complete generation
     Note over CM: absolute-period wakeup
     CM->>S: read latest without blocking
@@ -297,7 +303,7 @@ sequenceDiagram
     S-->>N: decimated immutable snapshot
 ```
 
-**有依据的推断**：TX 相位应位于正常 `write()` 完成之后，更新超时则使用仍在租约内的上一命令至多有限周期；租约到期后 neutral。总线发送采用 non-blocking socket，队列满时丢弃旧周期命令并报告，不在实时线程重试无界循环。
+**有依据的推断**：TX 相位应位于正常 `write()` 完成之后，更新超时则使用仍在租约内的上一命令至多有限周期；租约到期后 neutral。总线发送采用 backend 的 non-blocking submission，队列满时丢弃旧周期命令并报告，不在实时线程重试无界循环。
 
 **待确认项**：RX、controller_manager、TX 的最优相对优先级、相位和 CPU affinity 由项目负责人在 Week 3 使用周期、调度延迟和 command-to-wire 时间戳联合测量后决定。
 
@@ -330,11 +336,11 @@ stateDiagram-v2
 | Python 目标过期 | 本地 fallback 或 neutral | 目标超时诊断 | 新序号且策略允许 | 有依据的推断 |
 | controller_manager 未刷新租约 | 独立 TX 线程在 TTL 后 neutral | watchdog 计数 | 显式复核 | 有依据的推断 |
 | 进程崩溃 | 软件线程无法保证发送 neutral | 依赖已确认的驱动器 watchdog 或物理断能 | B 与项目负责人在 G3 前用固件资料和低能量断包试验确认；人工恢复 | 待确认项 |
-| bus-off/error-passive | 停止命令、保存错误帧与接口统计 | FAULT_LATCHED | 不默认自动 restart | 有依据的推断 |
+| backend 报告 bus-off/error-passive，或链路断开 | 停止命令、保存可用的错误帧/接口/链路统计 | FAULT_LATCHED | 不默认自动 restart；缺少必需错误能力时拒绝该 deployment | 有依据的推断 |
 | 设备故障码 | 不覆盖/清除；按映射停用 | 保留原始码、解释和首发时间 | 按手册和台架流程 | 有依据的推断 |
 | TX queue full | 丢旧周期命令，保留最新；不能无界阻塞 | counter + fault threshold | 负载整改 | 有依据的推断 |
 
-**有依据的推断**：诊断快照包含总线状态、RX/TX/parse/filter/drop/overflow/error 计数、各设备 age/sequence/quality、命令 generation/deadline、控制循环周期、切换结果和磁盘记录状态。字符串格式化、ROS 发布和文件写入只在非 RT 线程。
+**有依据的推断**：诊断快照包含 backend capability/连接状态、总线状态（若可用）、RX/TX/parse/filter/drop/overflow/error 计数、各设备 age/sequence/quality、命令 generation/deadline、控制循环周期、切换结果和磁盘记录状态。不可用指标显式标记 unavailable，不能填零。字符串格式化、ROS 发布和文件写入只在非 RT 线程。
 
 ## 14. 部署图与版本兼容
 
@@ -355,14 +361,14 @@ flowchart TB
         CONF[validated deployment config]
         PROC[control process]
         NP[Python and recorder processes]
-        HOST[host ROS, kernel, SocketCAN permissions]
+        HOST[host ROS, kernel, transport permissions]
         HOST --> PROC
         INSTALL --> PROC
         CONF --> PROC
         PROC <--> NP
     end
     subgraph LAB[Lab hardware]
-        ADP[isolated SocketCAN adapters]
+        ADP[validated CAN transport adapters]
         BUS[CAN buses and termination]
         RIG[motor fixture, E-stop, torque measurement]
         SENS[HI12 and future STM32]
@@ -398,7 +404,7 @@ FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 | [ADR-003](../adr/ADR-003-composite-system-interface.md) | Accepted | Foundation/MVP 一个配置驱动的复合 `SystemInterface` |
 | [ADR-004](../adr/ADR-004-fixed-protocol-profile.md) | Accepted | 配置期固定协议代际和 active command profile；ACTIVE 期间不自动猜测或混发 |
 | [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) | Accepted | 单调时钟管理 freshness/TTL，源时间和到达时间独立保存 |
-| [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 单 `can0` 只是等待逐台配置、ID/位速率和负载证据的条件式 deployment profile；架构保留双总线 |
+| [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 单物理通道及其 transport backend 只是等待逐台配置、能力、ID/位速率和负载证据的条件式 deployment profile；架构保留双总线 |
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort [N*m]` 受物理语义证据闸门约束；demo 与物理精度分开验收 |
 
 状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
@@ -407,9 +413,9 @@ ADR-007（部署）、ADR-008（Python 低频目标）、ADR-010（大数据）�
 
 ## 16. 扩展到 6 电机、2 CAN 的规则
 
-**有依据的推断**：长期两总线设计包络是一条经确认位速率的 actuator bus 承载最多 6 台电机，另一条 sensor bus 承载两台 HI12 和 Classic CAN 模式 STM32。AK V3 8 字节扩展命令加 8 字节扩展反馈按 1 Mbit/s、200 Hz 估算为 38.4%，仍需保留错误/诊断/仲裁余量；传感器总线加入 STM32 前必须重算。
+**有依据的推断**：长期两总线设计包络是一条经确认位速率的 actuator bus 承载最多 6 台电机，另一条 sensor bus 承载两台 HI12 和 Classic CAN 模式 STM32。当前物理入口可由 SocketCAN 或 HighTorque USB CDC backend 提供，但二者必须实现同一 `RawCanFrame`/BusRuntime 契约。L02 伺服扩展帧与运控/MIT 标准帧分别预算；传感器总线加入 STM32 前必须重算。
 
-**规划目标（受 ADR-006 Proposed 约束）**：当前两电机候选 profile 以 500 Hz 为正常目标；上段 200~250 Hz 只描述六电机单总线扩展预算。500 Hz 目标不证明单 `can0` 部署已通过；若两电机需要 1 kHz 电机收发、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
+**规划目标（受 ADR-006 Proposed 约束）**：当前 L02 两电机候选 profile 以 500 Hz 为资料上限和正常目标；上段 200~250 Hz 只描述六电机单总线扩展预算。500 Hz 目标不证明单物理通道部署已通过；若未来另证协议 profile 需要更高电机收发率、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
 
 **有依据的推断**：新增设备只增加配置、codec/device session 和 capability 映射；上层控制器继续使用标准物理量与质量接口。新增 Jetson 只更换部署映射和经过验证的 host manifest，不修改协议常量。
 
