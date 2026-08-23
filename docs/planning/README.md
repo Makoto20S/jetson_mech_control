@@ -1,8 +1,10 @@
 # Jetson 通用机电控制框架规划索引
 
 > 规划基线：2026-07-28
-> 最近收敛：2026-08-24（FND-005 合并；USB2CAN/HighTorque USB-CDC 运输路径与 RSP 顺序已同步）
-> 当前状态：FND-000～FND-005 已完成；FND-004 已完成且 FND-004A 已通过；**目标机平台迁移已于 2026-08-23 完成**（HZHY 镜像刷写 JetPack 6.2 / Ubuntu 22.04.5，加固与 ROS 2 Humble 安装完毕）；下一任务为 FND-006；未启用 CAN、未控制设备
+> 最近收敛：2026-08-24（FND-010～FND-014、RSP-002 与 INT-001 实现完成；FND-015 RC 验证中）
+> 当前状态：FND-000～FND-014、RSP-001/RSP-002 与 INT-001 已完成实现；FND-015 正在补齐 ARM64、30 分钟稳定性和 vcan 证据；未启用物理 CAN、未控制设备
+
+FND-004 已完成，FND-004A 也已通过并完成 tag/主分支保护切换；当前闸门已前移至 FND-015 Foundation RC 验证。
 
 ## 1. 权威边界
 
@@ -41,8 +43,9 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 | FND-005 | 已完成 | frame/time/status 核心类型和边界测试已合并（PR #1） |
 | FND-006～FND-009 | 已完成 | config/capability/schema、fake clock/transport、router、snapshot/lease/BusRuntime 均已通过纯 C++ 确定性测试 |
 | RSP-001 | 已完成 | SocketCAN RAW socket 与 HighTorque USB-CDC/USB2CAN 离线评估记录已完成；真实 backend 仍需后续实现/证据 |
-| FND-010～FND-015 | 待开始 | 通过任务分支和 PR 完成 SocketCAN、模拟链路、ros2_control、性能及 Foundation RC |
-| INT-001 以后 | Foundation RC 后 | 冻结 adapter 模板，再接入 CubeMars、HI12 与 HIL |
+| FND-010～FND-014、RSP-002 | 实现完成 | SocketCAN、注入式 USB-CDC、模拟链路、ros2_control 与集成测试已在任务分支通过本机验证 |
+| FND-015 | RC 验证中 | 本机 clean build/test 与 ASan/UBSan 已通过；待 ARM64、30 分钟稳定性和 vcan 证据 |
+| INT-001 | 模板已冻结 | AdapterContract v1、抽象接口和新 adapter checklist 已建立；不包含真实 CubeMars/HI12 adapter |
 
 如果烟测后需要修复，必须在新 commit 上重新完整执行 FND-004A；里程碑 tag 不得指向未实际通过的 commit。
 
