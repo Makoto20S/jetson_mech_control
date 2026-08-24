@@ -21,6 +21,7 @@ set +u
 # shellcheck disable=SC1091
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
 set -u
+SYSTEM_PATH="/opt/ros/${ROS_DISTRO}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 for required_command in colcon; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
@@ -45,19 +46,21 @@ if [[ "${MECH_SKIP_ROSDEP:-0}" != "1" ]]; then
     -y
 fi
 
-colcon --log-base "${OUTPUT_ROOT}/log" build \
+env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" build \
   --base-paths "${REPO_ROOT}/ros2_ws/src" \
   --build-base "${OUTPUT_ROOT}/build" \
   --install-base "${OUTPUT_ROOT}/install" \
   --symlink-install \
-  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  --cmake-args \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DPython3_EXECUTABLE=/usr/bin/python3
 
-colcon --log-base "${OUTPUT_ROOT}/log" test \
+env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" test \
   --base-paths "${REPO_ROOT}/ros2_ws/src" \
   --build-base "${OUTPUT_ROOT}/build" \
   --install-base "${OUTPUT_ROOT}/install" \
   --event-handlers console_direct+
 
-colcon test-result \
+env PATH="${SYSTEM_PATH}" colcon test-result \
   --test-result-base "${OUTPUT_ROOT}/build" \
   --verbose

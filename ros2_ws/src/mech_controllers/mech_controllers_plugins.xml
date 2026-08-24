@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<library path="mech_controllers">
+  <class name="mech_controllers/DemoController"
+         type="mech::mech_controllers::DemoController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Bounded position demo controller with slew and TTL.</description>
+  </class>
+</library>

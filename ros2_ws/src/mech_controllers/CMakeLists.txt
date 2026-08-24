@@ -9,9 +9,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
 find_package(ament_cmake REQUIRED)
+find_package(controller_interface REQUIRED)
 find_package(mech_control_core REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 
-add_library(${PROJECT_NAME} src/package_marker.cpp)
+add_library(${PROJECT_NAME} SHARED
+  src/package_marker.cpp
+  src/demo_controller.cpp
+)
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -20,6 +27,11 @@ target_include_directories(${PROJECT_NAME}
 ament_target_dependencies(
   ${PROJECT_NAME}
   mech_control_core)
+ament_target_dependencies(${PROJECT_NAME}
+  controller_interface pluginlib rclcpp rclcpp_lifecycle)
+
+pluginlib_export_plugin_description_file(
+  controller_interface mech_controllers_plugins.xml)
 
 install(TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
@@ -29,13 +41,17 @@ install(TARGETS ${PROJECT_NAME}
 )
 install(DIRECTORY include/ DESTINATION include)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(mech_control_core)
+ament_export_dependencies(
+  controller_interface mech_control_core pluginlib rclcpp rclcpp_lifecycle)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
-  ament_add_gtest(${PROJECT_NAME}_test test/test_package_marker.cpp)
+  ament_add_gtest(${PROJECT_NAME}_test
+    test/test_demo_controller.cpp
+    test/test_package_marker.cpp
+  )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_lint_cmake()
   ament_xmllint()

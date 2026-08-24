@@ -1,9 +1,9 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
-> 最近收敛：2026-08-24（FND-006～FND-009 core/runtime 实现与 RSP-001 transport 离线评估完成）
+> 最近收敛：2026-08-24（FND-010～FND-014、RSP-002 与 INT-001 实现完成；FND-015 RC 验证中）
 > 当前实施入口：本文件
-> 当前状态：FND-000～FND-004 已完成；下一步是在 FND-005 前执行 FND-004A Jetson ARM64 原生烟测
+> 当前状态：FND-000～FND-014、RSP-001/RSP-002 与 INT-001 已完成实现；FND-015 待补齐 ARM64、30 分钟稳定性与 vcan 证据
 > 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
 
 ## 1. 决策结论
@@ -453,18 +453,16 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 
 1. 读 [规划索引](README.md)、本文件、[ADR 索引](../adr/README.md)和当前 GitHub Milestone/Issue；
 2. 核对实际 branch/HEAD/status 与最近验证，不从归档、旧 memory 或旧 handoff 推断当前状态；
-3. FND-004A 前以 [ARM64 烟测清单](../development/jetson_arm64_smoke_test.md)为下一闸门；tag/保护切换后，确认自己位于任务分支而不是受保护 `main` 再编辑。
+3. 当前以 [Foundation RC 验证清单](../development/foundation_validation.md)为 FND-015 闸门；确认自己位于任务分支而不是受保护 `main` 再编辑。
 
 ## 16. 立即执行顺序
 
-当前下一步不是写 CAN 协议，也不是连接硬件，而是：
+当前下一步不是写真实设备协议，也不是连接硬件，而是：
 
-1. FND-000～FND-004 与 post-FND-004 文档收敛已完成；
-2. ~~目标机平台迁移~~ **已于 2026-08-23 完成**：HZHY 适配镜像 + `l4t_initrd_flash` 刷写 JetPack 6.2 / L4T R36.4.3 / Ubuntu 22.04.5，首启验收、`nvidia-l4t-*` 锁定加固与 ROS 2 Humble 安装完毕（记录见[升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md) §12.0/§14.0）；
-3. **当前下一步是执行 FND-004A**：在 Jetson ARM64 原生环境从 clean clone 执行无 CAN/无设备烟测并记录版本与结果；
-4. 若发现问题，在 `main` 修复后对新 commit 重跑完整 FND-004A；旧烟测结果不得沿用；
-5. 给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed`，推送 tag 后启用 `main` protection 和 required checks；
-6. FND-005 起从最新受保护 `main` 创建短生命周期任务分支并通过 PR 合并；仓库所有者使用同仓分支，外部成员可 fork；
-7. 从 FND-005 开始写第一行业务核心代码，不提前实现真实厂商 adapter。
+1. FND-000～FND-014、RSP-001/RSP-002 与 INT-001 的实现已在任务分支形成三个语义 commit；
+2. 本机五包 clean build/test（74 tests）和 ASan/UBSan 已通过；
+3. **当前下一步是 FND-015 RC 取证**：在 exact commit 上完成 vcan 软件集成、Jetson ARM64 clean build/test 和 30 分钟模拟稳定性运行；
+4. 通过同一个受保护 PR 合并，不在证据未完整前创建 `v0.1.0-foundation-rc1` tag；
+5. RC 完成后才能开始真实 L02/HI12 adapter，且仍需分别通过 G0～G3。
 
-平台迁移与 ROS 2 Humble 安装已完成，但仍未授权启用 CAN、发送电机命令或操作真实设备。FND-004A 在 Jetson 上执行依赖解析和用户态 build/test 时不得借此启用 CAN 或操作设备；如需安装缺失系统依赖，遵守目标机"只 `apt update` + `apt install`、禁止 `apt upgrade`"的纪律（升级教程 §12.1）。
+目标机依赖已满足，但仍未授权启用物理 CAN、发送电机命令或操作真实设备。ARM64 验证不得借此启用 CAN；如需安装缺失系统依赖，继续遵守目标机“只 `apt update` + `apt install`、禁止 `apt upgrade`”纪律（升级教程 §12.1）。

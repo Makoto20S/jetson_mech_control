@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<library path="mech_hardware_ros2_control">
+  <class name="mech_hardware_ros2_control/CompositeSystem"
+         type="mech::mech_hardware_ros2_control::CompositeSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>Thin canonical composite Foundation SystemInterface.</description>
+  </class>
+</library>

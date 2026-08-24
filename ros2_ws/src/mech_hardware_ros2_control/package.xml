@@ -6,11 +6,16 @@
   <maintainer email="project-owners@example.invalid">Project Owners</maintainer>
   <license>Internal Research Use - All Rights Reserved</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>hardware_interface</depend>
   <depend>mech_control_core</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_lint_cmake</test_depend>
   <test_depend>ament_cmake_xmllint</test_depend>
   <export>
     <build_type>ament_cmake</build_type>
+    <hardware_interface plugin="${prefix}/mech_hardware_plugins.xml"/>
   </export>
 </package>
