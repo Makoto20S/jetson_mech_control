@@ -41,7 +41,6 @@ if [[ "${MECH_SKIP_ROSDEP:-0}" != "1" ]]; then
     --from-paths "${REPO_ROOT}/ros2_ws/src" \
     --ignore-src \
     --rosdistro "${ROS_DISTRO}" \
-    --reinstall \
     -r \
     -y
 fi
