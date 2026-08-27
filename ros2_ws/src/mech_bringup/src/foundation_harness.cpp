@@ -42,7 +42,8 @@ bool FoundationHarness::configure(std::size_t joint_count) noexcept {
       hardware_.on_configure(state()) !=
           hardware_interface::CallbackReturn::SUCCESS ||
       !limiter_.configure(mech_controllers::BoundedTarget{-1.0, 1.0, 2.0,
-                                                           100000000})) {
+                                                           100000000,
+                                                           200000000})) {
     return false;
   }
   state_interfaces_ = hardware_.export_state_interfaces();
@@ -86,15 +87,18 @@ bool FoundationHarness::cycle(std::int64_t now_nanoseconds,
                               std::int64_t period_nanoseconds) noexcept {
   if (!active_ || !claimed_ || period_nanoseconds <= 0) return false;
   const auto started = std::chrono::steady_clock::now();
+  const rclcpp::Time time(now_nanoseconds);
+  const rclcpp::Duration period{std::chrono::nanoseconds(period_nanoseconds)};
+  // ros2_control's real control loop is read -> update -> write: the state
+  // read must reflect hardware as of the *previous* write, not the command
+  // this cycle is about to produce.
+  const auto read = hardware_.read(time, period);
   const auto previous = command_interfaces_[0].get_value();
   const auto next = limiter_.update(
       previous, static_cast<double>(period_nanoseconds) / 1000000000.0,
       now_nanoseconds);
   command_interfaces_[0].set_value(next);
-  const rclcpp::Time time(now_nanoseconds);
-  const rclcpp::Duration period{std::chrono::nanoseconds(period_nanoseconds)};
   const auto wrote = hardware_.write(time, period);
-  const auto read = hardware_.read(time, period);
   const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now() - started).count();
   ++metrics_.cycles;
