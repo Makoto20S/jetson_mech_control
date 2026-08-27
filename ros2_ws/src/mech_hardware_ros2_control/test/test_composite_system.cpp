@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <vector>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
@@ -34,6 +35,42 @@ hardware_interface::HardwareInfo info(std::size_t joints = 2U) {
   }
   return result;
 }
+
+// info() variant where the first joint's name itself contains a '/', to
+// exercise interface-name resolution that must split on the *last* slash.
+hardware_interface::HardwareInfo info_with_slash_joint_name() {
+  auto result = info(2U);
+  result.joints[0].name = "arm/j1";
+  return result;
+}
+
+// RuntimePort double whose read() reports a NaN position, simulating a
+// device adapter that decoded a corrupt frame.
+class NanReadRuntime final : public RuntimePort {
+ public:
+  bool configure(std::size_t resource_count) noexcept override {
+    count_ = resource_count;
+    return resource_count > 0U;
+  }
+  bool start() noexcept override {
+    running_ = count_ > 0U;
+    return running_;
+  }
+  void stop() noexcept override { running_ = false; }
+  bool read(CanonicalState* states, std::size_t count) noexcept override {
+    if (!running_ || states == nullptr || count != count_) return false;
+    for (std::size_t index = 0U; index < count; ++index) {
+      states[index] = CanonicalState{};
+    }
+    states[0].position = std::numeric_limits<double>::quiet_NaN();
+    return true;
+  }
+  bool write(const CanonicalCommand*, std::size_t) noexcept override { return true; }
+
+ private:
+  bool running_{false};
+  std::size_t count_{0U};
+};
 
 rclcpp_lifecycle::State state() {
   return rclcpp_lifecycle::State(
@@ -108,6 +145,86 @@ TEST(CompositeSystem, RepeatsLifecycleAndLatchesInvalidCommandFault) {
             hardware_interface::return_type::OK);
   commands[0].set_value(std::numeric_limits<double>::quiet_NaN());
   EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1)),
+            hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(system.fault_latched());
+}
+
+// Regression test for a heap-buffer-overflow (ASan-confirmed): interface
+// names are "<joint>/<interface>", so a joint name that itself contains '/'
+// (e.g. "arm/j1" -> "arm/j1/position") made the old find('/')-based lookup
+// resolve to the wrong joint substring, miss in joint_names_, and index
+// claimed_ with joint_names_.size() (one past the end). This exercises both
+// the start_interfaces and stop_interfaces loops in
+// perform_command_mode_switch with a slash-bearing joint name.
+TEST(CompositeSystem, HandlesJointNamesContainingSlashInModeSwitch) {
+  CompositeSystem system;
+  ASSERT_EQ(system.on_init(info_with_slash_joint_name()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_configure(state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
+
+  // start_interfaces loop: claim the slash-named joint's command interface.
+  ASSERT_EQ(system.prepare_command_mode_switch({"arm/j1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(system.perform_command_mode_switch({"arm/j1/position"}, {}),
+            hardware_interface::return_type::OK);
+
+  // stop_interfaces loop: release it again via the same slash-named joint.
+  ASSERT_EQ(system.prepare_command_mode_switch({}, {"arm/j1/position"}),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(system.perform_command_mode_switch({}, {"arm/j1/position"}),
+            hardware_interface::return_type::OK);
+  EXPECT_FALSE(system.fault_latched());
+}
+
+TEST(CompositeSystem, RejectsNonFiniteOnUnclaimedCommandInterface) {
+  CompositeSystem system;
+  ASSERT_EQ(system.on_init(info(2U)), hardware_interface::CallbackReturn::SUCCESS);
+  auto commands = system.export_command_interfaces();
+  ASSERT_EQ(system.on_configure(state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
+  // Claim only joint_1; joint_2's command interface is left unclaimed.
+  ASSERT_EQ(system.prepare_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+
+  commands[1].set_value(std::numeric_limits<double>::quiet_NaN());
+  EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1)),
+            hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(system.fault_latched());
+}
+
+TEST(CompositeSystem, RejectsInfOnUnclaimedCommandInterface) {
+  CompositeSystem system;
+  ASSERT_EQ(system.on_init(info(2U)), hardware_interface::CallbackReturn::SUCCESS);
+  auto commands = system.export_command_interfaces();
+  ASSERT_EQ(system.on_configure(state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.prepare_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+
+  commands[1].set_value(std::numeric_limits<double>::infinity());
+  EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1)),
+            hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(system.fault_latched());
+}
+
+TEST(CompositeSystem, LatchesFaultWhenRuntimeReadReturnsNonFiniteState) {
+  CompositeSystem system;
+  ASSERT_TRUE(system.set_runtime(std::make_unique<NanReadRuntime>()));
+  ASSERT_EQ(system.on_init(info(2U)), hardware_interface::CallbackReturn::SUCCESS);
+  auto states = system.export_state_interfaces();
+  ASSERT_EQ(system.on_configure(state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
+
+  EXPECT_EQ(system.read(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
             hardware_interface::return_type::ERROR);
   EXPECT_TRUE(system.fault_latched());
 }

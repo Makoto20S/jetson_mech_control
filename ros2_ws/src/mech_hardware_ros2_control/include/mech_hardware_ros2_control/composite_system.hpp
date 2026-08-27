@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,11 @@ class CompositeSystem final : public hardware_interface::SystemInterface {
       const std::vector<std::string>& start_interfaces,
       const std::vector<std::string>& stop_interfaces) const noexcept;
   [[nodiscard]] bool known_command_interface(const std::string& name) const noexcept;
+  // Resolves "<joint>/<interface>" to an index into joint_names_. Joint names
+  // may themselves contain '/', so the interface suffix is split off from the
+  // right; returns std::nullopt if no known joint matches the resolved prefix.
+  [[nodiscard]] std::optional<std::size_t> resolve_joint_index(
+      const std::string& name) const noexcept;
 
   std::unique_ptr<RuntimePort> runtime_;
   std::vector<std::string> joint_names_;

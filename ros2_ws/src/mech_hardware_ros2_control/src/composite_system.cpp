@@ -199,11 +199,22 @@ hardware_interface::CallbackReturn CompositeSystem::on_error(
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
+std::optional<std::size_t> CompositeSystem::resolve_joint_index(
+    const std::string& name) const noexcept {
+  // Joint names may contain '/', so split the interface suffix off from the
+  // right rather than the left (e.g. "arm/j1/position" -> joint "arm/j1").
+  const auto slash = name.rfind('/');
+  if (slash == std::string::npos) return std::nullopt;
+  const auto joint = name.substr(0U, slash);
+  const auto found = std::find(joint_names_.begin(), joint_names_.end(), joint);
+  if (found == joint_names_.end()) return std::nullopt;
+  return static_cast<std::size_t>(found - joint_names_.begin());
+}
+
 bool CompositeSystem::known_command_interface(const std::string& name) const noexcept {
-  for (const auto& joint : joint_names_) {
-    if (name == joint + "/" + hardware_interface::HW_IF_POSITION) return true;
-  }
-  return false;
+  const auto index = resolve_joint_index(name);
+  if (!index.has_value()) return false;
+  return name == joint_names_[*index] + "/" + hardware_interface::HW_IF_POSITION;
 }
 
 bool CompositeSystem::validate_switch(
@@ -244,20 +255,18 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
   }
   auto next = claimed_;
   for (const auto& name : stop_interfaces) {
-    const auto slash = name.find('/');
-    const auto joint = name.substr(0U, slash);
-    const auto found = std::find(joint_names_.begin(), joint_names_.end(), joint);
-    const auto index = static_cast<std::size_t>(found - joint_names_.begin());
-    if (!next[index]) return hardware_interface::return_type::ERROR;
-    next[index] = false;
+    const auto index = resolve_joint_index(name);
+    // validate_switch() already checked known_command_interface(), but never
+    // index using a value derived from a failed lookup -- defence in depth.
+    if (!index.has_value()) return hardware_interface::return_type::ERROR;
+    if (!next[*index]) return hardware_interface::return_type::ERROR;
+    next[*index] = false;
   }
   for (const auto& name : start_interfaces) {
-    const auto slash = name.find('/');
-    const auto joint = name.substr(0U, slash);
-    const auto found = std::find(joint_names_.begin(), joint_names_.end(), joint);
-    const auto index = static_cast<std::size_t>(found - joint_names_.begin());
-    if (next[index]) return hardware_interface::return_type::ERROR;
-    next[index] = true;
+    const auto index = resolve_joint_index(name);
+    if (!index.has_value()) return hardware_interface::return_type::ERROR;
+    if (next[*index]) return hardware_interface::return_type::ERROR;
+    next[*index] = true;
   }
   claimed_ = std::move(next);
   return hardware_interface::return_type::OK;
@@ -269,14 +278,25 @@ hardware_interface::return_type CompositeSystem::read(
     fault_latched_ = true;
     return hardware_interface::return_type::ERROR;
   }
+  // A device adapter decoding a corrupt frame must not be able to push
+  // NaN/Inf into exported ros2_control state interfaces unnoticed.
+  for (const auto& state : states_) {
+    if (!std::isfinite(state.position) || !std::isfinite(state.velocity) ||
+        !std::isfinite(state.effort)) {
+      fault_latched_ = true;
+      return hardware_interface::return_type::ERROR;
+    }
+  }
   return hardware_interface::return_type::OK;
 }
 
 hardware_interface::return_type CompositeSystem::write(
     const rclcpp::Time&, const rclcpp::Duration&) {
   if (!active_ || fault_latched_) return hardware_interface::return_type::ERROR;
-  for (std::size_t index = 0U; index < commands_.size(); ++index) {
-    if (claimed_[index] && !std::isfinite(commands_[index].position)) {
+  // Every element of commands_ is handed to runtime_->write() below,
+  // including unclaimed interfaces, so every element must be validated.
+  for (const auto& command : commands_) {
+    if (!std::isfinite(command.position)) {
       fault_latched_ = true;
       return hardware_interface::return_type::ERROR;
     }
