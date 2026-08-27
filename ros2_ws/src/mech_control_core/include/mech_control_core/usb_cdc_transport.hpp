@@ -3,9 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "mech_control_core/transport.hpp"
 
@@ -38,8 +38,57 @@ struct UsbCdcOptions final {
 };
 
 struct CdcFrameBatch final {
-  std::array<RawCanFrame, 64U> frames{};
+  std::array<RawCanFrame, 64U> frames;
   std::size_t size{0U};
+};
+
+// Fixed-capacity FIFO of RawCanFrame. Storage is allocated exactly once, at
+// construction, so it is safe to push/pop on the real-time receive path
+// without incurring per-frame allocation.
+class RawCanFrameRing final {
+ public:
+  explicit RawCanFrameRing(std::size_t capacity) : storage_(capacity) {}
+
+  [[nodiscard]] bool empty() const noexcept { return count_ == 0U; }
+  [[nodiscard]] bool full() const noexcept { return count_ == storage_.size(); }
+  [[nodiscard]] std::size_t size() const noexcept { return count_; }
+  [[nodiscard]] std::size_t capacity() const noexcept { return storage_.size(); }
+
+  // Returns false without modifying the ring if it is already full.
+  bool push_back(const RawCanFrame& frame) noexcept {
+    if (full() || storage_.empty()) {
+      return false;
+    }
+    storage_[tail_] = frame;
+    tail_ = (tail_ + 1U) % storage_.size();
+    ++count_;
+    return true;
+  }
+
+  // Precondition: !empty().
+  [[nodiscard]] const RawCanFrame& front() const noexcept {
+    return storage_[head_];
+  }
+
+  void pop_front() noexcept {
+    if (empty()) {
+      return;
+    }
+    head_ = (head_ + 1U) % storage_.size();
+    --count_;
+  }
+
+  void clear() noexcept {
+    head_ = 0U;
+    tail_ = 0U;
+    count_ = 0U;
+  }
+
+ private:
+  std::vector<RawCanFrame> storage_;
+  std::size_t head_{0U};
+  std::size_t tail_{0U};
+  std::size_t count_{0U};
 };
 
 class UsbCdcCodec final {
@@ -83,7 +132,7 @@ class UsbCdcTransport final : public Transport {
   std::array<std::uint8_t, 1024U> input_{};
   std::array<std::uint8_t, 4096U> pending_{};
   std::size_t pending_size_{0U};
-  std::deque<RawCanFrame> rx_;
+  RawCanFrameRing rx_;
   TransportStats stats_{};
 };
 

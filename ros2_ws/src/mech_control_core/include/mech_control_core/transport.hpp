@@ -25,6 +25,15 @@ struct TransportStats final {
   std::uint64_t errors{0U};
 };
 
+// Thread-affinity: implementations are NOT required to be internally
+// synchronized (no mutex, no atomics), and none in this repository are.
+// A Transport instance is intended to be driven by exactly one thread --
+// the same "bus poller" thread that owns the BusRuntime wrapping it -- and
+// open()/close()/try_receive()/try_send() must be called serially from
+// that thread. is_open()/capabilities()/stats()/kind() may be read from
+// another thread only if the caller supplies its own external
+// synchronization against the poller thread; there is no such
+// synchronization built in.
 class Transport {
  public:
   virtual ~Transport() = default;
