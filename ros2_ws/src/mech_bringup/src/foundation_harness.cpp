@@ -41,9 +41,11 @@ bool FoundationHarness::configure(std::size_t joint_count) noexcept {
   if (hardware_.on_init(info) != hardware_interface::CallbackReturn::SUCCESS ||
       hardware_.on_configure(state()) !=
           hardware_interface::CallbackReturn::SUCCESS ||
+      // Matches the documented <=3 control cycle (<=6 ms at 500 Hz) command
+      // watchdog budget in docs/planning/03_mvp_delivery_plan.md.
       !limiter_.configure(mech_controllers::BoundedTarget{-1.0, 1.0, 2.0,
-                                                           100000000,
-                                                           200000000})) {
+                                                           4000000,
+                                                           6000000})) {
     return false;
   }
   state_interfaces_ = hardware_.export_state_interfaces();
@@ -94,6 +96,10 @@ bool FoundationHarness::cycle(std::int64_t now_nanoseconds,
   // this cycle is about to produce.
   const auto read = hardware_.read(time, period);
   const auto previous = command_interfaces_[0].get_value();
+  // Mirror DemoController::update(): past the hard deadline the command has
+  // lapsed and the cycle is a failure, so the harness exercises the same
+  // "enter a defined fault" path a real controller would.
+  const auto stage = limiter_.stage(now_nanoseconds);
   const auto next = limiter_.update(
       previous, static_cast<double>(period_nanoseconds) / 1000000000.0,
       now_nanoseconds);
@@ -105,7 +111,8 @@ bool FoundationHarness::cycle(std::int64_t now_nanoseconds,
   metrics_.maximum_cycle_nanoseconds =
       std::max(metrics_.maximum_cycle_nanoseconds, elapsed);
   if (wrote != hardware_interface::return_type::OK ||
-      read != hardware_interface::return_type::OK) {
+      read != hardware_interface::return_type::OK ||
+      stage == mech_controllers::WatchdogStage::Expired) {
     ++metrics_.failures;
     return false;
   }

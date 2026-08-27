@@ -11,8 +11,12 @@ struct BoundedTarget final {
   double minimum{-1.0};
   double maximum{1.0};
   double max_slew_per_second{1.0};
-  std::int64_t ttl_nanoseconds{100000000};
-  std::int64_t hard_ttl_nanoseconds{200000000};
+  // 03_mvp_delivery_plan.md:215 requires a stale command to lapse within
+  // <=3 control cycles, i.e. <=6 ms at the 500 Hz target loop. Two cycles of
+  // holding followed by a hard failure on the third keeps the whole watchdog
+  // inside that budget.
+  std::int64_t ttl_nanoseconds{4000000};
+  std::int64_t hard_ttl_nanoseconds{6000000};
 };
 
 // Watchdog stage for the most recent TargetLimiter::update() call:

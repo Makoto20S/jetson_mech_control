@@ -103,8 +103,8 @@ controller_interface::CallbackReturn DemoController::on_init() {
     auto_declare<double>("minimum", -1.0);
     auto_declare<double>("maximum", 1.0);
     auto_declare<double>("max_slew_per_second", 1.0);
-    auto_declare<int64_t>("ttl_nanoseconds", 100000000);
-    auto_declare<int64_t>("hard_ttl_nanoseconds", 200000000);
+    auto_declare<int64_t>("ttl_nanoseconds", 4000000);
+    auto_declare<int64_t>("hard_ttl_nanoseconds", 6000000);
   } catch (...) {
     return controller_interface::CallbackReturn::ERROR;
   }

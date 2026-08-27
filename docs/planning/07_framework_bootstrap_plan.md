@@ -126,7 +126,7 @@ FND-000～FND-003 已完成建仓、资产隔离、依赖和 CI 基线；详细�
 |---|---|
 | 主仓库 | 私有 `Makoto20S/jetson_mech_control`；当前 HEAD/branch/status 不写死在规划正文 |
 | 跟踪内容 | 代码、配置、测试、ADR、正式文档、manifest 和经许可审查的小型测试向量 |
-| 排除内容 | 独立 `CubeMars/`、供应商二进制、生成物、大日志/抓包、`tmp/`、`.codex/`、`.agents/` |
+| 排除内容 | 独立 `CubeMars/`、`company/`(供应商现场资料)、供应商二进制、生成物、大日志/抓包、`tmp/`、`.codex/`、`.agents/` |
 | 本地恢复 | `memory/` 由每位开发者本地维护并被 Git 忽略；共享任务进入 Issues/Milestones/PR |
 | 当前 packages | 只创建 `mech_control_core`、`mech_simulation`、`mech_hardware_ros2_control`、`mech_controllers`、`mech_bringup`；vendor packages 在契约稳定后按需创建 |
 | 治理切换 | FND-004A 通过后给实测 commit 创建 `fnd-004a-passed` tag 并保护 `main`；FND-005 起所有人经任务分支和 PR 合并 |
@@ -254,6 +254,7 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 | [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) | Accepted | 单调时钟、源时间、到达时间和 freshness/TTL 的语义 |
 | [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 当前单物理通道及其 backend 只是等待逐台配置、能力和总线证据的条件式 profile；架构保留双总线 |
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort` 的物理语义闸门，框架 demo 与力矩精度分开验收 |
+| [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Proposed | 命令看门狗分级语义（跟随/冻结/失败）、transport 能力三态上报与远程帧表达；Foundation RC 评审后的追认记录，未复核前不得当作已接受约束 |
 
 七份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
 
@@ -460,7 +461,7 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 当前下一步不是写真实设备协议，也不是连接硬件，而是：
 
 1. FND-000～FND-014、RSP-001/RSP-002 与 INT-001 的实现已在任务分支形成三个语义 commit；
-2. 本机五包 clean build/test（74 tests）和 ASan/UBSan 已通过；
+2. 本机五包 clean build/test（116 tests）和 ASan/UBSan 已通过；该计数包含 Foundation RC 评审后补充的回归测试。
 3. **当前下一步是 FND-015 RC 取证**：在 exact commit 上完成 vcan 软件集成、Jetson ARM64 clean build/test 和 30 分钟模拟稳定性运行；
 4. 通过同一个受保护 PR 合并，不在证据未完整前创建 `v0.1.0-foundation-rc1` tag；
 5. RC 完成后才能开始真实 L02/HI12 adapter，且仍需分别通过 G0～G3。

@@ -212,7 +212,7 @@
 | 控制器切换 | STRICT 切换 100 次无资源泄漏；输出变化不越 slew；命令无效窗口 <=2 控制周期 | mock + 台架低能量 | 有依据的推断 |
 | 500 Hz 循环 | 2 ms 目标；nominal 与压力各 30 min：初始门槛 p99 周期误差 <=0.25 ms，p99.9 <=0.5 ms，最大 <=1 ms；连续 miss 不超过 1 次 | 单调时间直方图，保留完整原始样本；门槛须在控制需求评审后锁定 | 有依据的推断 |
 | 1 kHz 控制候选 | 1 ms controller_manager 循环可配置；先允许电机 I/O 保持 500 Hz，不把重复快照伪装为新反馈 | nominal/stress 对比 500 Hz，记录状态 age 和实际 `dt` | 有依据的推断 |
-| 命令 watchdog | controller_manager 不再刷新时，软件命令在 <=3 个控制周期内失效（500 Hz 为 <=6 ms）并进入已定义 neutral/fault；驱动器物理行为另行确认 | 模拟线程 stall；真实硬件仅 G3 后 | 有依据的推断 |
+| 命令 watchdog | controller_manager 不再刷新时，软件命令在 <=3 个控制周期内失效（500 Hz 为 <=6 ms）并进入已定义 fault；分级语义见 [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md)：软 TTL 后冻结最后一个有效命令，硬 TTL 后显式失败。位置类命令的「neutral」不得实现为运动到零位；驱动器物理行为另行确认 | 模拟线程 stall；真实硬件仅 G3 后 | 有依据的推断 |
 | CAN nominal | 每总线平均占用 <=50%，任意 1 s 峰值 <=60%；RX dropped/overrun=0；bus error/bus-off=0 | `canbusload`、接口统计、应用 counter | 有依据的推断 |
 | 诊断 | 所有故障注入在 1 个诊断发布周期内可见，包含首次时间、原始码、计数、设备和 lifecycle 状态 | 故障矩阵 | 有依据的推断 |
 | 可复现 | 每次正式实验绑定 Git commit/tag、配置 SHA-256、设备身份、host manifest、rosbag/candump URI 与哈希 | manifest 自动校验 | 有依据的推断 |

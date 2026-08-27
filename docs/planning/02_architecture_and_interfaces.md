@@ -334,7 +334,7 @@ stateDiagram-v2
 | 单帧迟到 | 保留上一值并增加 age，不伪造更新 | 计数/直方图 | 自动 | 有依据的推断 |
 | 关键状态超过 fault threshold | 拒绝新运动命令，按策略 neutral | hardware ERROR/锁存原因 | 显式 | 有依据的推断 |
 | Python 目标过期 | 本地 fallback 或 neutral | 目标超时诊断 | 新序号且策略允许 | 有依据的推断 |
-| controller_manager 未刷新租约 | 独立 TX 线程在 TTL 后 neutral | watchdog 计数 | 显式复核 | 有依据的推断 |
+| controller_manager 未刷新租约 | core `CommandSlot` 在 deadline 后直接失效停发；controller 层按 [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) 软 TTL 冻结、硬 TTL 显式失败，位置命令不回零 | watchdog 计数 | 显式复核 | 有依据的推断 |
 | 进程崩溃 | 软件线程无法保证发送 neutral | 依赖已确认的驱动器 watchdog 或物理断能 | B 与项目负责人在 G3 前用固件资料和低能量断包试验确认；人工恢复 | 待确认项 |
 | backend 报告 bus-off/error-passive，或链路断开 | 停止命令、保存可用的错误帧/接口/链路统计 | FAULT_LATCHED | 不默认自动 restart；缺少必需错误能力时拒绝该 deployment | 有依据的推断 |
 | 设备故障码 | 不覆盖/清除；按映射停用 | 保留原始码、解释和首发时间 | 按手册和台架流程 | 有依据的推断 |
@@ -406,6 +406,7 @@ FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 | [ADR-005](../adr/ADR-005-monotonic-time-freshness.md) | Accepted | 单调时钟管理 freshness/TTL，源时间和到达时间独立保存 |
 | [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 单物理通道及其 transport backend 只是等待逐台配置、能力、ID/位速率和负载证据的条件式 deployment profile；架构保留双总线 |
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort [N*m]` 受物理语义证据闸门约束；demo 与物理精度分开验收 |
+| [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Proposed | 命令看门狗分级语义（跟随/冻结/失败）、transport 能力三态上报与远程帧表达；Foundation RC 评审后的追认记录，未复核前不得当作已接受约束 |
 
 状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
 
