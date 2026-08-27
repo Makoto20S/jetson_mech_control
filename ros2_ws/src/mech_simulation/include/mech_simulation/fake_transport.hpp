@@ -17,9 +17,29 @@ class FakeTransport final : public mech_control_core::Transport {
 
   [[nodiscard]] static mech_control_core::TransportCapabilities
   default_capabilities() noexcept {
-    return mech_control_core::TransportCapabilities{
-        true, true, true, true, true, true, true, false, true, true, 1000000U,
-        64U, 16U};
+    // Named assignment on purpose: this struct is mostly booleans, so
+    // positional aggregate initialization would silently shift every later
+    // field the moment one is inserted.
+    mech_control_core::TransportCapabilities capabilities;
+    capabilities.supports_classic_can = true;
+    capabilities.supports_can_fd = true;
+    capabilities.supports_brs = true;
+    capabilities.supports_standard_frames = true;
+    capabilities.supports_extended_frames = true;
+    capabilities.supports_filters = true;
+    capabilities.supports_error_frames = true;
+    capabilities.supports_timestamps = false;
+    capabilities.supports_non_blocking_io = true;
+    capabilities.supports_remote_frames = true;
+    capabilities.nominal_bitrate_configurable = true;
+    // A simulated bus: the value is whatever this fake declares, which is the
+    // only sense in which it can be verified.
+    capabilities.nominal_bitrate_hz = 1000000U;
+    capabilities.nominal_bitrate_verified = true;
+    capabilities.max_payload_bytes = 64U;
+    capabilities.queue_capacity = 16U;
+    capabilities.queue_capacity_verified = true;
+    return capabilities;
   }
 
   [[nodiscard]] mech_control_core::TransportKind kind() const noexcept override {

@@ -51,21 +51,30 @@ SocketCanTransport::~SocketCanTransport() { close(); }
 
 TransportCapabilities SocketCanTransport::capabilities_for(
     const SocketCanOptions& options) noexcept {
-  return TransportCapabilities{true,
-                               options.enable_can_fd,
-                               options.enable_can_fd,
-                               true,
-                               true,
-                               true,
-                               options.enable_error_frames,
-                               true,
-                               true,
-                               false,
-                               options.nominal_bitrate_hz,
-                               static_cast<std::uint8_t>(
-                                   options.enable_can_fd ? 64U : 8U),
-                               static_cast<std::uint16_t>(std::min<std::size_t>(
-                                   options.receive_queue_capacity, 65535U))};
+  // Named assignment on purpose: this struct is mostly booleans, so positional
+  // aggregate initialization would silently shift every later field the moment
+  // one is inserted.
+  TransportCapabilities capabilities;
+  capabilities.supports_classic_can = true;
+  capabilities.supports_can_fd = options.enable_can_fd;
+  capabilities.supports_brs = options.enable_can_fd;
+  capabilities.supports_standard_frames = true;
+  capabilities.supports_extended_frames = true;
+  capabilities.supports_filters = true;
+  capabilities.supports_error_frames = options.enable_error_frames;
+  capabilities.supports_timestamps = true;
+  capabilities.supports_non_blocking_io = true;
+  capabilities.supports_remote_frames = true;
+  capabilities.nominal_bitrate_configurable = false;
+  // Declared until open() reads the real value back from netlink.
+  capabilities.nominal_bitrate_hz = options.nominal_bitrate_hz;
+  capabilities.nominal_bitrate_verified = false;
+  capabilities.max_payload_bytes =
+      static_cast<std::uint8_t>(options.enable_can_fd ? 64U : 8U);
+  capabilities.queue_capacity = static_cast<std::uint16_t>(
+      std::min<std::size_t>(options.receive_queue_capacity, 65535U));
+  capabilities.queue_capacity_verified = false;
+  return capabilities;
 }
 
 TransportKind SocketCanTransport::kind() const noexcept {

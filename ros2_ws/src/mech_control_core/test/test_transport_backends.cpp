@@ -77,10 +77,25 @@ TEST(SocketCanTransport, InvalidInterfaceDoesNotOpenDevice) {
   EXPECT_EQ(transport.try_receive(received), TransportResult::Disconnected);
 }
 
+TEST(SocketCanTransport, UndeclaredBitrateIsUnknownRatherThanInvalid) {
+  // A vcan interface genuinely has no bitrate. Requiring one here used to
+  // force the operator to invent a number, which is exactly the synthesized
+  // capability the transport contract forbids. Unknown-and-unverified is a
+  // legal state; only "verified but zero" is self-contradictory.
+  SocketCanOptions options;
+  options.interface_name = "vcan0";
+  options.logical_bus = 1U;
+  SocketCanTransport transport(options);
+  EXPECT_EQ(transport.capabilities().nominal_bitrate_hz, 0U);
+  EXPECT_FALSE(transport.capabilities().nominal_bitrate_verified);
+  EXPECT_TRUE(transport.capabilities().is_valid());
+}
+
 TEST(SocketCanTransport, RejectsInvalidCapabilityBeforeSocketCall) {
   SocketCanOptions options;
   options.interface_name = "vcan0";
   options.logical_bus = 1U;
+  options.receive_queue_capacity = 0U;  // no queue at all is still nonsense
   SocketCanTransport transport(options);
   EXPECT_FALSE(transport.capabilities().is_valid());
   EXPECT_FALSE(transport.open());

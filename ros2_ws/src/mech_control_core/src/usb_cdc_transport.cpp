@@ -170,11 +170,29 @@ bool UsbCdcCodec::supports_version(CdcProtocolVersion version) noexcept {
 
 UsbCdcTransport::UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options)
     : serial_(serial), options_(options) {
-  capabilities_ = TransportCapabilities{true, true, true, true, true, false,
-                                         false, false, true, false,
-                                         options_.nominal_bitrate_hz, 64U,
-                                         static_cast<std::uint16_t>(std::min<std::size_t>(
-                                             options_.receive_queue_capacity, 65535U))};
+  // Named assignment on purpose: see the note in SocketCanTransport.
+  capabilities_.supports_classic_can = true;
+  capabilities_.supports_can_fd = true;
+  capabilities_.supports_brs = true;
+  capabilities_.supports_standard_frames = true;
+  capabilities_.supports_extended_frames = true;
+  capabilities_.supports_filters = false;
+  capabilities_.supports_error_frames = false;
+  capabilities_.supports_timestamps = false;
+  capabilities_.supports_non_blocking_io = true;
+  // The documented pass-through command has no RTR bit.
+  capabilities_.supports_remote_frames = false;
+  capabilities_.nominal_bitrate_configurable = false;
+  // The board's bus bitrate is firmware-fixed and the vendor does not document
+  // it, and the protocol offers no way to read it back. It is therefore only
+  // ever operator-declared, and zero legitimately means "unknown".
+  capabilities_.nominal_bitrate_hz = options_.nominal_bitrate_hz;
+  capabilities_.nominal_bitrate_verified = false;
+  capabilities_.max_payload_bytes = 64U;
+  capabilities_.queue_capacity = static_cast<std::uint16_t>(
+      std::min<std::size_t>(options_.receive_queue_capacity, 65535U));
+  // This is our own software queue, so its capacity is a fact we control.
+  capabilities_.queue_capacity_verified = true;
 }
 
 TransportKind UsbCdcTransport::kind() const noexcept {
