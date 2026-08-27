@@ -33,6 +33,24 @@ enum class ProtocolProfile : std::uint8_t {
   Hi12Canopen,
 };
 
+// Capability reporting contract
+// ----------------------------
+// A backend must report what it actually knows, never a synthesized value.
+// For every quantity that could be either measured or merely asserted there is
+// an explicit `*_verified` flag:
+//
+//   verified == true   the backend read this value back from the real channel
+//                      in this process (netlink, an ioctl, a getsockopt, ...).
+//   verified == false  and value != 0   an operator declared it; nothing
+//                      checked it.
+//   verified == false  and value == 0   genuinely unknown, and deliberately
+//                      not claimed. This is a legal state: a vcan interface
+//                      has no bitrate, and the seven-channel USB-CDC board's
+//                      bitrate is firmware-fixed and undocumented. Forcing a
+//                      number here would only invite an invented one.
+//
+// Consequently `is_valid()` does NOT require a non-zero bitrate. It only
+// rejects the self-contradictory combination "verified but zero".
 struct TransportCapabilities final {
   bool supports_classic_can{false};
   bool supports_can_fd{false};
@@ -43,18 +61,24 @@ struct TransportCapabilities final {
   bool supports_error_frames{false};
   bool supports_timestamps{false};
   bool supports_non_blocking_io{false};
+  bool supports_remote_frames{false};
   bool nominal_bitrate_configurable{false};
   std::uint32_t nominal_bitrate_hz{0U};
+  bool nominal_bitrate_verified{false};
   std::uint8_t max_payload_bytes{0U};
   std::uint16_t queue_capacity{0U};
+  bool queue_capacity_verified{false};
 
   [[nodiscard]] bool is_valid() const noexcept {
     if (max_payload_bytes == 0U || max_payload_bytes > kMaxCanPayloadBytes ||
         queue_capacity == 0U ||
         (!supports_classic_can && !supports_can_fd) ||
         (!supports_standard_frames && !supports_extended_frames) ||
-        !supports_non_blocking_io || nominal_bitrate_hz == 0U ||
-        (supports_brs && !supports_can_fd)) {
+        !supports_non_blocking_io ||
+        (nominal_bitrate_verified && nominal_bitrate_hz == 0U) ||
+        (queue_capacity_verified && queue_capacity == 0U) ||
+        (supports_brs && !supports_can_fd) ||
+        (supports_remote_frames && !supports_classic_can)) {
       return false;
     }
     if (supports_classic_can && max_payload_bytes < 8U) {

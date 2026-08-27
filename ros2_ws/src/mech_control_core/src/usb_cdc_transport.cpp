@@ -92,8 +92,6 @@ bool UsbCdcCodec::encode(const RawCanFrame& frame,
   output[1] = kPassCommand;
   put_u16(output.data() + 2U, static_cast<std::uint16_t>(payload_length));
   output[4] = crc8(output.data() + 1U, 3U);
-  put_u16(output.data() + 5U,
-          crc16(output.data() + 7U, payload_length));  // filled below
   put_u32(output.data() + 7U, frame.id.value);
   output[11] = static_cast<std::uint8_t>(
       (frame.bitrate_switch ? 0x01U : 0U) |
@@ -169,12 +167,32 @@ bool UsbCdcCodec::supports_version(CdcProtocolVersion version) noexcept {
 }
 
 UsbCdcTransport::UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options)
-    : serial_(serial), options_(options) {
-  capabilities_ = TransportCapabilities{true, true, true, true, true, false,
-                                         false, false, true, false,
-                                         options_.nominal_bitrate_hz, 64U,
-                                         static_cast<std::uint16_t>(std::min<std::size_t>(
-                                             options_.receive_queue_capacity, 65535U))};
+    : serial_(serial),
+      options_(options),
+      rx_(options_.receive_queue_capacity) {
+  // Named assignment on purpose: see the note in SocketCanTransport.
+  capabilities_.supports_classic_can = true;
+  capabilities_.supports_can_fd = true;
+  capabilities_.supports_brs = true;
+  capabilities_.supports_standard_frames = true;
+  capabilities_.supports_extended_frames = true;
+  capabilities_.supports_filters = false;
+  capabilities_.supports_error_frames = false;
+  capabilities_.supports_timestamps = false;
+  capabilities_.supports_non_blocking_io = true;
+  // The documented pass-through command has no RTR bit.
+  capabilities_.supports_remote_frames = false;
+  capabilities_.nominal_bitrate_configurable = false;
+  // The board's bus bitrate is firmware-fixed and the vendor does not document
+  // it, and the protocol offers no way to read it back. It is therefore only
+  // ever operator-declared, and zero legitimately means "unknown".
+  capabilities_.nominal_bitrate_hz = options_.nominal_bitrate_hz;
+  capabilities_.nominal_bitrate_verified = false;
+  capabilities_.max_payload_bytes = 64U;
+  capabilities_.queue_capacity = static_cast<std::uint16_t>(
+      std::min<std::size_t>(options_.receive_queue_capacity, 65535U));
+  // This is our own software queue, so its capacity is a fact we control.
+  capabilities_.queue_capacity_verified = true;
 }
 
 TransportKind UsbCdcTransport::kind() const noexcept {
@@ -207,11 +225,20 @@ void UsbCdcTransport::close() noexcept {
 TransportResult UsbCdcTransport::fill_rx() noexcept {
   if (!is_open()) return TransportResult::Disconnected;
   std::size_t size = 0U;
-  const auto result = serial_.read_some(input_.data(), input_.size(), size);
+  const auto read_capacity =
+      std::min(input_.size(), options_.serial_read_capacity);
+  const auto result = serial_.read_some(input_.data(), read_capacity, size);
   if (result == TransportResult::WouldBlock) return result;
   if (result != TransportResult::Ok) return result;
-  if (size == 0U || size > input_.size() ||
-      pending_size_ + size > pending_.size()) {
+  if (size == 0U) {
+    // A successful read of zero bytes is "no data right now", not a fault.
+    return TransportResult::WouldBlock;
+  }
+  if (size > read_capacity || pending_size_ + size > pending_.size()) {
+    // A genuine overflow: the byte stream can no longer be trusted to be
+    // frame-aligned, so drop everything buffered so far rather than leaving
+    // pending_size_ stuck at a value that will keep overflowing forever.
+    pending_size_ = 0U;
     ++stats_.rx_dropped;
     return TransportResult::Invalid;
   }
@@ -249,12 +276,11 @@ TransportResult UsbCdcTransport::fill_rx() noexcept {
       continue;
     }
     for (std::size_t index = 0U; index < batch.size; ++index) {
-      if (rx_.size() >= options_.receive_queue_capacity) {
+      if (!rx_.push_back(batch.frames[index])) {
         ++stats_.rx_dropped;
         ++stats_.queue_full;
         continue;
       }
-      rx_.push_back(batch.frames[index]);
       ++stats_.rx_frames;
     }
     std::move(pending_.begin() + total, pending_.begin() + pending_size_, pending_.begin());
@@ -279,6 +305,12 @@ TransportResult UsbCdcTransport::try_receive(RawCanFrame& frame) noexcept {
 
 TransportResult UsbCdcTransport::try_send(const RawCanFrame& frame) noexcept {
   if (!is_open()) return TransportResult::Disconnected;
+  if (frame.logical_bus != options_.logical_bus ||
+      frame.direction != FrameDirection::Tx || frame.error_frame ||
+      frame.remote_request || !frame.is_valid()) {
+    ++stats_.errors;
+    return TransportResult::Invalid;
+  }
   std::array<std::uint8_t, 528U> encoded{};
   std::size_t size = 0U;
   if (!UsbCdcCodec::encode(frame, encoded, size)) {

@@ -39,6 +39,7 @@ REQUIRED_FILES = {
     "docs/adr/ADR-005-monotonic-time-freshness.md",
     "docs/adr/ADR-006-conditional-can0-deployment.md",
     "docs/adr/ADR-009-effort-semantic-gate.md",
+    "docs/adr/ADR-012-command-watchdog-and-capability-honesty.md",
     "docs/adr/README.md",
     "docs/archive/README.md",
     "docs/archive/codex_ultra_master_planning_prompt.md",
@@ -66,6 +67,23 @@ FORBIDDEN_TRACKED_PARTS = {
     "memory",
     "tmp",
     "presentation",
+    "company",
+}
+
+# Directories that are local-only/confidential and must never reach the Docker
+# build context. Every name here must appear in .dockerignore (as a bare
+# name so it matches the directory regardless of nesting) or a local-only
+# asset can silently leak into a built image even though it is correctly
+# excluded from Git by .gitignore. This list is intentionally independent of
+# FORBIDDEN_TRACKED_PARTS: it is checked against .dockerignore, not Git.
+DOCKER_CONTEXT_MUST_EXCLUDE = {
+    "CubeMars",
+    ".codex",
+    ".agents",
+    "memory",
+    "tmp",
+    "presentation",
+    "company",
 }
 
 PORTABLE_FILES = {
@@ -79,6 +97,7 @@ PORTABLE_FILES = {
     "docs/adr/ADR-005-monotonic-time-freshness.md",
     "docs/adr/ADR-006-conditional-can0-deployment.md",
     "docs/adr/ADR-009-effort-semantic-gate.md",
+    "docs/adr/ADR-012-command-watchdog-and-capability-honesty.md",
     "docs/adr/README.md",
     "docs/archive/README.md",
     "manifests/dependencies.json",
@@ -262,6 +281,23 @@ def main() -> int:
                 fail(f"forbidden path is tracked: {path}")
             if Path(path).suffix.lower() in {".pdf", ".zip", ".rar", ".exe", ".bag", ".log"}:
                 fail(f"forbidden artifact is tracked: {path}")
+
+        # Guard against the .dockerignore/.gitignore drift class of bug: every
+        # local-only/confidential directory must be excluded from the Docker
+        # build context, not just from Git. `COPY . /workspace` in the
+        # Dockerfile means anything missing here can be baked into an image.
+        dockerignore_lines = {
+            line.strip()
+            for line in read_text(root, ".dockerignore").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        for excluded_name in sorted(DOCKER_CONTEXT_MUST_EXCLUDE):
+            if excluded_name not in dockerignore_lines:
+                fail(
+                    ".dockerignore is missing a required entry: "
+                    f"'{excluded_name}' (present in DOCKER_CONTEXT_MUST_EXCLUDE "
+                    "but absent from .dockerignore)"
+                )
 
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError, RuntimeError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

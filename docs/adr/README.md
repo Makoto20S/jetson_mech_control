@@ -15,12 +15,13 @@
 | [ADR-005](ADR-005-monotonic-time-freshness.md) | Accepted | [Monotonic time and freshness](ADR-005-monotonic-time-freshness.md) | 源时间、到达时间、单调时钟和 TTL/freshness | virtual-clock 边界、重复读取不刷新时间戳、stale/TTL 测试 |
 | [ADR-006](ADR-006-conditional-can0-deployment.md) | Proposed | [Conditional single-channel deployment](ADR-006-conditional-can0-deployment.md) | 当前单物理通道、多 transport backend 的证据闸门与双总线扩展边界 | 逐台设备配置、backend 能力、ID/位速率、负载、仲裁和错误证据；G0/G1/G4 评审 |
 | [ADR-009](ADR-009-effort-semantic-gate.md) | Accepted | [Effort semantic gate](ADR-009-effort-semantic-gate.md) | `effort [N*m]` 的物理语义闸门与最小 demo 边界 | 匹配固件/参数、机械映射、校准和受控台架证据；G0–G3 评审后才可启用设备映射 |
+| [ADR-012](ADR-012-command-watchdog-and-capability-honesty.md) | Proposed | [Command watchdog and capability honesty](ADR-012-command-watchdog-and-capability-honesty.md) | 命令看门狗分级语义、能力三态上报与远程帧表达 | 项目负责人复核追认记录；真实抖动/位速率证据；vcan 与硬件验证 |
 
 ## Reading and status rules / 阅读与状态规则
 
 - `Accepted` 表示本 ADR 的架构/语义约束已经作为 Foundation 实施边界采用；它不表示真实设备、CAN 总线或物理性能已经验证。
 - `Proposed` 表示方向和安全边界已写清，但仍缺少本文件列出的决定性证据或批准。实现可以据此保守拒绝未知配置，不能据此激活真实设备。
-- 本轮 FND-004 只冻结上表七项。规划中提到的 ADR-007、ADR-008、ADR-010 和 ADR-011 是候选后续决策，尚未形成独立规范文件，不得被当作已接受约束。
+- 本轮 FND-004 冻结的是 ADR-001～ADR-006 与 ADR-009。ADR-012 是 Foundation RC 评审后的追认记录，状态为 Proposed，未经复核不得当作已接受约束。规划中提到的 ADR-007、ADR-008、ADR-010 和 ADR-011 仍是候选后续决策，尚未形成独立规范文件。
 - 供应商资料、配置导出、抓包、测量或测试与 ADR 冲突时，先停止受影响路径并按各 ADR 的“重审触发”更新记录；不得静默改写协议常量或标准接口语义。
 
 ## FND-004 verification / FND-004 验证

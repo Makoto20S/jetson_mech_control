@@ -19,7 +19,7 @@
 1. freshness、timeout、command deadline/TTL 和控制周期 elapsed time 统一使用主机单调时钟域；墙钟/ROS time 不参与安全关键过期判定。
 2. canonical state 按信号组保存 `value`、`valid`、`quality`、`source_time`（若有）、`kernel_rx_time`（若有）、`host_rx_mono`、`age`、`sequence/generation` 和源时间有效性/时钟域。
 3. 重复 `read()` 旧快照时保持源时间和接收时间不变，只按当前单调时钟递增 `age`；不得把时间戳刷新为本周期 `now()`。
-4. canonical command 保存 producer generation/sequence、提交单调时间、deadline、mode 和 limits result；controller 停止刷新后，旧命令必须在 TTL 到期后失效。
+4. canonical command 保存 producer generation/sequence、提交单调时间、deadline、mode 和 limits result；controller 停止刷新后，旧命令必须在 TTL 到期后失效。core 层的 `CommandLease`/`CommandSlot` 按本条在 deadline 到期时直接失效并停止发送，不进入任何保持状态。controller 层的目标看门狗另有分级语义，见 [ADR-012](ADR-012-command-watchdog-and-capability-honesty.md)：允许在软 TTL 之后把最后一个有效命令冻结一个**有界**时长，但整个看门狗必须在同一个 `<=3` 控制周期预算内结束于显式失败，且位置类命令在任何阶段都不得被静默替换为 `0.0`。
 5. 若设备提供可验证的时钟，使用显式 offset/drift/uncertainty 映射；若不提供，只记录主机到达时间并将 `sample_time_valid=false`，不得伪造设备采样时刻。
 
 ## Alternatives considered / 替代方案

@@ -9,8 +9,24 @@ namespace mech::mech_control_core {
 namespace {
 
 TransportCapabilities valid_capabilities() {
-  return TransportCapabilities{true, true, true, true, true, true, true,
-                               false, true, true, 1000000U, 64U, 16U};
+  TransportCapabilities capabilities;
+  capabilities.supports_classic_can = true;
+  capabilities.supports_can_fd = true;
+  capabilities.supports_brs = true;
+  capabilities.supports_standard_frames = true;
+  capabilities.supports_extended_frames = true;
+  capabilities.supports_filters = true;
+  capabilities.supports_error_frames = true;
+  capabilities.supports_timestamps = false;
+  capabilities.supports_non_blocking_io = true;
+  capabilities.supports_remote_frames = true;
+  capabilities.nominal_bitrate_configurable = true;
+  capabilities.nominal_bitrate_hz = 1000000U;
+  capabilities.nominal_bitrate_verified = true;
+  capabilities.max_payload_bytes = 64U;
+  capabilities.queue_capacity = 16U;
+  capabilities.queue_capacity_verified = true;
+  return capabilities;
 }
 
 DeviceConfig simulation_device(std::uint16_t device_id = 1U,

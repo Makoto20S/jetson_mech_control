@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <initializer_list>
 
 #include "mech_control_core/transport.hpp"
 
@@ -17,9 +18,29 @@ class FakeTransport final : public mech_control_core::Transport {
 
   [[nodiscard]] static mech_control_core::TransportCapabilities
   default_capabilities() noexcept {
-    return mech_control_core::TransportCapabilities{
-        true, true, true, true, true, true, true, false, true, true, 1000000U,
-        64U, 16U};
+    // Named assignment on purpose: this struct is mostly booleans, so
+    // positional aggregate initialization would silently shift every later
+    // field the moment one is inserted.
+    mech_control_core::TransportCapabilities capabilities;
+    capabilities.supports_classic_can = true;
+    capabilities.supports_can_fd = true;
+    capabilities.supports_brs = true;
+    capabilities.supports_standard_frames = true;
+    capabilities.supports_extended_frames = true;
+    capabilities.supports_filters = true;
+    capabilities.supports_error_frames = true;
+    capabilities.supports_timestamps = false;
+    capabilities.supports_non_blocking_io = true;
+    capabilities.supports_remote_frames = true;
+    capabilities.nominal_bitrate_configurable = true;
+    // A simulated bus: the value is whatever this fake declares, which is the
+    // only sense in which it can be verified.
+    capabilities.nominal_bitrate_hz = 1000000U;
+    capabilities.nominal_bitrate_verified = true;
+    capabilities.max_payload_bytes = 64U;
+    capabilities.queue_capacity = 16U;
+    capabilities.queue_capacity_verified = true;
+    return capabilities;
   }
 
   [[nodiscard]] mech_control_core::TransportKind kind() const noexcept override {
@@ -45,6 +66,23 @@ class FakeTransport final : public mech_control_core::Transport {
     if (!open_) {
       return mech_control_core::TransportResult::Disconnected;
     }
+    if (!forced_receive_results_.empty()) {
+      const auto forced = forced_receive_results_.front();
+      forced_receive_results_.pop_front();
+      if (forced == mech_control_core::TransportResult::Ok) {
+        if (rx_.empty()) {
+          return mech_control_core::TransportResult::WouldBlock;
+        }
+        frame = rx_.front();
+        rx_.pop_front();
+        ++stats_.rx_frames;
+        return mech_control_core::TransportResult::Ok;
+      }
+      if (forced == mech_control_core::TransportResult::Invalid) {
+        ++stats_.errors;
+      }
+      return forced;
+    }
     if (rx_.empty()) {
       return mech_control_core::TransportResult::WouldBlock;
     }
@@ -59,6 +97,21 @@ class FakeTransport final : public mech_control_core::Transport {
     if (!open_) {
       return mech_control_core::TransportResult::Disconnected;
     }
+    if (!forced_send_results_.empty()) {
+      const auto forced = forced_send_results_.front();
+      forced_send_results_.pop_front();
+      if (forced == mech_control_core::TransportResult::Ok) {
+        // Fall through to the normal accounting below.
+      } else {
+        if (forced == mech_control_core::TransportResult::QueueFull) {
+          ++stats_.tx_dropped;
+          ++stats_.queue_full;
+        } else if (forced == mech_control_core::TransportResult::Invalid) {
+          ++stats_.errors;
+        }
+        return forced;
+      }
+    }
     if (frame.direction != mech_control_core::FrameDirection::Tx ||
         !frame.is_valid()) {
       ++stats_.errors;
@@ -72,6 +125,26 @@ class FakeTransport final : public mech_control_core::Transport {
     tx_.push_back(frame);
     ++stats_.tx_frames;
     return mech_control_core::TransportResult::Ok;
+  }
+
+  // Test hook: force the next N calls to try_send()/try_receive() to return
+  // specific TransportResult values, without touching the underlying
+  // rx_/tx_ queues. A forced TransportResult::Ok is a pass-through -- the
+  // call still executes its normal queue-backed logic (so WouldBlock can
+  // still occur if, e.g., rx_ is empty). Forced results are consumed
+  // exactly once, in FIFO order, then normal behavior resumes.
+  void force_next_send_results(
+      std::initializer_list<mech_control_core::TransportResult> results) {
+    for (const auto result : results) {
+      forced_send_results_.push_back(result);
+    }
+  }
+
+  void force_next_receive_results(
+      std::initializer_list<mech_control_core::TransportResult> results) {
+    for (const auto result : results) {
+      forced_receive_results_.push_back(result);
+    }
   }
 
   [[nodiscard]] mech_control_core::TransportStats stats() const noexcept override {
@@ -111,6 +184,8 @@ class FakeTransport final : public mech_control_core::Transport {
   std::deque<mech_control_core::RawCanFrame> rx_;
   std::deque<mech_control_core::RawCanFrame> tx_;
   mech_control_core::TransportStats stats_;
+  std::deque<mech_control_core::TransportResult> forced_send_results_;
+  std::deque<mech_control_core::TransportResult> forced_receive_results_;
 };
 
 }  // namespace mech::mech_simulation

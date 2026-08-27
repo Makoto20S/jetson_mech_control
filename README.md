@@ -6,15 +6,20 @@ adapters.
 
 ## Current status
 
-FND-000 through FND-003 are complete. The repository has a pinned Ubuntu
-22.04/ROS 2 Humble build boundary, five package skeletons, and a minimal
-CI/context workflow. Native x86_64 Humble builds and the pinned CI build pass
-all skeleton tests. FND-004 has formalized the core architecture baseline as
-six Accepted ADRs and one intentionally Proposed deployment ADR. FND-004A is
-the next gate and will run an early native Jetson ARM64 smoke test before FND-005.
-ARM64, vcan, timing, and hardware results are not claimed until those gates run.
-No CAN interface is enabled and no motor command is sent by the current
-Foundation work.
+FND-000 through FND-015, RSP-001/RSP-002 and INT-001 are implemented on a
+pinned Ubuntu 22.04/ROS 2 Humble build boundary. FND-004A passed a native
+Jetson ARM64 smoke test, and `v0.1.0-foundation-rc1` tags the Foundation
+release candidate. The architecture baseline is six Accepted ADRs plus two
+Proposed ones: ADR-006 (deployment) and ADR-012, which records the command
+watchdog, capability-reporting and remote-frame contract changes that came out
+of the RC code review and still needs owner sign-off.
+
+That review found and fixed defects the RC test suite had passed straight
+through, including an out-of-bounds write in the ros2_control claim tracking, a
+bus runtime that latched a permanent fault on transient write backpressure, and
+a USB-CDC transport that would emit a frame addressed to a different logical
+bus. Timing and hardware results are still not claimed. No CAN interface is
+enabled and no motor command is sent by the current Foundation work.
 
 Start with:
 
