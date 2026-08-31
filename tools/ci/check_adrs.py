@@ -19,7 +19,7 @@ ADR_FILES = {
     "ADR-005": ("ADR-005-monotonic-time-freshness.md", "Accepted"),
     "ADR-006": ("ADR-006-conditional-can0-deployment.md", "Proposed"),
     "ADR-009": ("ADR-009-effort-semantic-gate.md", "Accepted"),
-    "ADR-012": ("ADR-012-command-watchdog-and-capability-honesty.md", "Proposed"),
+    "ADR-012": ("ADR-012-command-watchdog-and-capability-honesty.md", "Accepted"),
 }
 
 REQUIRED_HEADINGS = (

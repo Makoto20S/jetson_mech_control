@@ -8,11 +8,16 @@ adapters.
 
 FND-000 through FND-015, RSP-001/RSP-002 and INT-001 are implemented on a
 pinned Ubuntu 22.04/ROS 2 Humble build boundary. FND-004A passed a native
-Jetson ARM64 smoke test, and `v0.1.0-foundation-rc1` tags the Foundation
-release candidate. The architecture baseline is six Accepted ADRs plus two
-Proposed ones: ADR-006 (deployment) and ADR-012, which records the command
-watchdog, capability-reporting and remote-frame contract changes that came out
-of the RC code review and still needs owner sign-off.
+Jetson ARM64 smoke test. The architecture baseline is seven Accepted ADRs plus
+one Proposed one, ADR-006, which gates real single-channel deployment.
+ADR-012 records the command watchdog, capability-reporting and remote-frame
+contract changes that came out of the RC code review; it was accepted on
+2026-08-31 and constrains interface semantics only — it does not relax any
+device-activation gate.
+
+Note that `v0.1.0-foundation-rc1` tags `a056492`, which predates the RC code
+review and still contains the defects listed below. It is a historical marker,
+not the recommended commit.
 
 That review found and fixed defects the RC test suite had passed straight
 through, including an out-of-bounds write in the ros2_control claim tracking, a
