@@ -377,9 +377,9 @@ TEST(SocketCanTransport, OpenAcceptsFrameTypeFilterInsteadOfSilentlyFailing) {
   // `filter.frame_type.has_value() -> close(fd); return false;` early-return
   // path, because both the old (rejecting) and new (accepting) behavior of
   // that internal branch converge on the same externally-observable
-  // `open() == false` here: there is no real/vcan0 interface in this
-  // sandbox, so open() always fails at if_nametoindex() regardless of
-  // whether the frame_type branch was reached at all. I confirmed this by
+  // `open() == false` for a missing interface: open() fails at
+  // if_nametoindex() regardless of whether the frame_type branch was
+  // reached at all. I confirmed this by
   // temporarily reintroducing the old `close(fd); return false;` early
   // return in open() and rebuilding: this test still passed, which is
   // exactly why its regression claim is scoped down to the two EXPECT_TRUE
@@ -396,7 +396,13 @@ TEST(SocketCanTransport, OpenAcceptsFrameTypeFilterInsteadOfSilentlyFailing) {
   EXPECT_TRUE(without_frame_type.is_valid());
 
   SocketCanOptions options;
-  options.interface_name = "vcan0";
+  // Deliberately NOT "vcan0": this test's greenness must not depend on
+  // vcan0 being absent. The RC evidence procedure requires creating vcan0
+  // for the MECH_RUN_VCAN_TESTS-gated tests below, and naming it here made
+  // that procedure turn this test red for a reason unrelated to the code
+  // under test. This name cannot resolve on any host, so the assertion
+  // below means the same thing whether or not vcan0 exists.
+  options.interface_name = "mech-no-such-if";
   options.logical_bus = 1U;
   options.filters = {with_frame_type};
   SocketCanTransport transport(options);
@@ -405,9 +411,8 @@ TEST(SocketCanTransport, OpenAcceptsFrameTypeFilterInsteadOfSilentlyFailing) {
   // makes the promise honest). This much IS device-independent and IS the
   // regression this test actually pins down.
   EXPECT_TRUE(transport.capabilities().supports_filters);
-  // Not a regression assertion (see comment above): open() fails here
-  // because there is no real vcan0 in this sandbox, the same as it would
-  // for any interface name that does not exist.
+  // Not a regression assertion (see comment above): open() fails because
+  // the interface does not exist, which is now true by construction.
   EXPECT_FALSE(transport.open());
 }
 
