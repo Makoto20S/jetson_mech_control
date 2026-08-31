@@ -1,16 +1,19 @@
 # ADR-012：命令看门狗分级语义、transport 能力三态上报与远程帧表达
 
 - **Decision ID:** ADR-012
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-27
+- **Accepted:** 2026-08-31（项目负责人复核后批准）
 - **Owner:** 项目负责人（Foundation core/controller owner）
 - **Scope:** `TargetLimiter`/controller 命令看门狗、`TransportCapabilities` 能力上报、`RawCanFrame` 远程帧字段
 
 ## Status rationale / 状态依据
 
-本 ADR 记录的三项契约变更是在 Foundation RC（`v0.1.0-foundation-rc1`，commit `a056492`）代码评审中发现缺陷后实施的。按 [适配器契约](../development/adapter_contract_v1.md) 第 40 行第 7 条，canonical 契约变更本应先出 ADR 再实现；本轮顺序颠倒，因此本文件是**追认记录**，状态为 `Proposed`，需要项目负责人复核后才能转 `Accepted`。
+本 ADR 记录的三项契约变更是在 Foundation RC（`v0.1.0-foundation-rc1`，commit `a056492`）代码评审中发现缺陷后实施的。按 [适配器契约](../development/adapter_contract_v1.md) 第 40 行第 7 条，canonical 契约变更本应先出 ADR 再实现；本轮顺序颠倒，因此本文件是**追认记录**。实现随 PR #4 合并为 `f3012ee`，ADR 于 2026-08-31 经项目负责人复核后转 `Accepted`。
 
-实现已经存在并通过测试，不等于决策已被批准。在转为 `Accepted` 之前，不得据此启用任何真实设备，也不得把这里的语义当作已冻结的对外契约。
+**流程违规的事实不因批准而消失，保留在此备查。** 批准的是这三项契约本身，不是"先实现后补 ADR"这个做法；后续 canonical 契约变更仍须先出 ADR。
+
+**批准范围仅限接口语义。** ADR-012 不授权、也从不曾授权任何真实设备启用：CAN 使能、电机命令和物理通道激活仍然只受 [ADR-006](ADR-006-conditional-can0-deployment.md) 与 G0–G3 证据闸门约束，与本 ADR 的状态无关。同样地，本 ADR 中标注为"未验证"的 SocketCAN netlink 位速率读取、`SO_RCVBUF` 回读、RTR 线上往返和错误帧解码，状态转为 `Accepted` 后**仍然未验证**——批准的是契约形状，不是这些代码路径在真实硬件上的正确性。
 
 ## Context / 上下文
 
@@ -79,8 +82,7 @@ RC 评审复现了三类问题：
 
 ## Review triggers / 重审触发
 
-- 项目负责人复核本追认记录，决定转 `Accepted` 或要求改设计；
-- 获得真实电机/上游的抖动与延迟分布证据，可据此重新选择 `ttl`/`hard_ttl` 默认值或取消 hold 阶段；
+- 获得真实电机/上游的抖动与延迟分布证据，可据此重新选择 `ttl`/`hard_ttl` 默认值或取消 hold 阶段。当前默认值 4 ms / 6 ms 只由 `03_mvp_delivery_plan.md` 的 `<=3` 控制周期预算推得，没有任何实测抖动数据支持；
 - 决定把看门狗阶段映射到 `SampleQuality`/`StatusSnapshot` 并统一到 core 的 `CommandSlot`，届时 controller 层的独立实现应当撤销；
 - 厂商给出 7 路盒子的位速率书面答复（OQ-08），或 netlink 读取在目标硬件上被实测验证；
 - L02/HI12 profile 需要使用远程帧，届时 [ADR-004](ADR-004-fixed-protocol-profile.md) 必须同步说明。
