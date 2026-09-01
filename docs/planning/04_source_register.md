@@ -13,12 +13,12 @@
 | ID | 来源 | 版本/页数 | 本规划使用的证据 | 性质 |
 |---|---|---|---|---|
 | L01 | [归档的主规划提示词](../archive/codex_ultra_master_planning_prompt.md) | 2026-07-28 工作区版本 | 历史任务输入：项目目标、MVP、规模、边界和交付清单；非当前规范 | 历史来源 |
-| L02 | CubeMars AK 系列驱动手册（受控外部文件，见 `manifests/assets.yaml`；用户确认副本位于 `company/`） | AK2.0 V1.0.18，47 页 | 用户确认其 CAN 协议和 CAN 参数适用于当前两台电机；提供伺服扩展帧与运控/MIT 标准帧两条互斥 profile 的直接实现依据 | 用户确认事实 + 资料事实 |
+| L02 | CubeMars AK 系列**驱动器**手册（受控外部文件，见 `manifests/assets.yaml`；副本位于 `company/`） | AK2.0 V1.0.18，47 页 | ⚠️ **2026-09-01 起不适用于本项目电机**，见 [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)。它覆盖的驱动板是 `AK-DRV-V2.1/V2.2/V1.0`，而本项目电机的驱动板 `AK54-4810-1C-A2`（资产 L14）只出现在 L07。这也解释了为何 L02 的运控/MIT 型号表中没有 AKE60-8。~~2026-08-19 曾被用户确认适用~~，该确认已由项目负责人于 2026-09-01 更正。保留本条仅为记录基线变更历史，**不得再作为任何协议判断的依据** | 历史来源（曾为用户确认事实） |
 | L03 | HI12 系列规格书（受控外部文件，见 `manifests/assets.yaml`） | Rev 1.5，30 页 | 型号/接口、SYNC_IN/PPS、CAN 500 kbit/s、0~200 Hz、采样与环境规格 | 已确认事实 |
 | L04 | HiPNUC IMU 指令与编程手册（受控外部文件，见 `manifests/assets.yaml`） | Rev 1.7.2，63 页 | J1939/CANopen、PGN/TPDO、缩放、时间、同步、默认配置 | 已确认事实 |
 | L05 | DM-MC-Board02 手册（受控外部文件，见 `manifests/assets.yaml`） | V1.1 | STM32H723、3 路 CAN FD、外设与引脚图 | 已确认事实 |
 | L06 | 此前组会汇报稿（排除的本地 `presentation/` 资产，见 `manifests/assets.yaml`） | 2026-07-16 工作区版本 | 早期方案和来源线索；不作为现场硬件证据，也不要求 clean clone 包含原文件 | 历史来源 |
-| L07 | AK3.0 电机使用说明（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | V3.2.0，52 页 | AKE60-8、AK54、servo/force 扩展帧、`0x29/0x2A`、1–2000 Hz、Kt、CubeMarsTool | 资料事实 |
+| **L07** | **AK3.0 电机模组产品使用说明**（受控外部文件，见 `manifests/assets.yaml`；副本位于 `company/ak-series-prodcut-manual-v3-2-0-for-ak-3-0-robotic-actuator-cn.pdf`，SHA-256 与原 `CubeMars/` 登记值逐位一致） | V3.2.0，52 页 | ✅ **2026-09-01 起为本项目电机的适用协议基线**，见 [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)。覆盖驱动板 `AK54-4810-1C-A2`（本项目所用）、AKE60-8 力控参数表（KV 80、`Kt=0.7382 N·m/A`、位置 ±12.56 rad、速度 ±40 rad/s、力矩 ±15 N·m、Kp 0–500、Kd 0–5）、伺服扩展帧（模式 0–6、15、16）、力控扩展帧（控制模式 ID 8）、`0x29`/`0x2A` 反馈、1–2000 Hz、`输出端转速 = ERPM ÷ 极对数 ÷ 减速比`、CubeMarsTool。**已知缺陷**：§4.4.1 力控速度环示例 `DATA[5]` 应为 `0x9B` 而非 `0x98`，照抄会产生约 11% 系统性速度误差 | **用户确认事实 + 资料事实** |
 | L08 | AK54 驱动器安装说明（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | V1.0.0，9 页 | 标准硬件版本、电压、电流、CAN 位速率和线色 | 资料事实 |
 | L09 | AKA 系列使用说明（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | V3.0.0，47 页 | CubeMars 内/外环双编码器通用交叉参考 | 仅参考 |
 | L10 | AKE60-8 KV80 2D 图（`CubeMars/` 受控外部文件，见 `manifests/assets.yaml`） | 供应商目录版本 | 标准目录身份旁证；结构内容按用户要求排除 | 范围外 |
@@ -42,8 +42,10 @@
 | AK3.0 力控/MIT-like 扩展帧和 AKE60-8 Kt/范围 | L07 第 36~40 页 | 资料事实 |
 | AK3.0 `0x29` 反馈/1~2000 Hz 与可选 `0x2A` | L07 第 41~42 页 | 资料事实 |
 | 双编码器 UART 字段 | L07 第 43 页附近 | 资料事实 |
-| L02 伺服扩展帧（ID/功能/`0x29` 反馈） | L02 第 27~40 页附近 | 当前首个实现 profile 的协议依据；实际固件仍需逐台核对 |
-| L02 运控/MIT 标准帧（进入/退出/零位及 8 字节反馈） | L02 第 41~45 页附近 | 当前第二实现 profile 的协议依据；ACTIVE 期间不与伺服 profile 混发 |
+| ~~L02 伺服扩展帧（ID/功能/`0x29` 反馈）~~ | ~~L02 第 27~40 页附近~~ | **2026-09-01 作废**（[ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)）。AK2.0 手册，硬件世代不符。伺服标度恰与 L07 逐条相同，但引证必须改用 L07 |
+| ~~L02 运控/MIT 标准帧（11 位标准帧）~~ | ~~L02 第 41~45 页附近~~ | **2026-09-01 作废**。该 profile 在本项目硬件上**不存在**——AK3.0 的对应命令族是力控扩展帧（控制模式 ID 8），不是 11 位标准帧 |
+| **AK3.0 力控扩展帧（控制模式 ID 8，`KP KD 位置 速度 力矩` 打包）** | **L07 第 36~40 页** | **当前第一实现 profile 的协议依据**；AKE60-8 归一化常数同页 |
+| **AK3.0 伺服扩展帧（控制模式 0–6、15、16）** | **L07 第 30~35 页** | **当前第二实现 profile 的协议依据**；模式 15 失能、模式 16 反馈报文设置为 L02 所无 |
 | L02 标准帧 MIT | L02 第 40~42 页附近；L11 demo | 当前电机的用户确认适用 profile；不再标记为仅 legacy |
 | HighTorque USB CDC 透传 framing | L15/L16 及本地源码 | transport backend 参考；CDC header/CRC/版本/bitrate/错误语义仍需独立验证 |
 | HI12 CAN 和同步硬件 | L03 第 11~13、20 页 | 已确认事实 |

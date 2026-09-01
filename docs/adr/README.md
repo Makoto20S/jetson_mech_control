@@ -16,6 +16,7 @@
 | [ADR-006](ADR-006-conditional-can0-deployment.md) | Proposed | [Conditional single-channel deployment](ADR-006-conditional-can0-deployment.md) | 当前单物理通道、多 transport backend 的证据闸门与双总线扩展边界 | 逐台设备配置、backend 能力、ID/位速率、负载、仲裁和错误证据；G0/G1/G4 评审 |
 | [ADR-009](ADR-009-effort-semantic-gate.md) | Accepted | [Effort semantic gate](ADR-009-effort-semantic-gate.md) | `effort [N*m]` 的物理语义闸门与最小 demo 边界 | 匹配固件/参数、机械映射、校准和受控台架证据；G0–G3 评审后才可启用设备映射 |
 | [ADR-012](ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | [Command watchdog and capability honesty](ADR-012-command-watchdog-and-capability-honesty.md) | 命令看门狗分级语义、能力三态上报与远程帧表达 | 项目负责人复核追认记录；真实抖动/位速率证据；vcan 与硬件验证 |
+| [ADR-013](ADR-013-ak30-protocol-baseline.md) | Proposed | [AK3.0 protocol baseline](ADR-013-ak30-protocol-baseline.md) | 协议基线由 L02（AK2.0）切换为 L07（AK3.0）、`ProtocolProfile` 重定义、力控优先、`effort` 解锁 | 驱动板 `AK54-4810-1C-A2` 对应关系；项目负责人复核 Kt 对定制版的适用性；带宽重算结论 |
 
 ## Reading and status rules / 阅读与状态规则
 

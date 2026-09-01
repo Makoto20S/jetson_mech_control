@@ -8,11 +8,15 @@
 
 ## Status rationale / 状态依据
 
-接受的是一个保守接口规则：没有匹配设备、固件和机械侧映射证据时，不得把电流、归一化值或未校准字段命名为标准 `effort`。这不表示两台定制 AKE60-8 已通过闸门；它们的标准 `effort` 映射仍未批准。
+接受的是一个保守接口规则：没有匹配设备、固件和机械侧映射证据时，不得把电流、归一化值或未校准字段命名为标准 `effort`。
+
+> **2026-09-01 修订（[ADR-013](ADR-013-ak30-protocol-baseline.md)）。闸门规则本身不变，但本电机的 Kt 一项已通过。** 原文写道「这不表示两台定制 AKE60-8 已通过闸门；它们的标准 `effort` 映射仍未批准」，其依据是候选 Kt 来自适用性未确认的资料。协议基线切换到 L07 后，AKE60-8 **就列在本项目适用手册自身的力控参数表内**（第 37 页：KV 80、`Kt = 0.7382 N·m/A`、位置 ±12.56 rad、速度 ±40.0 rad/s、力矩 ±15.0 N·m、Kp 0–500、Kd 0–5），且手册明确 `T = Kt × Iq` 中 **T 为输出端输出扭矩**。项目负责人于 2026-09-01 明确担保该值适用于本定制双编码器版本。**因此 Kt 与力矩单位/参考位置这一项不再阻塞 `effort`。**
+>
+> **仍未通过的部分，闸门照旧**：方向与零位链路（`foc_encoder_inverted` 与 `m_invert_direction` 的合成效果）、`0x29` 位置字段的编码器来源、以及物理精度。本次修订只解除「Kt 未知」这一个阻塞项，不等于标准 `effort` 已可无条件导出，也不解除 ADR-006 与 G0–G3 的设备启用闸门。
 
 ## Context / 上下文
 
-AK V3.2 资料给出标准 AKE60-8 的候选 `Kt = 0.7382 N*m/A` 和输出端 `T = Kt * Iq`，但当前设备是定制双编码器版本，逐台驱动板、固件、配置、减速/机械映射和物理误差尚未确认。servo profile 可能接受 Iq，force-control profile 可能提供 torque 字段；二者都不能仅因字段名相似就自动成为关节侧 N·m。
+~~AK V3.2 资料给出标准 AKE60-8 的候选 `Kt = 0.7382 N*m/A` 和输出端 `T = Kt * Iq`，但当前设备是定制双编码器版本~~ ——**2026-09-01 更正**：AK V3.2（L07）不是「另一代补充资料」，而是本项目电机的适用手册本身（驱动板 `AK54-4810-1C-A2` 只出现在其中），`Kt = 0.7382 N·m/A` 与输出端 `T = Kt × Iq` 由项目负责人担保适用。逐台驱动板、固件、配置、减速/机械映射和物理误差**仍未确认**。servo profile 可能接受 Iq，force-control profile 可能提供 torque 字段；二者都不能仅因字段名相似就自动成为关节侧 N·m。
 
 项目还需要一个最小恒定命令 demo 来验证 controller → hardware → protocol → transport → state/diagnostics 链路。链路贯通与物理输出力矩准确是两个不同验收目标。
 
@@ -71,5 +75,7 @@ AK V3.2 资料给出标准 AKE60-8 的候选 `Kt = 0.7382 N*m/A` 和输出端 `T
 - [架构与接口设计](../planning/02_architecture_and_interfaces.md)，第 7.2、7.3、9.2 节。
 - [已确认决策与待确认项](../planning/05_decisions_and_open_questions.md)，第 3.4、4、5 节。
 - [CubeMars 供应商资料审查](../planning/06_cubemars_material_review.md)。
+- [ADR-013 AK3.0 协议基线](ADR-013-ak30-protocol-baseline.md)——本 ADR 2026-09-01 修订的依据。
+- 资产 L07 `ak-series-prodcut-manual-v3-2-0-for-ak-3-0-robotic-actuator-cn.pdf` 第 37 页力控参数范围表（合并单元格已按原页图确认）。
 - [Foundation 搭建计划](../planning/07_framework_bootstrap_plan.md)，第 3、8.1、9.3、13 节。
 - [FND-004 ADR index](README.md)。
