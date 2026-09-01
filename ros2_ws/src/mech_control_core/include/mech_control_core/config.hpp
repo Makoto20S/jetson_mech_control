@@ -24,11 +24,22 @@ enum class TransportKind : std::uint8_t {
   HighTorqueUsbCdc,
 };
 
+// CubeMars profiles follow the AK3.0 product manual (registered asset L07).
+// Both AK3.0 command families are 29-bit extended frames. The 11-bit standard
+// "motion control / MIT" profile belongs to the previous AK2.0 generation and
+// does not exist on this project's hardware, whose driver board is
+// AK54-4810-1C-A2 -- documented in L07 and absent from the AK2.0 manual.
+// See ADR-013.
 enum class ProtocolProfile : std::uint8_t {
   Unknown,
   LoopbackV1,
-  L02ServoExtended,
-  L02MitStandard,
+  // Control mode ID 8. Its three sub-modes (position, velocity, torque) share
+  // that single ID and are distinguished by payload content, never by ID, so
+  // one codec owns all three and selects between them by explicit
+  // configuration rather than by inspecting received data.
+  Ak30ForceControlExtended,
+  // Control modes 0-6 plus 15 (disable) and 16 (feedback configuration).
+  Ak30ServoExtended,
   Hi12J1939,
   Hi12Canopen,
 };
@@ -166,12 +177,15 @@ struct ProfileRequirements final {
   switch (profile) {
     case ProtocolProfile::LoopbackV1:
       return ProfileRequirements{};
-    case ProtocolProfile::L02ServoExtended:
+    // Both AK3.0 families are Classic extended. The previous AK2.0 MIT profile
+    // required Standard here; that requirement was wrong for this hardware and
+    // would have rejected every valid force-control configuration. See ADR-013.
+    case ProtocolProfile::Ak30ForceControlExtended:
       return ProfileRequirements{CanFrameType::Classic,
                                  CanFrameFormat::Extended};
-    case ProtocolProfile::L02MitStandard:
+    case ProtocolProfile::Ak30ServoExtended:
       return ProfileRequirements{CanFrameType::Classic,
-                                 CanFrameFormat::Standard};
+                                 CanFrameFormat::Extended};
     case ProtocolProfile::Hi12J1939:
       return ProfileRequirements{CanFrameType::Classic,
                                  CanFrameFormat::Extended};

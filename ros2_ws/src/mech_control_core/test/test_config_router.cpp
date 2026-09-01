@@ -102,12 +102,32 @@ TEST(ConfigValidation, RejectsDuplicateIdsAndChannels) {
 
 TEST(ConfigValidation, RejectsProfileAndCapabilityMismatch) {
   auto config = valid_configuration();
-  config.devices.front().profile = ProtocolProfile::L02ServoExtended;
+  config.devices.front().profile = ProtocolProfile::Ak30ServoExtended;
   config.devices.front().frame_format = CanFrameFormat::Standard;
   config.buses.front().capabilities.supports_standard_frames = false;
   const auto result = validate_deployment(config);
   EXPECT_TRUE(result.has(ConfigErrorCode::IncompatibleFrameFormat));
   EXPECT_TRUE(result.has(ConfigErrorCode::IncompatibleCapability));
+}
+
+// ADR-013: force control is a 29-bit extended frame, not the 11-bit standard
+// frame the superseded AK2.0 MIT profile used. Declaring it as Standard must
+// be rejected -- under the old enum this configuration would have been
+// accepted, which is the concrete defect the baseline switch removes.
+TEST(ConfigValidation, RejectsForceControlDeclaredAsStandardFrame) {
+  auto config = valid_configuration();
+  config.devices.front().profile = ProtocolProfile::Ak30ForceControlExtended;
+  config.devices.front().frame_format = CanFrameFormat::Standard;
+  const auto result = validate_deployment(config);
+  EXPECT_TRUE(result.has(ConfigErrorCode::IncompatibleFrameFormat));
+}
+
+TEST(ConfigValidation, AcceptsForceControlAsExtendedFrame) {
+  auto config = valid_configuration();
+  config.devices.front().profile = ProtocolProfile::Ak30ForceControlExtended;
+  config.devices.front().frame_format = CanFrameFormat::Extended;
+  const auto result = validate_deployment(config);
+  EXPECT_FALSE(result.has(ConfigErrorCode::IncompatibleFrameFormat));
 }
 
 TEST(ConfigValidation, RejectsInvalidCapabilitiesAndPayload) {
