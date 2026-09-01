@@ -6,7 +6,7 @@
 >
 > 2026-08-07 文档收敛：本文件只保留完整 MVP、硬件闸门、带宽与量化验收；FND-004A 之后的任务顺序以 [07](07_framework_bootstrap_plan.md) 为准。初始规划输入已移入 [非规范归档](../archive/README.md)。
 >
-> 2026-08-19 规划修订：用户确认 L02 V1.0.18 CAN 协议/参数适用于当前电机；伺服扩展帧为第一实现 profile，运控/MIT 标准帧为第二实现 profile。HighTorque ROS2 SDK/FDCAN 示例只作为集成与 USB-CDC raw transport 参考，不改变 Foundation 的 core/BusRuntime/codec 边界。
+> **2026-09-01 规划修订（[ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)）：协议基线为 L07（AK3.0 V3.2.0）；力控扩展帧（控制模式 ID `8`）为第一实现 profile，伺服扩展帧（控制模式 `0–6,15,16`）为第二实现 profile。~~2026-08-19 曾确认 L02 V1.0.18 适用、伺服优先、运控/MIT 标准帧次之~~——L02 是 AK2.0 驱动器手册，其覆盖的驱动板与本项目的 `AK54-4810-1C-A2` 不符，该 11 位标准帧 profile 在本项目硬件上不存在。**HighTorque ROS2 SDK/FDCAN 示例只作为集成与 USB-CDC raw transport 参考，不改变 Foundation 的 core/BusRuntime/codec 边界。
 
 ## 1. 需求分解与完成口径
 
@@ -82,7 +82,7 @@
 | 包/目录 | 职责 | 依赖边界 | 性质 |
 |---|---|---|---|
 | `mech_control_core` | BusRuntime、router、快照、时间、command lease、故障状态 | Linux/标准 C++，不依赖 ROS | 有依据的推断 |
-| `mech_protocol_cubemars` | L02 servo-extended、L02 motion-control/MIT-standard codec 与 device session；AK V3 作为补充 profile | 依赖 core 抽象，不打开 socket；协议 profile 不共用有歧义的打包函数 | 有依据的推断 |
+| `mech_protocol_cubemars` | AK3.0 力控（控制模式 ID `8`，第一实现）与伺服扩展帧（控制模式 `0–6,15,16`，第二实现）的 codec 与 device session | 依赖 core 抽象，不打开 socket；协议 profile 不共用有歧义的打包函数 | 有依据的推断 |
 | `mech_transport_hightorque`（Foundation 后按 spike 决定） | HighTorque USB CDC raw CAN/CAN-FD transport backend | 只实现受控 framing/CRC/队列/能力边界；不拥有 motor codec 或 ros2_control 生命周期 | 有依据的推断 |
 | `mech_protocol_hipnuc` | J1939/CANopen profile codec、坐标/质量 | CANopen 后端条件依赖 | 有依据的推断 |
 | `mech_hardware_ros2_control` | 复合 SystemInterface、接口与 lifecycle | 依赖 core，不含协议位域 | 有依据的推断 |
@@ -120,7 +120,7 @@
 | 任务 | 依赖 | 负责人 | 协作者 | 评审者 | 交付/验收 | 性质 |
 |---|---|---|---|---|---|---|
 | 多 transport backend、router、错误帧/统计 | W1 schema/vcan；HighTorque CDC spike | 项目负责人 | B | C | SocketCAN/vcan 与注入式 CDC 的 raw-frame/filter/fan-out/单写者/队列满测试通过 | 有依据的推断 |
-| L02 CubeMars 两套 codec 与 HI12 codec | G0 协议选择 | 项目负责人 | B | 另一名非作者 | L02 servo extended 先通过；MIT standard 随后；各自 golden、边界、DLC/ID/字节序、fuzz 全通过 | 有依据的推断 |
+| AK3.0 CubeMars 两套 codec 与 HI12 codec | G0 协议选择 | 项目负责人 | B | 另一名非作者 | 力控先通过；伺服扩展帧随后；各自 golden、边界、DLC/ID/字节序、fuzz 全通过 | 有依据的推断 |
 | 设备模拟器和故障脚本 | codec | B | C | 项目负责人 | drop/duplicate/reorder/stale/fault/重启可复现 | 有依据的推断 |
 | 两台 HI12 逐台只读 bring-up | G1、台架接线 | B | 项目负责人 | A | PNAME/APP_VER/协议/ID/位速率与抓包归档 | 待确认项 |
 | 两台 HI12 联合 30 min 接收 | 唯一 ID、正确终端 | B | 项目负责人 | C | 第 6 节 IMU 指标通过 | 待确认项 |
@@ -408,9 +408,9 @@
 | R05 | 只有 `can0` 且默认位速率不同 | 高 | 高 | 第二接口未到/驱动不支持 | 采购隔离 SocketCAN 适配器；禁止盲目共总线 | B | 有依据的推断 |
 | R06 | USB-CAN 延迟/断连 | 中 | 高 | p99.9 或 disconnect 不达标 | 选主线驱动、稳定序列号、HIL 压测；必要时换接口 | B | 有依据的推断 |
 | R21 | HighTorque USB-CDC 示例能力或许可不足 | 中 | 高 | 板卡/固件、bitrate、错误/时间戳、队列或许可证证据缺失 | reference-only；注入式离线 spike；保留 SocketCAN backend；未闭合前禁止真实激活 | 项目负责人 | 规划决定 |
-| R22 | L02 两种 profile 被误混发/热切换 | 低 | 极高 | 同一 ACTIVE session 接受两种 codec 或自动探测 | 配置期固定；独立 codec/session；negative cross-profile tests；切换需停用/neutral/断能和重新 configure | 项目负责人 | 规划决定 |
+| R22 | AK3.0 力控与伺服两种 profile 被误混发/热切换 | 低 | 极高 | 同一 ACTIVE session 接受两种 codec 或自动探测 | 配置期固定；独立 codec/session；negative cross-profile tests；切换需停用/neutral/断能和重新 configure | 项目负责人 | 规划决定 |
 | R07 | 非 PREEMPT_RT 抖动超标 | 中 | 高 | 第 6 节周期失败 | 清除 RT 路径阻塞；再评估官方 RT 内核与回滚 | 项目负责人 | 有依据的推断 |
-| R08 | 六电机、高频或补充 AK3.0 `0x2A` 导致拥塞 | 中 | 高 | 平均 >50% 或 queue/drop | 当前 L02 两电机 500 Hz 与六电机 200~250 Hz 使用独立 profile；`0x2A` 仅在另证 AK3.0 后评估；必要时分总线 | 项目负责人 | 有依据的推断 |
+| R08 | 六电机、高频或补充 AK3.0 `0x2A` 导致拥塞 | 中 | 高 | 平均 >50% 或 queue/drop | 当前 力控两电机 500 Hz 与六电机 200~250 Hz 使用独立 profile；`0x2A` 在 500 Hz 下超预算，只有降频或分总线后才评估；必要时分总线 | 项目负责人 | 有依据的推断 |
 | R09 | 多帧 IMU 被误当同步样本 | 高 | 中 | 无序号却发布 coherent | 字段级 age；SYNC_IN 实测；质量标志 | B | 有依据的推断 |
 | R10 | 坐标、安装方向或 yaw 约定错误 | 中 | 高 | 静态/转台方向测试失败 | 四元数为事实源；安装变换校准；协议专用缩放 | B + A | 有依据的推断 |
 | R11 | 第三方代码许可证不清 | 中 | 中 | 根 LICENSE 缺失/复制代码 | 仅参考；依赖前 legal/SPDX scan 和 commit lock | 项目负责人 | 有依据的推断 |
@@ -432,8 +432,8 @@
 |---|---|---|---|---|
 | 基型 AKE60-8、完整定制件号、序列号 | 基型已由用户确认；补两台实机连接/版本记录或订单/BOM | 项目负责人 | W1D2 | 部分确认 |
 | 驱动板 HW、FW、构建/发布日期 | 上位机/启动输出只读、供应商固件包哈希 | B | W1D2 | 待确认项 |
-| 当前 L02 servo/MIT active profile、驱动板/固件、CAN ID、位速率和反馈设置；是否另属 AK3.0 | 每台上位机/供应商工具基础设置截图、只读导出 + 后续被动证据 | B | G0 | 待确认项 |
-| L02 `0x29`（以及实机若另属 AK3.0 时的 `0x2A`）编码器来源、方向与零位 | 供应商帧说明 + 配置记录 + 后续手动方向校验 | 项目负责人 + A | G2 前 | 待确认项 |
+| 当前 AK3.0 力控/伺服 active profile、驱动板/固件、CAN ID、位速率和反馈设置（含单圈模式与 `0x2A` 的 Flash 持久状态） | 每台上位机/供应商工具基础设置截图、只读导出 + 后续被动证据 | B | G0 | 待确认项 |
+| `0x29`（以及启用时的 `0x2A`）编码器来源、方向与零位 | 供应商帧说明 + 配置记录 + 后续手动方向校验 | 项目负责人 + A | G2 前 | 待确认项 |
 | 定制版 Kt、减速比、允许电流/速度/温度 | 对比标准 V3.2、两台 `.AppParams`/`.McParams` 和供应商确认 | 项目负责人 | G3 前 | 部分确认 |
 | 命令超时、neutral、故障复位、上电行为 | 固件说明 + G3 后断包测试 | B | 真实电机最小 demo 前 | 待确认项 |
 | 机械连续/峰值力矩与夹具安全上限 | 准确型号数据 + 结构计算 + 计量 | A | G3 | 待确认项 |
@@ -476,7 +476,7 @@
 3. **待确认项**：Foundation 后由 B 与项目负责人完成电机和两台 HI12 的身份表；任何未知保留为空，不补默认值。
 4. **待确认项**：A 在 W1D2 前给出台架接口、机械限位、急停/断能和力矩计量交付计划。
 5. **待确认项**：B 在 G0/G1 提交候选 transport 的准确型号/固件/通道能力，以及单物理通道的共同位速率、ID、终端和负载证据；不通过时验收第二个隔离通道、改用合格 backend 或修改 profile。
-6. **规划决定**：先从用户确认适用的 L02 建立 servo extended golden/negative/boundary vectors，再建立 motion-control/MIT standard vectors；跨 profile 帧必须被拒绝。AK V3.2 与第三方实现只作交叉比较。
+6. **规划决定（2026-09-01 修订）**：先从 L07 建立**力控** golden/negative/boundary vectors，再建立**伺服扩展帧** vectors；跨 profile 帧必须被拒绝。**每条 golden vector 必须按文档化范围反算验证，不得照抄手册示例**——L07 §4.4.1 力控速度环示例本身有一个十六进制位的笔误。AK V3.2 与第三方实现只作交叉比较。
 7. **有依据的推断**：先实现/验证配置 schema、capability、纯 codec、fake/vcan 与注入式 HighTorque CDC framing，不连接真实命令路径。
 8. **有依据的推断**：完成单总线 BusRuntime、错误帧、统计、最新命令槽和模拟设备；用压力/故障测试验证边界。
 9. **待确认项**：通过 G1 后由成员 B 在 Week 2 逐台只读接入 HI12，随后双设备运行 30 min；不在同一步同时改 ID、位速率和输出 profile。

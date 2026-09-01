@@ -26,7 +26,7 @@
 | 项目 | 当前状态 | 对启动工作的含义 |
 |---|---|---|
 | 总体架构 | 已确定“纯 C++ 核心 + 薄 ros2_control 适配层” | 可以开始编码核心边界 |
-| 电机协议资料 | 用户确认 L02 V1.0.18 CAN 协议/参数适用于当前电机；目标是伺服扩展帧 + 运控/MIT 标准帧，先实现扩展帧 | 不阻塞接口、golden vectors 和模拟器；阻塞真实激活 |
+| 电机协议资料 | **2026-09-01 起为 L07（AK3.0 V3.2.0）**，见 [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)；目标是力控扩展帧 + 伺服扩展帧，**先实现力控** | 不阻塞接口、golden vectors 和模拟器；阻塞真实激活 |
 | HighTorque 资料 | `hightorque_fdcan` 提供 USB CDC raw CAN/CAN-FD 透传示例 | 只提炼 transport contract 和离线 framing/parser；不原样使用会打开串口/`exit(1)` 的 `canport` |
 | HI12 | 通用 J1939/CANopen 资料存在，交付固件未知 | Foundation 只保留 sensor capability，不选现场 profile |
 | 控制频率 | 当前两电机正常目标 500 Hz；框架支持 1 kHz 测试 | 测试和配置从第一天支持多速率，不承诺真实硬件性能 |
@@ -239,7 +239,7 @@ bash tools/ci/build_workspace.sh
 | FND-015 | 性能、ARM64 和 Foundation RC | FND-014 | benchmark/report/tag candidate | Definition of Done 全部有实际证据 |
 | INT-001 | 冻结新 device adapter 模板 | FND-015 | template/checklist/example | 新 adapter 无需修改 controller/core 公共语义 |
 
-严格执行顺序不是“先写 CubeMars driver”。共享主线仍按 `FND-000 -> FND-001/002 -> FND-003 -> FND-004 -> FND-004A -> FND-005...015 -> INT-001`；Foundation 内含 simulation 与 transport spikes。`INT-001` 冻结 adapter 模板后，依次实现 L02 servo codec/session，再实现 L02 MIT codec/session；真实设备始终受 G0-G3 约束。
+严格执行顺序不是“先写 CubeMars driver”。共享主线仍按 `FND-000 -> FND-001/002 -> FND-003 -> FND-004 -> FND-004A -> FND-005...015 -> INT-001`；Foundation 内含 simulation 与 transport spikes。`INT-001` 冻结 adapter 模板后，依次实现 AK3.0 力控 codec/session，再实现 AK3.0 伺服 codec/session；真实设备始终受 G0-G3 约束。
 
 ### 8.1 FND-004 完成结果
 
@@ -354,7 +354,7 @@ SocketCAN 只有前六项通过才封装使用，否则实现最小 Linux RAW so
 
 - `cubemars_hardware`：参考 ros2_control 映射和硬件经验；型号/生命周期/许可边界不足以直接依赖；
 - `motor-control-sdk`：参考 AK V3 force-control 字段，不能继承硬编码 AKE60-8 参数或 C++23/Bazel 体系；
-- `mini-cheetah-tmotor-can`、`tmotor-ak-actuators-driver`：只作 MIT golden frame 交叉旁证，当前实现仍以用户确认适用的 L02 为准；
+- `mini-cheetah-tmotor-can`、`tmotor-ak-actuators-driver`：**不得作为交叉旁证**。它们实现的是旧式 11 位标准帧 MIT，与 AK3.0 力控的 29 位扩展帧和 `KP KD 位置 速度 力矩` 位序都不同；当前实现以 L07（AK3.0）为准；
 - `Panthera-HT_ROS2`：参考 ros2_control/配置组织和 HighTorque 厂家电机语义，不作为 core 或 HI12 实现；
 - `hightorque_fdcan`：只参考 USB CDC raw-frame protocol/behavior；不复用构造即开设备、进程退出和自有线程所有权；
 - `cubemars_servo_can`：只作 servo 报文对照，不进入 C++ RT 路径；
@@ -411,7 +411,7 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 | 工作流 | 主要职责 | 不能修改的边界 | 交付 |
 |---|---|---|---|
 | Core/ros2_control owner | 维护 core、SystemInterface、CI 和 schema | 不加入厂商 if/else | API review、release、集成测试 |
-| CubeMars owner | L02 servo-extended（先）、L02 MIT-standard（后）的 codec/session/golden/sim；AK V3 补充 profile | 不直接打开 socket，不改 controller，不混发 profile | `mech_protocol_cubemars` + evidence |
+| CubeMars owner | AK3.0 力控（先）、AK3.0 伺服扩展帧（后）的 codec/session/golden/sim；AK V3 补充 profile | 不直接打开 socket，不改 controller，不混发 profile | `mech_protocol_cubemars` + evidence |
 | HI12 owner | 识别交付协议、J1939/CANopen codec、坐标/时间/质量 | 不用 host now 替代 sample time | `mech_protocol_hipnuc` + evidence |
 | Integration/HIL owner | CAN 拓扑、配置、抓包、性能和故障试验 | 不跳过 G0~G3，不改协议常量 | deployment profile、原始证据和验收报告 |
 
@@ -465,6 +465,6 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 2. 本机五包 clean build/test（116 tests）和 ASan/UBSan 已通过；该计数包含 Foundation RC 评审后补充的回归测试。
 3. **当前下一步是 FND-015 RC 取证**：在 exact commit 上完成 vcan 软件集成、Jetson ARM64 clean build/test 和 30 分钟模拟稳定性运行；
 4. 通过同一个受保护 PR 合并，不在证据未完整前创建 `v0.1.0-foundation-rc1` tag；
-5. RC 完成后才能开始真实 L02/HI12 adapter，且仍需分别通过 G0～G3。
+5. RC 完成后才能开始真实 AK3.0/HI12 adapter，且仍需分别通过 G0～G3。
 
 目标机依赖已满足，但仍未授权启用物理 CAN、发送电机命令或操作真实设备。ARM64 验证不得借此启用 CAN；如需安装缺失系统依赖，继续遵守目标机“只 `apt update` + `apt install`、禁止 `apt upgrade`”纪律（升级教程 §12.1）。
