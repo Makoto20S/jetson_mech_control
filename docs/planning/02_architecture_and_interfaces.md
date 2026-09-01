@@ -155,9 +155,9 @@ flowchart LR
 
 ### 7.1 配置期固定协议
 
-用户确认适用的 L02 V1.0.18 同时定义 servo extended 与 motion-control/MIT standard，两者帧类型、ID、payload 和 command capability 不同；AK3.0 V3.2 又提供补充的另一代命令族。HI12 J1939/CANopen 取决于交付固件。正式失败关闭规则见 [ADR-004](../adr/ADR-004-fixed-protocol-profile.md)，协议证据和 codec 边界见 [06](06_cubemars_material_review.md)。
+适用的 L07（AK3.0 V3.2.0，见 [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)）同时定义**力控**（控制模式 ID `8`）与**伺服扩展帧**（控制模式 `0–6,15,16`），两者同为 29 位扩展帧但 payload 布局与 command capability 完全不同；上一代 L02（AK2.0）的 servo/MIT 组合不适用于本项目硬件。HI12 J1939/CANopen 取决于交付固件。正式失败关闭规则见 [ADR-004](../adr/ADR-004-fixed-protocol-profile.md)，协议证据和 codec 边界见 [06](06_cubemars_material_review.md)。
 
-实现必须在 `on_configure` 验证固件范围、帧格式、codec、反馈集合和命令集合并绑定 profile；ACTIVE 期间不得改变 profile、claim 或混发。当前电机目标至少包括 L02 `servo_extended`（29 位）和 `motion_control_mit_standard`（11 位），先实现前者；HighTorque transport 只搬运 RawCanFrame，不决定 profile。需要设备写入或刷固件的变化先停用、断能并走独立 bring-up。
+实现必须在 `on_configure` 验证固件范围、帧格式、codec、反馈集合和命令集合并绑定 profile；ACTIVE 期间不得改变 profile、claim 或混发。当前电机目标包括 AK3.0 `force_control_extended`（控制模式 ID 8）和 `servo_extended`（控制模式 0–6,15,16），两者均为 29 位扩展帧，**先实现力控**；HighTorque transport 只搬运 RawCanFrame，不决定 profile。需要设备写入或刷固件的变化先停用、断能并走独立 bring-up。
 
 ### 7.2 capability 描述
 
@@ -407,6 +407,7 @@ FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 | [ADR-006](../adr/ADR-006-conditional-can0-deployment.md) | Proposed | 单物理通道及其 transport backend 只是等待逐台配置、能力、ID/位速率和负载证据的条件式 deployment profile；架构保留双总线 |
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort [N*m]` 受物理语义证据闸门约束；demo 与物理精度分开验收 |
 | [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | 命令看门狗分级语义（跟随/冻结/失败）、transport 能力三态上报与远程帧表达；Foundation RC 评审后的追认记录，2026-08-31 复核转 Accepted，仅约束接口语义、不解除设备启用闸门 |
+| [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md) | Accepted | 协议基线由 L02（AK2.0）切换为 L07（AK3.0）；`ProtocolProfile` 重定义为伺服（模式 0–6、15、16）与力控（控制模式 ID 8），两者均为扩展帧；力控为第一实现 profile；`Kt = 0.7382 N·m/A` 经项目负责人担保后解锁 `effort`；配置期固定 profile 的规则保留但理由改为主动选择而非固件限制 |
 
 状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
 
@@ -414,9 +415,9 @@ ADR-007（部署）、ADR-008（Python 低频目标）、ADR-010（大数据）�
 
 ## 16. 扩展到 6 电机、2 CAN 的规则
 
-**有依据的推断**：长期两总线设计包络是一条经确认位速率的 actuator bus 承载最多 6 台电机，另一条 sensor bus 承载两台 HI12 和 Classic CAN 模式 STM32。当前物理入口可由 SocketCAN 或 HighTorque USB CDC backend 提供，但二者必须实现同一 `RawCanFrame`/BusRuntime 契约。L02 伺服扩展帧与运控/MIT 标准帧分别预算；传感器总线加入 STM32 前必须重算。
+**有依据的推断**：长期两总线设计包络是一条经确认位速率的 actuator bus 承载最多 6 台电机，另一条 sensor bus 承载两台 HI12 和 Classic CAN 模式 STM32。当前物理入口可由 SocketCAN 或 HighTorque USB CDC backend 提供，但二者必须实现同一 `RawCanFrame`/BusRuntime 契约。AK3.0 力控与伺服扩展帧分别预算；传感器总线加入 STM32 前必须重算。
 
-**规划目标（受 ADR-006 Proposed 约束）**：当前 L02 两电机候选 profile 以 500 Hz 为资料上限和正常目标；上段 200~250 Hz 只描述六电机单总线扩展预算。500 Hz 目标不证明单物理通道部署已通过；若未来另证协议 profile 需要更高电机收发率、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
+**规划目标（受 ADR-006 Proposed 约束，2026-09-01 重算）**：当前两电机力控 profile 以 500 Hz 为正常目标——协议上限已由 L07 提高到 2000 Hz，**约束改由总线预算给出**（两电机加两台 HI12 为 41.6%，1 kHz 则 73.6% 被拒）；上段 200~250 Hz 只描述六电机单总线扩展预算。500 Hz 目标不证明单物理通道部署已通过；若未来另证协议 profile 需要更高电机收发率、单总线出现不可接受负载/故障影响面，或 STM32 带宽使 sensor bus 超过目标，则应启用第二总线或重审设计包络，不能用更深软件队列掩盖物理带宽不足。
 
 **有依据的推断**：新增设备只增加配置、codec/device session 和 capability 映射；上层控制器继续使用标准物理量与质量接口。新增 Jetson 只更换部署映射和经过验证的 host manifest，不修改协议常量。
 

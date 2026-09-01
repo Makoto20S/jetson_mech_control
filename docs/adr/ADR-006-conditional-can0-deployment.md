@@ -16,7 +16,9 @@
 
 最近一次已记录的 Jetson 快照只观察到 `can0`，现场意图是两台电机与两台 HI12 共总线；该硬件状态本轮未重验，第二物理通道也未确认。`company/hightorque_fdcan` 又提供了 USB-CDC raw CAN transport 的参考，但准确通信板、固件、通道数、nominal bitrate 配置和错误/时间戳能力尚未闭合，不能把示例存在等同于 transport 已可部署。
 
-按 1 Mbit/s 经典 CAN 保守估算，当前第一目标 L02 servo-extended 的两电机 500 Hz 加两台 HI12 100 Hz 约 41.6%；第二目标 L02 motion-control/MIT-standard 若同按 500 Hz 候选频率估算约 36.6%。这些只是 profile-specific 静态预算，不证明交付设备具有共同位速率、无 ID 冲突、可接受仲裁延迟或稳定错误行为。`0x2A` 和 1 kHz 电机 I/O 属于另需实机证明的 AK3.0 补充 profile，不属于当前 L02 默认预算。
+**（2026-09-01 按 [ADR-013](ADR-013-ak30-protocol-baseline.md) 重算）** 按 1 Mbit/s 经典 CAN 最坏位填充预算（8 字节扩展帧 160 bit、4 字节 120 bit），当前第一目标 **AK3.0 力控**的两电机 500 Hz 加两台 HI12 100 Hz 约 **41.6%**。力控命令固定 8 字节扩展帧、反馈按 `0x29` 8 字节计，帧长与切换前的「8B 命令 + `0x29`」场景相同，**因此基线切换没有使带宽变差，频率目标不需要下调**。若额外启用 `0x2A` 位置帧则升至 53.6%，**超过 50% 平均目标，故 500 Hz 下不得启用**；两电机 1 kHz 场景为 73.6%，拒绝。六电机包络为 200–250 Hz（含两台 HI12 时 48.0%）。完整场景表见 [06 §5](../planning/06_cubemars_material_review.md)。
+
+~~原文按 L02（AK2.0）servo-extended 与 motion-control/MIT-standard 帧型估算，得 41.6% 与 36.6%~~ —— 帧型基线已变更，数字按上文重算。无论数字如何，静态预算只是 profile-specific 估算，不证明交付设备具有共同位速率、无 ID 冲突、可接受仲裁延迟或稳定错误行为。
 
 ## Decision / 决策
 
@@ -25,7 +27,7 @@
 1. core、codec、controller 只引用 logical bus；deployment 把逻辑总线显式映射到一个具有稳定身份的物理通道。该通道可由 SocketCAN、经验证的 HighTorque USB-CDC backend、`vcan` 或 fake 提供，协议常量不硬编码 `can0` 或 `/dev/ttyACM*`。
 2. 当前单物理通道是一个条件式 deployment profile，不是架构事实，也不预先选定 transport backend。四台设备只有在共同位速率、唯一 ID/节点、明确帧格式/filter、终端、backend capability 和负载/故障验收全部通过后才可激活。
 3. nominal 目标为每总线平均占用不高于 50%、任意 1 秒峰值不高于 60%，RX dropped/overrun 与未解释 bus error/bus-off 为零；占用率之外还必须验证 command-to-wire、仲裁最坏响应和 queue 行为。
-4. L02 servo-extended 与 motion-control/MIT-standard 必须分别预算和验收；ACTIVE 期间不探测、混发或热切换。`0x2A`、高于 L02 资料上限的反馈率、1 kHz 电机 I/O、更多电机或 STM32 只能在对应协议/固件另有证据时作为独立 profile 重算并实测。
+4. **（2026-09-01 按 [ADR-013](ADR-013-ak30-protocol-baseline.md) 改写）** AK3.0 力控与伺服扩展帧必须分别预算和验收；ACTIVE 期间不探测、混发或热切换。`0x2A` 可选位置反馈帧、高于设备配置限值的反馈率（L07 的协议上限为 1–2000 Hz，远高于 L02 的 500 Hz，因此上限不再是天然约束，实际约束来自总线预算）、1 kHz 电机 I/O、更多电机或 STM32，都必须作为独立 profile 重算并实测后才可启用。
 5. backend 必须显式报告其 Classic/FD、标准/扩展帧、最大 DLC、bitrate 配置、filter、时间戳、错误状态和队列能力；不支持或未知的能力必须失败关闭，不得伪造成统一 transport 保证。
 6. 任一条件不通过时，动作是增加经验证的第二个隔离物理通道、改用能力充分的 backend、分配独立物理总线或降低/调整 profile；不得假装已有 `can1` 或可用 USB 通道，也不得盲改未知设备配置来迎合单总线。
 

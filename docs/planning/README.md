@@ -58,7 +58,7 @@ ADR-001/002/003/004/005/009 为 Accepted；[ADR-006](../adr/ADR-006-conditional-
 | [03 MVP 执行、验证与治理](03_mvp_delivery_plan.md) | 完整 MVP、硬件闸门、量化验收和发布路线 | 当前总路线 |
 | [04 证据与来源登记](04_source_register.md) | 本地资料、哈希、官方文档、仓库快照与冲突 | 证据登记 |
 | [05 决策与待确认项](05_decisions_and_open_questions.md) | ADR 导航、现场上下文和 OQ-01～OQ-10 | 状态概览；ADR 优先 |
-| [06 CubeMars 资料审查](06_cubemars_material_review.md) | L02 双 profile、AK3.0/AKE60-8 交叉资料、HighTorque transport 边界和实机缺口 | 供应商证据层 |
+| [06 CubeMars 资料审查](06_cubemars_material_review.md) | AK3.0（L07）力控/伺服双 profile、AKE60-8 参数、HighTorque transport 边界和实机缺口 | 供应商证据层 |
 | [07 Foundation 搭建计划](07_framework_bootstrap_plan.md) | 当前 FND/RSP 顺序、核心契约与 Definition of Done | 当前实施入口 |
 | [RSP-001 transport 评估](rsp-001-transport-evaluation.md) | SocketCAN 与 HighTorque USB-CDC/USB2CAN 的离线取舍和能力证据 | 已完成离线评估；不授权真实激活 |
 | [FND-000 仓库与资产政策](fnd-000_repository_and_asset_policy.md) | 仓库、许可证、资产、Memory 与分支治理 | 已确认政策 |

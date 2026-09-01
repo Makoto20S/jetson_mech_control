@@ -25,7 +25,7 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 | 项目 | 当前记录 | 证据性质 |
 |---|---|---|
 | 电机 | 两台基于 AKE60-8 的定制驱控一体电机，加装 CubeMars 双编码器；结构设计不属于软件任务 | 用户确认；实机配置待证 |
-| 电机资料 | 用户确认 L02 V1.0.18 CAN 协议/参数适用于当前电机；伺服扩展帧与运控/MIT 标准帧都支持，先实现伺服扩展帧 | 用户确认事实 + 规划决定，见 [06](06_cubemars_material_review.md) |
+| 电机资料 | **2026-09-01 更正（[ADR-013](../adr/ADR-013-ak30-protocol-baseline.md)）**：适用手册为 L07（AK3.0 V3.2.0），力控与伺服扩展帧都支持，先实现力控扩展帧 | 用户确认事实 + 规划决定，见 [06](06_cubemars_material_review.md) |
 | HighTorque 资料 | ROS2 SDK 是集成参考；`hightorque_fdcan` 是 USB CDC raw-CAN transport 参考，不是电机 codec | 资料事实 + 规划决定，见 [04](04_source_register.md)、[06](06_cubemars_material_review.md) |
 | HI12 | 当前有两台；标准 CAN 交付通常为 J1939，但每台交付协议、ID、位速率和输出 profile 尚未读取 | 用户提供 + 待确认 |
 | CAN transport | **用户确认（2026-08-23）：电机将接入高擎通用盒子**（`company/4.png`，7路CAN功率板独立形态）的 XT30(2+2) 电源+CAN 通道；Jetson 经 Type-C USB CDC（7×`/dev/ttyACM`，每通道一个串口）收发原始帧。两台 HI12 接盒子通道或独立适配器**均为候选，未定**。USB-CDC transport 由此升级为主部署路径候选，SocketCAN 转为测试路径与备选。关键未知：每通道 nominal 波特率固件固定且数值未知（见 §5.2 问题 1/2） | 用户确认拓扑意向 + 资料事实；ADR-006 仍 Proposed，激活仍需全部证据 |
@@ -37,7 +37,7 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 
 ## 3. 已确认的实施解释
 
-- **协议选择：** 当前电机至少区分 `L02 servo extended (29-bit)` 与 `L02 motion-control/MIT standard (11-bit)` 两个 profile，先实现前者；AK V3 profile 作为补充证据集保留。配置期绑定，ACTIVE 期间禁止自动探测、混发或热切换；详细协议证据见 [06](06_cubemars_material_review.md)。
+- **协议选择（2026-09-01 修订）：** 当前电机区分 `AK3.0 force-control (extended, mode ID 8)` 与 `AK3.0 servo extended (modes 0-6,15,16)` 两个 profile，先实现前者；AK V3 profile 作为补充证据集保留。配置期绑定，ACTIVE 期间禁止自动探测、混发或热切换；详细协议证据见 [06](06_cubemars_material_review.md)。
 - **Transport 选择：** `RawCanFrame`/`BusRuntime` 下同时保留 Fake、SocketCAN 和 HighTorque USB-CDC backend。**2026-08-23 起 USB-CDC 为主部署路径候选**（用户确认电机接通用盒子通道；每盒子通道即一个 `/dev/ttyACM` 设备，与 ADR-002 单写者一一对应），SocketCAN 为测试路径（vcan）与备选实链路。USB-CDC backend 必须以注入式串口、CDC CRC/批量帧 golden vectors 和明确能力失败语义验证，不能直接把供应商 `canport` 类放进 SystemInterface；缺失能力（无时间戳、错误上报需自行实现、波特率固件固定）必须显式声明为 unavailable/固定值，不得伪造。
 - **控制职责：** 驱动器负责 FOC、高速电流环和所选模式的内部闭环；Jetson C++ 控制器读取标准状态并产生有界目标。Python 不拥有电机命令接口。
 - **最小 demo：** 恒定命令只验证 controller → hardware → session → BusRuntime → CAN → state/diagnostics 链路。目标必须可配置、有限、受限、带 slew/TTL 且可回零；它不是最终控制算法或物理力矩精度验收。
@@ -53,11 +53,11 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 | ID | 当前状态 | 待确认项 | 所需证据 | 影响 |
 |---|---|---|---|---|
 | OQ-01 | 部分解决 | 基型为 AKE60-8；两台定制件号、驱动板和固件未知 | 每台连接/版本记录、序列号和只读配置导出 | 协议代际、缩放和范围 |
-| OQ-02 | 资料部分解决 | L02 适用性已由用户确认；每台实际固件、active profile、CAN ID/反馈设置仍未知 | 只读固件/配置记录、两套 L02 golden frame 与后续被动证据 | codec、claim、lifecycle |
-| OQ-03 | 资料部分解决 | L02 `0x29` 的编码器来源未知；若实机另证 AK3.0，`0x2A` 来源及能否同读两者也未知 | 供应商帧说明、配置和后续被动证据 | `joint/position` 来源 |
+| OQ-02 | 资料部分解决 | **L07 适用性已由项目负责人 2026-09-01 确认并有驱动板证据**；每台实际固件、active profile、CAN ID/反馈设置（含单圈模式与 `0x2A` 的 Flash 持久状态）仍未知 | 只读固件/配置记录、两套 L07 golden frame 与后续被动证据 | codec、claim、lifecycle |
+| OQ-03 | 资料部分解决 | `0x29` 的编码器来源仍未知——L07 在力矩与转速处明写「输出端」，位置处未写；`0x2A` 来源及能否同读两者也未知 | 供应商帧说明、配置和后续被动证据 | `joint/position` 来源 |
 | OQ-04 | 资料部分解决 | 标准 Kt/范围已知；定制版是否保持不变未知 | `.AppParams`/`.McParams` 与供应商确认 | 标准 `effort` 映射 |
-| OQ-05 | 协议范围解决，性能待测 | L02 伺服反馈资料记录最高 500 Hz；实际设备稳定性、transport latency 和 USB batching 未知 | 配置、离线/注入测试、后续抓包与 30 min 统计 | 有效闭环带宽 |
-| OQ-06 | 资料部分解决（2026-08-23） | 失控保护机制已证实存在（L02 p18：失控时间/失控刹车电流，上位机配置，见 [06 §4.4.3](06_cubemars_material_review.md)）；出厂默认值与启用状态未知（截图为 0，疑似默认关闭），能否经 CAN 配置未知 | 逐台读取"应用功能"页并截图（G0）；§5.1 问题 1；G3 后受控断包试验验证实际行为 | 命令租约与进程崩溃安全 |
+| OQ-05 | 协议范围解决，性能待测 | **L07 反馈协议范围为 1–2000 Hz，上限不再是协议约束而是总线预算约束（500 Hz 为当前目标）**；实际设备稳定性、transport latency 和 USB batching 未知 | 配置、离线/注入测试、后续抓包与 30 min 统计 | 有效闭环带宽 |
+| OQ-06 | 资料部分解决（2026-08-23） | 失控保护机制已证实存在（上位机应用设置：失控时间/失控刹车电流（原引证 L02 p18 已随基线切换作废，L07 侧对应章节待核对），见 [06 §4.4.3](06_cubemars_material_review.md)）；出厂默认值与启用状态未知（截图为 0，疑似默认关闭），能否经 CAN 配置未知 | 逐台读取"应用功能"页并截图（G0）；§5.1 问题 1；G3 后受控断包试验验证实际行为 | 命令租约与进程崩溃安全 |
 | OQ-07 | 未解决 | 两台 HI12 的协议、节点、位速率和输出 profile | PNAME/APP_VER、逐台配置读取和抓包 | HI12 接入方案（盒子通道或独立适配器） |
 | OQ-08 | 问题重塑（2026-08-23） | 原"四设备共享单总线的共同位速率"问题因电机确认接盒子分通道而降级；**新关键问题：盒子每通道 nominal 波特率由固件固定、数值未记载、无配置命令**——电机通道能否跑 Classic CAN 1 Mbps、HI12（默认 500 kbps，可改 125k~1M）能否上盒子通道均未知 | 高擎书面答复（§5.2 问题 1/2）+ 实物板卡固件核对 + G1 抓包 | ADR-006 状态、HI12 接入方案 |
 | OQ-09 | 未解决 | Jetson 500 Hz/1 kHz 周期与 command-to-wire 性能 | nominal/stress 原始时序 | RT 内核/第二总线需求 |
@@ -69,7 +69,7 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 
 ### 5.1 致 CubeMars（电机）
 
-背景：项目电机为基于 AKE60-8 的定制驱控一体双编码器电机；用户已确认 AK2.0 V1.0.18 手册（L02）的 CAN 协议适用。
+背景：项目电机为基于 AKE60-8 的定制驱控一体双编码器电机；用户已确认 AK2.0 V1.0.18 手册（L02，已于 2026-09-01 更正为 L07）的 CAN 协议适用。
 
 1. **失控保护默认值与配置路径**：V1.0.18 手册第 18 页"应用功能"含"失控时间(ms)"与"失控刹车电流(A)"。两参数的出厂默认值是多少？默认是否启用？除 CubeMarsTool 外能否通过 CAN 报文配置？
 2. **运控/MIT 模式归一化常量**：手册第 43 页示例代码使用固定常量（P ±12.5 rad、V ±30 rad/s、T ±18 N·m、Kp 0-500、Kd 0-5），而第 42 页各型号物理范围差异很大。我们的定制 AKE60-8 机型固件在 MIT 编码/解码时使用哪一套 MIN/MAX 常量？

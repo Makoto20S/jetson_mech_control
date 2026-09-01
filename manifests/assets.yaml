@@ -82,13 +82,17 @@ observed_external_or_excluded_files:
     sha256: "94563A0A9939C9B870C0820DB405BC8B6FA77316628E2B98FE79729553ED14B9"
     bytes: 2164401
     tracking: excluded_by_default
-  - path: "CubeMars/AK系列/AK系列电机模组产品使用说明V3.2.0（适用AK3.0电机）.pdf"
+  # L07 —— 2026-09-01 起为本项目电机的适用协议手册（见 ADR-013）。
+  # 该文件原登记于 CubeMars/AK系列/AK系列电机模组产品使用说明V3.2.0（适用AK3.0电机）.pdf，
+  # 但 CubeMars/ 目录已不在工作区；项目负责人于 2026-09-01 将同一文件放入 company/，
+  # SHA-256 与原登记值逐位一致，故此处只更新路径，不新增条目。
+  - path: "company/ak-series-prodcut-manual-v3-2-0-for-ak-3-0-robotic-actuator-cn.pdf"
     category: supplier_document
     source_version: "AK3.0 V3.2.0"
     source_uri: null
     sha256: "41069C1810C27EE2C1D03049F7FF68A14F9DC0579304176BB0240E71CCF0C5AA"
     bytes: 3218805
-    tracking: excluded_nested_repository
+    tracking: excluded_by_default
   - path: "CubeMars/驱动板/【小板-驱动板V3.0】AK54-4810-1C-A2驱动器安装说明.pdf"
     category: supplier_document
     source_version: "V1.0.0"

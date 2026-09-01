@@ -16,12 +16,13 @@
 | [ADR-006](ADR-006-conditional-can0-deployment.md) | Proposed | [Conditional single-channel deployment](ADR-006-conditional-can0-deployment.md) | 当前单物理通道、多 transport backend 的证据闸门与双总线扩展边界 | 逐台设备配置、backend 能力、ID/位速率、负载、仲裁和错误证据；G0/G1/G4 评审 |
 | [ADR-009](ADR-009-effort-semantic-gate.md) | Accepted | [Effort semantic gate](ADR-009-effort-semantic-gate.md) | `effort [N*m]` 的物理语义闸门与最小 demo 边界 | 匹配固件/参数、机械映射、校准和受控台架证据；G0–G3 评审后才可启用设备映射 |
 | [ADR-012](ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | [Command watchdog and capability honesty](ADR-012-command-watchdog-and-capability-honesty.md) | 命令看门狗分级语义、能力三态上报与远程帧表达 | 项目负责人复核追认记录；真实抖动/位速率证据；vcan 与硬件验证 |
+| [ADR-013](ADR-013-ak30-protocol-baseline.md) | Accepted | [AK3.0 protocol baseline](ADR-013-ak30-protocol-baseline.md) | 协议基线由 L02（AK2.0）切换为 L07（AK3.0）、`ProtocolProfile` 重定义、力控优先、`effort` 解锁 | 驱动板 `AK54-4810-1C-A2` 对应关系；项目负责人复核 Kt 对定制版的适用性；带宽重算结论 |
 
 ## Reading and status rules / 阅读与状态规则
 
 - `Accepted` 表示本 ADR 的架构/语义约束已经作为 Foundation 实施边界采用；它不表示真实设备、CAN 总线或物理性能已经验证。
 - `Proposed` 表示方向和安全边界已写清，但仍缺少本文件列出的决定性证据或批准。实现可以据此保守拒绝未知配置，不能据此激活真实设备。
-- 本轮 FND-004 冻结的是 ADR-001～ADR-006 与 ADR-009。ADR-012 是 Foundation RC 评审后的追认记录，已于 2026-08-31 复核转 Accepted；其批准范围仅限接口语义，不解除任何设备启用闸门。规划中提到的 ADR-007、ADR-008、ADR-010 和 ADR-011 仍是候选后续决策，尚未形成独立规范文件。
+- 本轮 FND-004 冻结的是 ADR-001～ADR-006 与 ADR-009。ADR-012 是 Foundation RC 评审后的追认记录，已于 2026-08-31 复核转 Accepted；其批准范围仅限接口语义，不解除任何设备启用闸门。ADR-013 于 2026-09-01 提交并在同日复核转 Accepted，它在任何实现进入 `main` 之前完成，与 ADR-012 的追认路径相反；其批准范围为协议基线与接口语义，同样不解除任何设备启用闸门。规划中提到的 ADR-007、ADR-008、ADR-010 和 ADR-011 仍是候选后续决策，尚未形成独立规范文件。
 - 供应商资料、配置导出、抓包、测量或测试与 ADR 冲突时，先停止受影响路径并按各 ADR 的“重审触发”更新记录；不得静默改写协议常量或标准接口语义。
 
 ## FND-004 verification / FND-004 验证
@@ -33,7 +34,7 @@ python3 tools/ci/check_adrs.py
 python3 tools/ci/context_check.py
 ```
 
-检查器验证七个文件、状态枚举、必需章节、内部链接和规划入口的反向链接。它是文档结构检查，不替代后续 core、vcan、ARM64 或硬件验收。
+检查器验证全部九个 ADR 文件、状态枚举、必需章节、内部链接和规划入口的反向链接。它是文档结构检查，不替代后续 core、vcan、ARM64 或硬件验收。
 
 ## Deferred candidates / 延后候选
 
