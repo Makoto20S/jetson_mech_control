@@ -16,9 +16,9 @@
 
 最近一次已记录的 Jetson 快照只观察到 `can0`，现场意图是两台电机与两台 HI12 共总线；该硬件状态本轮未重验，第二物理通道也未确认。`company/hightorque_fdcan` 又提供了 USB-CDC raw CAN transport 的参考，但准确通信板、固件、通道数、nominal bitrate 配置和错误/时间戳能力尚未闭合，不能把示例存在等同于 transport 已可部署。
 
-> ⚠️ **2026-09-01：本段的两个百分比已作废，等待按 [ADR-013](ADR-013-ak30-protocol-baseline.md) 重算。** 它们按 L02（AK2.0）的 servo-extended 与 motion-control/MIT-standard 帧型计算，而本项目硬件适用的是 L07（AK3.0）。新基线下第一目标是**力控**（8 字节扩展帧），且 `0x2A` 不再是「另一代补充 profile」而是本代的可选反馈帧，必须纳入预算考量。**重算完成前，不得引用下列数字做容量判断。**
+**（2026-09-01 按 [ADR-013](ADR-013-ak30-protocol-baseline.md) 重算）** 按 1 Mbit/s 经典 CAN 最坏位填充预算（8 字节扩展帧 160 bit、4 字节 120 bit），当前第一目标 **AK3.0 力控**的两电机 500 Hz 加两台 HI12 100 Hz 约 **41.6%**。力控命令固定 8 字节扩展帧、反馈按 `0x29` 8 字节计，帧长与切换前的「8B 命令 + `0x29`」场景相同，**因此基线切换没有使带宽变差，频率目标不需要下调**。若额外启用 `0x2A` 位置帧则升至 53.6%，**超过 50% 平均目标，故 500 Hz 下不得启用**；两电机 1 kHz 场景为 73.6%，拒绝。六电机包络为 200–250 Hz（含两台 HI12 时 48.0%）。完整场景表见 [06 §5](../planning/06_cubemars_material_review.md)。
 
-~~按 1 Mbit/s 经典 CAN 保守估算，当前第一目标 L02 servo-extended 的两电机 500 Hz 加两台 HI12 100 Hz 约 41.6%；第二目标 L02 motion-control/MIT-standard 若同按 500 Hz 候选频率估算约 36.6%。~~ 无论数字如何，静态预算只是 profile-specific 估算，不证明交付设备具有共同位速率、无 ID 冲突、可接受仲裁延迟或稳定错误行为。
+~~原文按 L02（AK2.0）servo-extended 与 motion-control/MIT-standard 帧型估算，得 41.6% 与 36.6%~~ —— 帧型基线已变更，数字按上文重算。无论数字如何，静态预算只是 profile-specific 估算，不证明交付设备具有共同位速率、无 ID 冲突、可接受仲裁延迟或稳定错误行为。
 
 ## Decision / 决策
 
