@@ -16,6 +16,7 @@ add_library(${PROJECT_NAME}
   src/ak30_force_wire.cpp
   src/ak30_mapping.cpp
   src/ak30_force_codec.cpp
+  src/ak30_force_session.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -47,7 +48,9 @@ if(BUILD_TESTING)
     test/test_ak30_feedback_decode.cpp
     test/test_ak30_mapping.cpp
     test/test_ak30_force_codec.cpp
+    test/test_ak30_force_session.cpp
   )
+  target_include_directories(${PROJECT_NAME}_test PRIVATE test)
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_target_dependencies(${PROJECT_NAME}_test mech_simulation)
   ament_lint_cmake()
