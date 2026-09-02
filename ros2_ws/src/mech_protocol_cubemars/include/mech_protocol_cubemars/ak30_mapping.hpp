@@ -41,10 +41,19 @@ struct ForceControlGains final {
 };
 
 // Defaults are motor1's evidence state as the repository records it today:
-// only pole_pairs and torque_constant are verified, so no sub-mode configures.
+// pole_pairs, gear_ratio and torque_constant are verified, so no sub-mode
+// configures until direction_sign is resolved (vendor question B9).
 struct Ak30Mapping final {
   EvidencedValue pole_pairs{14.0, true};
-  EvidencedValue gear_ratio{8.0, false};
+  // Verified 2026-09-02 from three independent sources agreeing on 8:1 — the
+  // host tool's dedicated 减速器参数设置 field reading `Ratio: 8`, the model
+  // naming convention in L07's own force-control parameter table (AK80-9 is
+  // 9:1, AK60-39 is 39:1, AKH70-48 is 48:1, so AKE60-8 is 8:1), and the
+  // displayed reduction ratio. The export's `si_gear_ratio = 0` is a different,
+  // unset VESC-lineage SI-display field, not a counter-source; an earlier
+  // summary mistook the two for one field and recorded a conflict that does not
+  // exist.
+  EvidencedValue gear_ratio{8.0, true};
   EvidencedValue zero_offset_rad{0.0, false};
   EvidencedValue direction_sign{1.0, false};
   // L07 p.37 for AKE60-8, owner-guaranteed for this variant (ADR-013 section 4).

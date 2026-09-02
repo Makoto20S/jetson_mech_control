@@ -30,14 +30,15 @@ using mech::mech_protocol_cubemars::to_device_command;
   return mapping;
 }
 
-// motor1 as the repository actually evidences it today: only pole_pairs and
-// torque_constant are verified. This is the state the evidence gate must
-// refuse, and it is why no sub-mode configures yet.
+// motor1 as the repository actually evidences it today: pole_pairs, gear_ratio
+// and torque_constant are verified. This is the state the evidence gate must
+// still refuse, and it is why no sub-mode configures yet.
 [[nodiscard]] Ak30Mapping motor1_as_evidenced() {
   Ak30Mapping mapping{};
   mapping.pole_pairs = {14.0, true};
   mapping.torque_constant_nm_per_a = {0.7382, true};
-  mapping.gear_ratio = {8.0, false};
+  // Three agreeing sources, 2026-09-02; see the header's comment.
+  mapping.gear_ratio = {8.0, true};
   mapping.zero_offset_rad = {0.0, false};
   mapping.direction_sign = {1.0, false};
   mapping.position_source_known = false;
@@ -51,15 +52,18 @@ TEST(Ak30Mapping, RefusesEverySubModeWithMotor1sCurrentEvidence) {
   EXPECT_FALSE(mapping_is_sufficient(mapping, ForceControlSubMode::Position));
 }
 
-// The design's central claim: direction_sign alone stands between the project
-// and a torque sub-mode that configures. If this test ever needs changing,
-// the shortest path to a usable adapter has moved and the design doc is stale.
-TEST(Ak30Mapping, VerifyingDirectionSignAloneUnblocksTorqueAndNothingElse) {
+// The design's central claim: direction_sign is the last parameter standing
+// between the project and a configurable adapter. Since gear_ratio was verified
+// on 2026-09-02 it now unblocks velocity as well as torque; only the position
+// chain (zero offset and encoder shaft) remains beyond it. If this test ever
+// needs changing, the shortest path to a usable adapter has moved and the
+// design document is stale.
+TEST(Ak30Mapping, VerifyingDirectionSignUnblocksTorqueAndVelocityButNotPosition) {
   auto mapping = motor1_as_evidenced();
   mapping.direction_sign = {1.0, true};
 
   EXPECT_TRUE(mapping_is_sufficient(mapping, ForceControlSubMode::Torque));
-  EXPECT_FALSE(mapping_is_sufficient(mapping, ForceControlSubMode::Velocity));
+  EXPECT_TRUE(mapping_is_sufficient(mapping, ForceControlSubMode::Velocity));
   EXPECT_FALSE(mapping_is_sufficient(mapping, ForceControlSubMode::Position));
 }
 

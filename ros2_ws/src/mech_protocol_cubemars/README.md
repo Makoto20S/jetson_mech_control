@@ -33,7 +33,8 @@ torque ±54 N·m. Tests citing manual examples use `ak10_9_ranges()`; AKE60-8 is
 ## Evidence gate
 
 `configure()` fails closed unless every mapping parameter the configured
-sub-mode consumes is verified. With motor1's present evidence only
-`pole_pairs` and `torque_constant` are verified, so **every sub-mode still
+sub-mode consumes is verified. With motor1's present evidence `pole_pairs`,
+`gear_ratio` and `torque_constant` are verified, so **every sub-mode still
 refuses to configure**; `direction_sign` (vendor question B9) is the single
-parameter that unblocks the torque sub-mode.
+parameter that unblocks both the torque and velocity sub-modes. The position
+sub-mode additionally needs the zero offset and the encoder's shaft (B4).

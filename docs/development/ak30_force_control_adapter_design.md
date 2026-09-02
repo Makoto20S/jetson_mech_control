@@ -114,7 +114,7 @@ Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, dr
 | Parameter | Initial state for motor1 | Basis |
 |---|---|---|
 | `pole_pairs` = 14 | **verified** | Screenshot and XML export agree |
-| `gear_ratio` = 8 | unverified | Export `si_gear_ratio = 0` contradicts the displayed 8 |
+| `gear_ratio` = 8 | ~~unverified~~ **verified (2026-09-02)** | Three agreeing sources: the host tool's dedicated `减速器参数设置 → Ratio: 8`; L07's own model-naming convention (AK80-**9** is 9:1, AK60-**39** is 39:1, AKH70-**48** is 48:1, so AKE60-**8** is 8:1); and the displayed ratio. ~~Export `si_gear_ratio = 0` contradicts the displayed 8~~ — that was an error: `si_gear_ratio` is a different, unset VESC-lineage SI-display field, not a counter-source |
 | `zero_offset` | unverified | Screenshot `330.07°` vs export `336.28°` |
 | `position_source_shaft` | **unknown** | L07 writes 输出端 explicitly for torque and speed but not for position |
 | `direction_sign` | unverified | `foc_encoder_inverted` and `m_invert_direction` act at different layers |
@@ -175,14 +175,14 @@ A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` pres
 ## 10. Still open, and what each blocks
 
 - **`0x29` encoder source** — blocks `position_source_shaft`, hence the position sub-mode. Vendor question B4.
-- **Direction and zero chain** — blocks `direction_sign`, hence all sub-modes including torque. Vendor question B9. **This is the shortest path to a usable adapter.**
-- **Gear ratio conflict** (`si_gear_ratio = 0` vs displayed 8) — vendor question B8.
-- **Force-control feedback frame** — L07 §4.3.1 is titled "servo mode feedback" and §4.2 defines only the command; the manual never states what feedback looks like in force-control mode. `0x29` as a command-family-independent status frame is the reasonable inference. Vendor question B13.
-- **Single-turn / `0x2A` Flash state** — position semantics depend on a persisted setting invisible on the wire. Vendor question B14.
+- **Direction and zero chain** — blocks `direction_sign`, hence all sub-modes including torque. Vendor question B9. **This is the shortest path to a usable adapter, and since `gear_ratio` was verified on 2026-09-02 it now unblocks the velocity sub-mode as well as torque.** It may be settled faster by measurement than by the vendor: on an unloaded motor, a passive listen while turning the output shaft by hand reveals the feedback direction without sending a single frame.
+- ~~**Gear ratio conflict** (`si_gear_ratio = 0` vs displayed 8) — vendor question B8.~~ **Closed 2026-09-02.** There was no conflict: `si_gear_ratio` is a different, unset SI-display field. See the §5 table. B8 is withdrawn.
+- **Force-control feedback frame** — L07 §4.3.1 is titled "servo mode feedback" and §4.2 defines only the command; the manual never states what feedback looks like in force-control mode. `0x29` as a command-family-independent status frame is the reasonable inference. Vendor question B13. Also observable directly during the passive listen.
+- **Single-turn / `0x2A` Flash state** — position semantics depend on a persisted setting invisible on the wire. Vendor question B14. **Note:** the `多圈模式` / `单圈模式` buttons visible in the host tool's trajectory-planning panel are a host-side command-shaping choice, **not** the device's persisted feedback mode, and must not be read as answering this item.
 - **Which shaft the command velocity refers to** — L07 documents the wire
   command velocity only as `电机速度 (rad/s)`, while feedback is ERPM requiring
   `÷ pole_pairs ÷ gear_ratio`. The implementation assumes output-side, matching
   the torque field, which the manual does state is 输出端. Vendor question B15.
-  Gated behind the same `gear_ratio` evidence requirement, so it cannot reach a
-  device unanswered.
+  **Now that `gear_ratio` is verified this assumption is no longer gated behind
+  it, so B15 must be answered before the velocity sub-mode drives a real motor.**
 - **`ADR-012`'s staged freeze/error actions** — this package implements only the classification half: `command_stage()` reports `Following`/`Holding`/`Expired` and the session never synthesizes or re-sends a command. It does not freeze the last valid command or raise an explicit ERROR past the hard TTL; there is no caller yet to drive that behavior. This blocks nothing offline. The ros2_control hardware-plugin slice must close it by polling `command_stage()` and acting on `Holding` and `Expired` itself; shipping that plugin without consuming `command_stage()` would leave the watchdog decorative.
