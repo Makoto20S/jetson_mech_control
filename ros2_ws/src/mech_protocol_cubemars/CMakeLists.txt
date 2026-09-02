@@ -49,6 +49,7 @@ if(BUILD_TESTING)
     test/test_ak30_mapping.cpp
     test/test_ak30_force_codec.cpp
     test/test_ak30_force_session.cpp
+    test/test_ak30_simulation_integration.cpp
   )
   target_include_directories(${PROJECT_NAME}_test PRIVATE test)
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
