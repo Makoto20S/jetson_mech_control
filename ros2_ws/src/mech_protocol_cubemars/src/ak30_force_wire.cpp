@@ -1,6 +1,7 @@
 #include "mech_protocol_cubemars/ak30_force_wire.hpp"
 
 #include <cmath>
+#include <cstdint>
 
 namespace mech::mech_protocol_cubemars {
 namespace {
@@ -90,6 +91,30 @@ bool encode_force_control(const ForceControlCommand& command,
       static_cast<std::uint8_t>(((velocity & 0x0FU) << 4U) | (torque >> 8U));
   payload[7] = static_cast<std::uint8_t>(torque & 0xFFU);
   return true;
+}
+
+namespace {
+
+[[nodiscard]] std::int16_t big_endian_int16(std::uint8_t high,
+                                            std::uint8_t low) noexcept {
+  const auto raw = static_cast<std::uint16_t>(
+      (static_cast<std::uint16_t>(high) << 8U) | static_cast<std::uint16_t>(low));
+  return static_cast<std::int16_t>(raw);
+}
+
+}  // namespace
+
+void decode_feedback(const ForceControlPayload& payload,
+                     ForceControlFeedback& output) noexcept {
+  output.position_deg =
+      static_cast<double>(big_endian_int16(payload[0], payload[1])) * 0.1;
+  output.electrical_speed_erpm =
+      static_cast<double>(big_endian_int16(payload[2], payload[3])) * 10.0;
+  output.current_iq_a =
+      static_cast<double>(big_endian_int16(payload[4], payload[5])) * 0.01;
+  output.board_temperature_c =
+      static_cast<double>(static_cast<std::int8_t>(payload[6]));
+  output.raw_status = payload[7];
 }
 
 }  // namespace mech::mech_protocol_cubemars

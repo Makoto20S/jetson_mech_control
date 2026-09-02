@@ -42,6 +42,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_package_marker.cpp
     test/test_ak30_force_wire.cpp
+    test/test_ak30_feedback_decode.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_target_dependencies(${PROJECT_NAME}_test mech_simulation)

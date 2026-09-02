@@ -84,4 +84,46 @@ struct ForceControlCommand final {
                                         const ForceControlRanges& ranges,
                                         ForceControlPayload& payload) noexcept;
 
+// Fault codes occupy 0-7 (L07 section 4.3.1). 0x77 is the disable-succeeded
+// acknowledgement (section 4.1.8), which shares the same byte.
+inline constexpr std::uint8_t kMaxFaultCode = 7U;
+inline constexpr std::uint8_t kDisableAcknowledgedStatus = 0x77U;
+
+// Decoded 0x29 feedback in device-native units. Nothing here is canonical SI:
+// the position's shaft source is undetermined, so converting it is the mapping
+// layer's job and is gated on evidence.
+struct ForceControlFeedback final {
+  double position_deg{0.0};
+  double electrical_speed_erpm{0.0};
+  double current_iq_a{0.0};
+  double board_temperature_c{0.0};
+  std::uint8_t raw_status{0U};
+};
+
+enum class StatusMeaning : std::uint8_t {
+  NoFault,
+  Fault,
+  DisableAcknowledged,
+  Unknown,
+};
+
+[[nodiscard]] constexpr StatusMeaning classify_status(
+    std::uint8_t raw) noexcept {
+  if (raw == 0U) {
+    return StatusMeaning::NoFault;
+  }
+  if (raw <= kMaxFaultCode) {
+    return StatusMeaning::Fault;
+  }
+  if (raw == kDisableAcknowledgedStatus) {
+    return StatusMeaning::DisableAcknowledged;
+  }
+  return StatusMeaning::Unknown;
+}
+
+// Total over all 8-byte payloads, so there is no failure mode to report. The
+// caller is responsible for having checked identifier, DLC and frame format.
+void decode_feedback(const ForceControlPayload& payload,
+                     ForceControlFeedback& output) noexcept;
+
 }  // namespace mech::mech_protocol_cubemars
