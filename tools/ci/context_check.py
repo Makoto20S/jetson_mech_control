@@ -22,6 +22,7 @@ EXPECTED_PACKAGES = {
         "mech_hardware_ros2_control",
         "mech_controllers",
     },
+    "mech_protocol_cubemars": {"mech_control_core", "mech_simulation"},
 }
 
 REQUIRED_FILES = {
@@ -55,6 +56,7 @@ REQUIRED_FILES = {
     "ros2_ws/src/mech_hardware_ros2_control/package.xml",
     "ros2_ws/src/mech_controllers/package.xml",
     "ros2_ws/src/mech_bringup/package.xml",
+    "ros2_ws/src/mech_protocol_cubemars/package.xml",
     "tools/ci/build_workspace.sh",
     "tools/ci/check_adrs.py",
     "tools/ci/context_check.py",
