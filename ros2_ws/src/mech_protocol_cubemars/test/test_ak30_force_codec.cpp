@@ -160,6 +160,10 @@ TEST(Ak30Codec, RejectsMalformedFeedbackFrames) {
   auto errored = feedback_frame();
   errored.error_frame = true;
   EXPECT_EQ(torque_codec().decode(errored, state), AdapterResult::InvalidCommand);
+
+  auto transmitted = feedback_frame();
+  transmitted.direction = FrameDirection::Tx;
+  EXPECT_EQ(torque_codec().decode(transmitted, state), AdapterResult::InvalidCommand);
 }
 
 TEST(Ak30Codec, SurfacesAFaultCodeWithoutOverwritingTheRawByte) {

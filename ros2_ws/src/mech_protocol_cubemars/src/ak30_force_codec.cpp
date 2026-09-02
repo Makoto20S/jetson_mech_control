@@ -64,10 +64,16 @@ AdapterResult Ak30ForceControlCodec::decode(
     const mech_control_core::RawCanFrame& frame,
     mech_control_core::CanonicalDeviceState& output) const noexcept {
   // Reject rather than degrade: a frame that is not exactly this device's
-  // Classic extended 8-byte feedback is not this device's feedback.
+  // Classic extended 8-byte feedback is not this device's feedback. Direction
+  // is part of that shape, not a redundant belt-and-braces check: nothing
+  // upstream filters direction on the inbound path (every direction check in
+  // the repository guards outbound Tx submission instead), so a Tx-tagged
+  // frame that otherwise matches this ID would sail through unless rejected
+  // here. Do not remove this on the assumption the transport already did it.
   if (frame.id.format != CanFrameFormat::Extended ||
       frame.id.value != feedback_can_id(drive_id_) ||
-      frame.type != CanFrameType::Classic || frame.error_frame ||
+      frame.type != CanFrameType::Classic ||
+      frame.direction != FrameDirection::Rx || frame.error_frame ||
       frame.remote_request || frame.bitrate_switch ||
       frame.payload_size != kForceControlPayloadBytes) {
     return AdapterResult::InvalidCommand;
