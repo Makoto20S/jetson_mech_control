@@ -32,7 +32,7 @@
 | `adapter_contract_v1.md` | Codec is pure, no I/O or session state; session borrows an injected transport; one explicit `ProtocolProfile`, no runtime auto-detection |
 | `ADR-013` | L07 is the baseline; force control is the first profile; profile fixed at configure with **no ACTIVE-period mixing — by our choice, not a firmware limit**; golden vectors must be back-solved |
 | `ADR-009` (as amended) | The Kt blocker is lifted: `Kt = 0.7382 N·m/A`, `T = Kt × Iq` at the **output shaft**. Direction, zero chain, encoder source and physical accuracy stay gated |
-| `ADR-012` | Staged watchdog: follow → freeze last valid → explicit ERROR past a hard TTL; a position command never resolves to `0.0`; the whole watchdog fits `<=3` control cycles |
+| `ADR-012` | Staged watchdog: follow → freeze last valid → explicit ERROR past a hard TTL; a position command never resolves to `0.0`; the whole watchdog fits `<=3` control cycles. **This package classifies the watchdog stage via `command_stage()` and never synthesizes or re-sends a command; acting on `Holding`/`Expired` — freezing, erroring, or otherwise — is the caller's responsibility and is not implemented here** |
 | `02:81` / `02:82` | Codec owns byte order, bit fields, scaling, range, error codes. Session owns firmware capability, sample aggregation, freshness, command mode, device state machine |
 | `02:160` | `on_configure` must validate **firmware range**, frame format, codec, feedback set and command set, and bind the profile |
 | `06 §5` | 500 Hz for two motors plus two HI12 is 41.6%; enabling `0x2A` reaches 53.6% and is excluded |
@@ -146,7 +146,7 @@ The sub-mode is **explicit configuration**, not inferred from the payload. Force
 
 Force control has **no host-side activation handshake** and, being impedance control, none of the servo position mode's "runs to target at maximum speed" hazard. The first-command plausibility check designed for the superseded servo-first draft is therefore **not carried over**; it guarded a hazard this profile does not have.
 
-Watchdog follows `ADR-012` unchanged: follow → freeze last valid → explicit ERROR past the hard TTL, and a position command never resolves to `0.0`.
+The session classifies the command's watchdog stage — following, holding, or expired — through `command_stage()`, and guarantees it will never synthesize or re-send a command on the caller's behalf; a position command never resolves to `0.0`. Acting on a `Holding` or `Expired` stage — freezing the last valid command, raising an explicit ERROR, or anything else `ADR-012` prescribes — is the caller's responsibility and is not implemented in this package.
 
 A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` preserves the raw byte; the decoded meaning never overwrites it.
 
@@ -185,3 +185,4 @@ A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` pres
   the torque field, which the manual does state is 输出端. Vendor question B15.
   Gated behind the same `gear_ratio` evidence requirement, so it cannot reach a
   device unanswered.
+- **`ADR-012`'s staged freeze/error actions** — this package implements only the classification half: `command_stage()` reports `Following`/`Holding`/`Expired` and the session never synthesizes or re-sends a command. It does not freeze the last valid command or raise an explicit ERROR past the hard TTL; there is no caller yet to drive that behavior. This blocks nothing offline. The ros2_control hardware-plugin slice must close it by polling `command_stage()` and acting on `Holding` and `Expired` itself; shipping that plugin without consuming `command_stage()` would leave the watchdog decorative.

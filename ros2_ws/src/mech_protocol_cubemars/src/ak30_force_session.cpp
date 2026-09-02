@@ -190,6 +190,11 @@ mech_control_core::CanonicalDeviceState Ak30ForceControlSession::snapshot(
   const auto age = mech_control_core::elapsed_since(last_feedback_time_.value(), now);
   const bool stale =
       !age.has_value() || age->nanoseconds() > config_.feedback_ttl_nanoseconds;
+  // Staleness outranks a Degraded classification set by the codec: once a
+  // sample is old, its classification is itself no longer trustworthy, so
+  // there is nothing to gain by preferring it over Stale. No information is
+  // lost either way - the raw status byte survives in raw_fault_code
+  // regardless of which quality wins here.
   if (stale) {
     state.status.quality = mech_control_core::SampleQuality::Stale;
   }

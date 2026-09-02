@@ -521,4 +521,21 @@ TEST_F(Ak30SessionRuntime, DoesNotLatchAFaultOnAnUnknownStatusByte) {
             SampleQuality::Degraded);
 }
 
+// Precedence rule at the Stale assignment in snapshot(): once a sample is
+// stale, staleness wins over a Degraded classification, because an old
+// sample's classification is itself no longer trustworthy. The raw status
+// byte is unaffected either way.
+TEST_F(Ak30SessionRuntime, StalenessOutranksADegradedClassification) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x42U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.quality,
+            SampleQuality::Degraded);
+
+  // feedback_ttl is 6 ms; the first nanosecond past it becomes Stale.
+  const auto state = session_.snapshot(fixtures::at(6001001));
+  EXPECT_EQ(state.status.quality, SampleQuality::Stale);
+  EXPECT_EQ(state.status.raw_fault_code, 0x42U);
+}
+
 }  // namespace
