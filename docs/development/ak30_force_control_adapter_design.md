@@ -1,6 +1,6 @@
 # AK3.0 Force-Control Adapter Design
 
-- **Status:** Draft for review
+- **Status:** Implemented — `mech_protocol_cubemars`, offline only. Real activation remains gated by ADR-006 and G0–G3.
 - **Date:** 2026-09-01
 - **Scope:** `mech_protocol_cubemars` — the AK3.0 force-control codec and device session, offline only
 - **Governs:** the first vendor protocol adapter under `AdapterContract v1`
@@ -81,6 +81,26 @@ Widths: `KP` 12, `KD` 12, position 16, velocity 12, torque 12 — 64 bits exactl
 
 Signed quantities map linearly onto the unsigned field with midpoint `(2^bits − 1) / 2`; `KP`/`KD` map from zero. Position, `KP` and `KD` ranges are merged cells spanning all models in the source table, confirmed by reading the page as an image rather than trusting `pdftotext`.
 
+**Two defects in L07 that the implementation deliberately does not reproduce.**
+
+1. §4.4's printed `float_to_uint()` scales by `(1 << bits) / span`. The manual's
+   own example table was generated with `((1 << bits) - 1) / span`, and the
+   printed formula reproduces none of the manual's examples: position `0 rad`
+   becomes `80 00` instead of `7F FF`, velocity `0` becomes `0x800` instead of
+   `0x7FF`, and velocity `-6 rad/s` becomes `64 98` instead of `64 87`. At
+   `p_des = P_MAX` it yields `p_int = 65536`, which overflows the 16-bit field
+   to `0x0000` and decodes as `-12.56 rad` — **maximum position commands
+   minimum position**. `EncodingMaxPositionDoesNotWrapToMinimum` pins this.
+2. §4.4's worked examples are stated to use **AK10-9** constants (`±12.56 rad`,
+   `±28.0 rad/s`, `±54.0 N·m`), not AKE60-8's. Decoding an example row with
+   AKE60-8's ranges gives a wrong answer, which is why the test suite carries
+   `ak10_9_ranges()` purely for manual cross-checking.
+
+Quantization therefore truncates with divisor `((1 << bits) - 1)`, and encoding
+**rejects** out-of-range input rather than clamping as the vendor code does:
+clamping converts an invalid command into a valid-looking one, which is the
+degradation ADR-012 forbids.
+
 ### 4.4 Feedback decoder — function ID `0x29`, DLC 8
 
 Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, driver-board temperature `int8`, `DATA[7]` status byte.
@@ -159,3 +179,9 @@ A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` pres
 - **Gear ratio conflict** (`si_gear_ratio = 0` vs displayed 8) — vendor question B8.
 - **Force-control feedback frame** — L07 §4.3.1 is titled "servo mode feedback" and §4.2 defines only the command; the manual never states what feedback looks like in force-control mode. `0x29` as a command-family-independent status frame is the reasonable inference. Vendor question B13.
 - **Single-turn / `0x2A` Flash state** — position semantics depend on a persisted setting invisible on the wire. Vendor question B14.
+- **Which shaft the command velocity refers to** — L07 documents the wire
+  command velocity only as `电机速度 (rad/s)`, while feedback is ERPM requiring
+  `÷ pole_pairs ÷ gear_ratio`. The implementation assumes output-side, matching
+  the torque field, which the manual does state is 输出端. Vendor question B15.
+  Gated behind the same `gear_ratio` evidence requirement, so it cannot reach a
+  device unanswered.

@@ -3375,3 +3375,10 @@ Run after all nine tasks were written, against the spec with fresh eyes.
 **New unverified assumption this plan introduces**, and the only one: the wire command velocity is treated as output-side rad/s. L07 never says. It is gated behind `gear_ratio` evidence, pinned nowhere in a way that could silently drift, and filed as vendor question B15 in Task 9.
 
 **What this plan does not achieve.** With motor1's current evidence every sub-mode still fails to configure. The deliverable is an adapter that is *ready* to configure the moment `direction_sign` (vendor question B9) is answered — not one that can move a motor.
+
+## Deviations from this plan, found during execution
+
+Both were found by review, not written into the plan up front, and fixed during implementation.
+
+- **Task 5:** `decode()` as planned did not check `frame.direction`, so a `Tx`-direction frame matching the feedback shape would have been accepted as received feedback. Nothing upstream filters direction on the inbound path — every `direction` check elsewhere in the repository is on the outbound path. A check and a regression test were added.
+- **Task 7:** `activate()` as planned did not reset `last_feedback_time_`, `last_state_` or `sequence_`, so a sample captured before `deactivate()` survived reactivation and could be reported as a current measurement. Since deactivate→activate is the fault-recovery path, activation now clears observation state, with a regression test.
