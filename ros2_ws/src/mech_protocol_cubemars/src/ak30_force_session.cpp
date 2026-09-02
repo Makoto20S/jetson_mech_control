@@ -89,6 +89,14 @@ AdapterResult Ak30ForceControlSession::activate() noexcept {
   }
   fault_latched_ = false;
   last_command_time_.reset();
+  // Activation is a clean slate for observation state, matching configure().
+  // A sample captured before a prior deactivation must never be reported as
+  // a current measurement after reactivation - deactivate-then-activate is
+  // the fault-recovery path, and re-presenting pre-fault state as live would
+  // mask exactly the condition recovery is meant to reveal.
+  sequence_ = 0U;
+  last_state_ = mech_control_core::CanonicalDeviceState{};
+  last_feedback_time_.reset();
   lifecycle_ = Lifecycle::Active;
   return AdapterResult::Ok;
 }

@@ -362,6 +362,13 @@ TEST_F(Ak30SessionRuntime, MarksTheSampleStaleOnceFeedbackExceedsItsTtl) {
   // feedback_ttl is 6 ms.
   EXPECT_EQ(session_.snapshot(fixtures::at(6000999)).status.quality,
             SampleQuality::Valid);
+  // The comparison is `age > feedback_ttl_nanoseconds`, so an age exactly at
+  // the TTL (6,000,000 ns) is still Valid, and only the first nanosecond past
+  // it (6,000,001 ns) becomes Stale.
+  EXPECT_EQ(session_.snapshot(fixtures::at(6001000)).status.quality,
+            SampleQuality::Valid);
+  EXPECT_EQ(session_.snapshot(fixtures::at(6001001)).status.quality,
+            SampleQuality::Stale);
   EXPECT_EQ(session_.snapshot(fixtures::at(7001000)).status.quality,
             SampleQuality::Stale);
 }
@@ -473,6 +480,26 @@ TEST_F(Ak30SessionRuntime, ClearsALatchedFaultOnlyThroughTheLifecycle) {
   EXPECT_FALSE(session_.fault_latched());
   EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(3000)),
             AdapterResult::Ok);
+}
+
+// A pre-deactivation sample must never be reported as a current measurement
+// after reactivation: deactivate-then-activate is the fault-recovery path,
+// and re-presenting stale, pre-fault state as live would mask exactly the
+// condition recovery is meant to reveal.
+TEST_F(Ak30SessionRuntime, DoesNotReportAPreDeactivationSampleAfterReactivation) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  ASSERT_TRUE(session_.snapshot(fixtures::at(1000)).status.has_sample());
+
+  session_.deactivate();
+  ASSERT_EQ(session_.activate(), AdapterResult::Ok);
+
+  const auto state = session_.snapshot(fixtures::at(2000));
+  EXPECT_EQ(state.status.quality, SampleQuality::Unknown);
+  EXPECT_FALSE(state.status.has_sample());
+  EXPECT_FALSE(state.status.host_rx_time.has_value());
+  EXPECT_EQ(state.status.sequence, 0U);
 }
 
 // 0x77 is the disable-succeeded acknowledgement. Latching a fault on it would
