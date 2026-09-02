@@ -256,4 +256,242 @@ TEST(Ak30SessionConfigure, IsRepeatable) {
             AdapterResult::Ok);
 }
 
+using mech::mech_control_core::CanonicalDeviceCommand;
+using mech::mech_control_core::DeviceState;
+using mech::mech_control_core::SampleQuality;
+using mech::mech_control_core::TransportResult;
+using mech::mech_protocol_cubemars::CommandStage;
+
+// Configures and activates, so runtime tests start from a known state.
+class Ak30SessionRuntime : public ::testing::Test {
+ protected:
+  Ak30SessionRuntime()
+      : transport_(fixtures::classic_extended_capabilities()),
+        session_(transport_, fixtures::valid_session_config()) {}
+
+  void SetUp() override {
+    ASSERT_EQ(session_.configure(fixtures::valid_device_config(),
+                                 fixtures::classic_extended_capabilities()),
+              AdapterResult::Ok);
+    ASSERT_EQ(session_.activate(), AdapterResult::Ok);
+  }
+
+  [[nodiscard]] static CanonicalDeviceCommand torque_command(double effort,
+                                                             std::int64_t deadline) {
+    CanonicalDeviceCommand command{};
+    command.effort = effort;
+    command.deadline = fixtures::at(deadline);
+    return command;
+  }
+
+  fixtures::RecordingTransport transport_;
+  Ak30ForceControlSession session_;
+};
+
+TEST_F(Ak30SessionRuntime, SendsOneFrameToTheBorrowedTransportPerCommand) {
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::Ok);
+  ASSERT_EQ(transport_.sent().size(), 1U);
+  EXPECT_EQ(transport_.sent().front().id.value, fixtures::kCommandId);
+  EXPECT_EQ(transport_.sent().front().payload[7], 0x10U);
+}
+
+TEST(Ak30SessionLifecycle, RefusesToActivateBeforeConfigure) {
+  fixtures::RecordingTransport transport{fixtures::classic_extended_capabilities()};
+  Ak30ForceControlSession session{transport, fixtures::valid_session_config()};
+  EXPECT_EQ(session.activate(), AdapterResult::InvalidConfiguration);
+  EXPECT_EQ(session.submit(CanonicalDeviceCommand{}, fixtures::at(1000)),
+            AdapterResult::InvalidConfiguration);
+}
+
+TEST_F(Ak30SessionRuntime, RefusesToReconfigureWhileActive) {
+  EXPECT_EQ(session_.configure(fixtures::valid_device_config(),
+                               fixtures::classic_extended_capabilities()),
+            AdapterResult::InvalidConfiguration);
+}
+
+TEST_F(Ak30SessionRuntime, IsRepeatableAcrossDeactivateAndActivate) {
+  session_.deactivate();
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::InvalidConfiguration);
+  EXPECT_EQ(session_.activate(), AdapterResult::Ok);
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::Ok);
+}
+
+TEST_F(Ak30SessionRuntime, ReportsAnEmptySnapshotBeforeAnyFeedbackArrives) {
+  const auto state = session_.snapshot(fixtures::at(1000));
+  EXPECT_EQ(state.status.quality, SampleQuality::Unknown);
+  EXPECT_FALSE(state.status.host_rx_time.has_value());
+  EXPECT_FALSE(state.status.has_sample());
+}
+
+TEST_F(Ak30SessionRuntime, AcceptsACommandBeforeAnyFeedbackHasArrived) {
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::Ok);
+}
+
+TEST_F(Ak30SessionRuntime, SequencesAcceptedFeedbackFrames) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.sequence, 1U);
+
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(2000)),
+                             fixtures::at(2000)),
+            AdapterResult::Ok);
+  EXPECT_EQ(session_.snapshot(fixtures::at(2000)).status.sequence, 2U);
+}
+
+TEST_F(Ak30SessionRuntime, IgnoresFramesThatAreNotThisDevicesFeedback) {
+  auto foreign = fixtures::feedback_frame(0x00U, fixtures::at(1000));
+  foreign.id = mech::mech_control_core::CanId::create(
+                   0x2969U, CanFrameFormat::Extended)
+                   .value();
+  EXPECT_EQ(session_.process(foreign, fixtures::at(1000)),
+            AdapterResult::InvalidCommand);
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.sequence, 0U);
+}
+
+TEST_F(Ak30SessionRuntime, MarksTheSampleStaleOnceFeedbackExceedsItsTtl) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.quality,
+            SampleQuality::Valid);
+  // feedback_ttl is 6 ms.
+  EXPECT_EQ(session_.snapshot(fixtures::at(6000999)).status.quality,
+            SampleQuality::Valid);
+  EXPECT_EQ(session_.snapshot(fixtures::at(7001000)).status.quality,
+            SampleQuality::Stale);
+}
+
+// ADR-012's staged watchdog: follow, then freeze the last valid command, then
+// an explicit error past the hard TTL. ttl 4 ms, hard_ttl 6 ms.
+TEST_F(Ak30SessionRuntime, StagesTheCommandWatchdogFollowingHoldingExpired) {
+  ASSERT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::Ok);
+
+  EXPECT_EQ(session_.command_stage(fixtures::at(1000)), CommandStage::Following);
+  EXPECT_EQ(session_.command_stage(fixtures::at(4000999)), CommandStage::Following);
+  EXPECT_EQ(session_.command_stage(fixtures::at(4001000)), CommandStage::Holding);
+  EXPECT_EQ(session_.command_stage(fixtures::at(6000999)), CommandStage::Holding);
+  EXPECT_EQ(session_.command_stage(fixtures::at(6001000)), CommandStage::Expired);
+}
+
+TEST_F(Ak30SessionRuntime, ReportsExpiredBeforeAnyCommandHasBeenSubmitted) {
+  EXPECT_EQ(session_.command_stage(fixtures::at(1000)), CommandStage::Expired);
+}
+
+// The failure this guards is a position command resolving to 0.0, which on a
+// position interface is a commanded move to the zero position. The session
+// emits nothing it was not given, so an expired watchdog produces silence.
+TEST_F(Ak30SessionRuntime, NeverSynthesizesACommandWhenTheWatchdogExpires) {
+  ASSERT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::Ok);
+  ASSERT_EQ(transport_.sent().size(), 1U);
+
+  ASSERT_EQ(session_.command_stage(fixtures::at(9000000)), CommandStage::Expired);
+  (void)session_.snapshot(fixtures::at(9000000));
+  (void)session_.command_stage(fixtures::at(9000000));
+
+  EXPECT_EQ(transport_.sent().size(), 1U);
+}
+
+TEST_F(Ak30SessionRuntime, RejectsACommandWhoseDeadlineHasAlreadyPassed) {
+  EXPECT_EQ(session_.submit(torque_command(2.0, 1000), fixtures::at(2000)),
+            AdapterResult::InvalidCommand);
+  EXPECT_TRUE(transport_.sent().empty());
+}
+
+TEST_F(Ak30SessionRuntime, RejectsAnUnrepresentableCommandWithoutSending) {
+  EXPECT_EQ(session_.submit(torque_command(99.0, 10000000), fixtures::at(1000)),
+            AdapterResult::InvalidCommand);
+  EXPECT_TRUE(transport_.sent().empty());
+}
+
+// A transient backpressure result must not fault the bus. The RC shipped a
+// defect where one WouldBlock permanently faulted it; the lease is retried
+// instead.
+TEST_F(Ak30SessionRuntime, TreatsTransientBackpressureAsRetryableNotFatal) {
+  transport_.inject_send_result(TransportResult::WouldBlock);
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::WouldBlock);
+  EXPECT_FALSE(session_.fault_latched());
+
+  transport_.inject_send_result(TransportResult::QueueFull);
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(2000)),
+            AdapterResult::WouldBlock);
+  EXPECT_FALSE(session_.fault_latched());
+
+  transport_.inject_send_result(TransportResult::Ok);
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(3000)),
+            AdapterResult::Ok);
+  EXPECT_EQ(transport_.sent().size(), 1U);
+}
+
+TEST_F(Ak30SessionRuntime, SurfacesADisconnectedTransport) {
+  transport_.inject_send_result(TransportResult::Disconnected);
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(1000)),
+            AdapterResult::Disconnected);
+}
+
+TEST_F(Ak30SessionRuntime, LatchesAFaultAndRefusesFurtherCommands) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x05U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  EXPECT_TRUE(session_.fault_latched());
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.device_state,
+            DeviceState::Fault);
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.raw_fault_code, 0x05U);
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(2000)),
+            AdapterResult::Fault);
+}
+
+// Latched means latched: a subsequent clean frame is not a recovery signal,
+// because the condition that caused the fault is not observable from one frame.
+TEST_F(Ak30SessionRuntime, DoesNotClearALatchedFaultOnTheNextCleanFrame) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x02U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  ASSERT_TRUE(session_.fault_latched());
+
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(2000)),
+                             fixtures::at(2000)),
+            AdapterResult::Ok);
+  EXPECT_TRUE(session_.fault_latched());
+}
+
+TEST_F(Ak30SessionRuntime, ClearsALatchedFaultOnlyThroughTheLifecycle) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x07U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  ASSERT_TRUE(session_.fault_latched());
+
+  session_.deactivate();
+  ASSERT_EQ(session_.activate(), AdapterResult::Ok);
+  EXPECT_FALSE(session_.fault_latched());
+  EXPECT_EQ(session_.submit(torque_command(2.0, 10000000), fixtures::at(3000)),
+            AdapterResult::Ok);
+}
+
+// 0x77 is the disable-succeeded acknowledgement. Latching a fault on it would
+// turn a successful, deliberate disable into an error state requiring recovery.
+TEST_F(Ak30SessionRuntime, DoesNotLatchAFaultOnTheDisableAcknowledgement) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x77U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  EXPECT_FALSE(session_.fault_latched());
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.raw_fault_code, 0x77U);
+}
+
+TEST_F(Ak30SessionRuntime, DoesNotLatchAFaultOnAnUnknownStatusByte) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x42U, fixtures::at(1000)),
+                             fixtures::at(1000)),
+            AdapterResult::Ok);
+  EXPECT_FALSE(session_.fault_latched());
+  EXPECT_EQ(session_.snapshot(fixtures::at(1000)).status.quality,
+            SampleQuality::Degraded);
+}
+
 }  // namespace
