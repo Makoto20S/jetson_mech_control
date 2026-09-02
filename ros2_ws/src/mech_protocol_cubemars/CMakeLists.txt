@@ -15,6 +15,7 @@ add_library(${PROJECT_NAME}
   src/package_marker.cpp
   src/ak30_force_wire.cpp
   src/ak30_mapping.cpp
+  src/ak30_force_codec.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -45,6 +46,7 @@ if(BUILD_TESTING)
     test/test_ak30_force_wire.cpp
     test/test_ak30_feedback_decode.cpp
     test/test_ak30_mapping.cpp
+    test/test_ak30_force_codec.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_target_dependencies(${PROJECT_NAME}_test mech_simulation)
