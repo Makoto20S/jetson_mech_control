@@ -13,6 +13,7 @@ find_package(mech_control_core REQUIRED)
 
 add_library(${PROJECT_NAME}
   src/package_marker.cpp
+  src/ak30_force_wire.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -40,6 +41,7 @@ if(BUILD_TESTING)
   find_package(mech_simulation REQUIRED)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_package_marker.cpp
+    test/test_ak30_force_wire.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_target_dependencies(${PROJECT_NAME}_test mech_simulation)
