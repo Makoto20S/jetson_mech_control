@@ -30,9 +30,11 @@ using mech::mech_protocol_cubemars::to_device_command;
   return mapping;
 }
 
-// motor1 as the repository actually evidences it today: pole_pairs, gear_ratio
-// and torque_constant are verified. This is the state the evidence gate must
-// still refuse, and it is why no sub-mode configures yet.
+// motor1 as the repository actually evidences it today: pole_pairs, gear_ratio,
+// torque_constant and direction_sign are verified (direction_sign measured on
+// the bench 2026-09-03: positive command -> clockwise rotation -> feedback
+// position increase). Torque and velocity configure; position still waits on
+// the zero-offset chain and the position source (B4).
 [[nodiscard]] Ak30Mapping motor1_as_evidenced() {
   Ak30Mapping mapping{};
   mapping.pole_pairs = {14.0, true};
@@ -40,24 +42,33 @@ using mech::mech_protocol_cubemars::to_device_command;
   // Three agreeing sources, 2026-09-02; see the header's comment.
   mapping.gear_ratio = {8.0, true};
   mapping.zero_offset_rad = {0.0, false};
-  mapping.direction_sign = {1.0, false};
+  mapping.direction_sign = {1.0, true};
   mapping.position_source_known = false;
   return mapping;
 }
 
-TEST(Ak30Mapping, RefusesEverySubModeWithMotor1sCurrentEvidence) {
+// What motor1's evidence looked like before the 2026-09-03 bench measurement.
+// Un-verifying any single parameter must still refuse every sub-mode, and with
+// direction_sign present the torque and velocity sub-modes configure.
+TEST(Ak30Mapping, Motor1EvidenceConfiguresTorqueAndVelocityButNotPosition) {
   const auto mapping = motor1_as_evidenced();
-  EXPECT_FALSE(mapping_is_sufficient(mapping, ForceControlSubMode::Torque));
-  EXPECT_FALSE(mapping_is_sufficient(mapping, ForceControlSubMode::Velocity));
+  EXPECT_TRUE(mapping_is_sufficient(mapping, ForceControlSubMode::Torque));
+  EXPECT_TRUE(mapping_is_sufficient(mapping, ForceControlSubMode::Velocity));
   EXPECT_FALSE(mapping_is_sufficient(mapping, ForceControlSubMode::Position));
+
+  auto without_direction = mapping;
+  without_direction.direction_sign.verified = false;
+  EXPECT_FALSE(mapping_is_sufficient(without_direction, ForceControlSubMode::Torque));
+  EXPECT_FALSE(mapping_is_sufficient(without_direction, ForceControlSubMode::Velocity));
+  EXPECT_FALSE(mapping_is_sufficient(without_direction, ForceControlSubMode::Position));
 }
 
-// The design's central claim: direction_sign is the last parameter standing
-// between the project and a configurable adapter. Since gear_ratio was verified
-// on 2026-09-02 it now unblocks velocity as well as torque; only the position
-// chain (zero offset and encoder shaft) remains beyond it. If this test ever
-// needs changing, the shortest path to a usable adapter has moved and the
-// design document is stale.
+// The design's former central claim, now history: direction_sign WAS the last
+// parameter standing between the project and a configurable adapter until the
+// 2026-09-03 bench measurement verified it. The test pins the boundary that
+// remains: torque and velocity configure, position still does not. If this
+// test ever needs changing, the shortest path to a usable adapter has moved
+// and the design document is stale.
 TEST(Ak30Mapping, VerifyingDirectionSignUnblocksTorqueAndVelocityButNotPosition) {
   auto mapping = motor1_as_evidenced();
   mapping.direction_sign = {1.0, true};

@@ -41,8 +41,9 @@ struct ForceControlGains final {
 };
 
 // Defaults are motor1's evidence state as the repository records it today:
-// pole_pairs, gear_ratio and torque_constant are verified, so no sub-mode
-// configures until direction_sign is resolved (vendor question B9).
+// pole_pairs, gear_ratio, torque_constant and direction_sign are verified, so
+// the torque and velocity sub-modes configure; position still waits on B4
+// (position_source_shaft) and the zero-offset chain.
 struct Ak30Mapping final {
   EvidencedValue pole_pairs{14.0, true};
   // Verified 2026-09-02 from three independent sources agreeing on 8:1 — the
@@ -55,7 +56,14 @@ struct Ak30Mapping final {
   // exist.
   EvidencedValue gear_ratio{8.0, true};
   EvidencedValue zero_offset_rad{0.0, false};
-  EvidencedValue direction_sign{1.0, false};
+  // Verified 2026-09-03 by direct bench measurement: commanding +0.8 and
+  // +1.0 rad/s (velocity sub-mode, Kd=1, Kp=0) turned the output shaft
+  // clockwise (owner-observed) while feedback position increased and Iq stayed
+  // positive-dominant (+0.42 A peak). The canonical positive direction is
+  // therefore the direction in which feedback position increases: +1.0. Vendor
+  // question B9's remaining value is confirming the
+  // foc_encoder_inverted/m_invert_direction layer chain, not this sign.
+  EvidencedValue direction_sign{1.0, true};
   // L07 p.37 for AKE60-8, owner-guaranteed for this variant (ADR-013 section 4).
   EvidencedValue torque_constant_nm_per_a{0.7382, true};
   // Vendor question B4: L07 writes 输出端 explicitly for torque and speed but

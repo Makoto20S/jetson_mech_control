@@ -21,6 +21,7 @@ EXPECTED_PACKAGES = {
         "mech_simulation",
         "mech_hardware_ros2_control",
         "mech_controllers",
+        "mech_protocol_cubemars",
     },
     "mech_protocol_cubemars": {"mech_control_core", "mech_simulation"},
 }

@@ -23,12 +23,18 @@ TEST(Ak30SessionConfigure, AcceptsAFullyEvidencedConfiguration) {
             AdapterResult::Ok);
 }
 
-// The state the repository is actually in today. If this test ever passes,
-// either evidence landed or the gate broke; both need a human to look.
-TEST(Ak30SessionConfigure, RefusesMotor1sCurrentEvidenceForEverySubMode) {
-  for (const auto sub_mode :
-       {ForceControlSubMode::Torque, ForceControlSubMode::Velocity,
-        ForceControlSubMode::Position}) {
+// The default mapping is motor1's evidenced state (direction_sign verified on
+// the bench 2026-09-03: positive command -> clockwise rotation -> feedback
+// position increase), so torque and velocity configure on defaults. Position
+// must still refuse: its zero-offset chain and position source (B4) remain
+// unverified. If position ever passes here, either evidence landed or the gate
+// broke; both need a human to look.
+TEST(Ak30SessionConfigure, DefaultEvidenceConfiguresTorqueAndVelocityButNotPosition) {
+  const std::pair<ForceControlSubMode, AdapterResult> cases[] = {
+      {ForceControlSubMode::Torque, AdapterResult::Ok},
+      {ForceControlSubMode::Velocity, AdapterResult::Ok},
+      {ForceControlSubMode::Position, AdapterResult::InvalidConfiguration}};
+  for (const auto& [sub_mode, expected] : cases) {
     fixtures::RecordingTransport transport{
         fixtures::classic_extended_capabilities()};
     auto config = fixtures::valid_session_config();
@@ -37,7 +43,7 @@ TEST(Ak30SessionConfigure, RefusesMotor1sCurrentEvidenceForEverySubMode) {
     Ak30ForceControlSession session{transport, config};
     EXPECT_EQ(session.configure(fixtures::valid_device_config(),
                                 fixtures::classic_extended_capabilities()),
-              AdapterResult::InvalidConfiguration);
+              expected);
   }
 }
 

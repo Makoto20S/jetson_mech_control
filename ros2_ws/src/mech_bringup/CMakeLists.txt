@@ -13,10 +13,12 @@ find_package(mech_control_core REQUIRED)
 find_package(mech_simulation REQUIRED)
 find_package(mech_hardware_ros2_control REQUIRED)
 find_package(mech_controllers REQUIRED)
+find_package(mech_protocol_cubemars REQUIRED)
 
 add_library(${PROJECT_NAME}
   src/package_marker.cpp
   src/foundation_harness.cpp
+  src/posix_cdc_serial_port.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -29,6 +31,19 @@ ament_target_dependencies(
   mech_simulation
   mech_hardware_ros2_control
   mech_controllers)
+
+# First real-device entry point: drives a motor through the repository's own
+# UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
+# option so default builds and CI never produce a device-touching binary.
+option(MECH_BUILD_DEVICE_PROBES "Build device-touching bring-up probes" OFF)
+if(MECH_BUILD_DEVICE_PROBES)
+  add_executable(ak30_torque_probe src/ak30_torque_probe.cpp)
+  target_include_directories(ak30_torque_probe PRIVATE include)
+  target_link_libraries(ak30_torque_probe ${PROJECT_NAME})
+  ament_target_dependencies(ak30_torque_probe
+    mech_control_core mech_protocol_cubemars)
+  install(TARGETS ak30_torque_probe RUNTIME DESTINATION lib/${PROJECT_NAME})
+endif()
 
 install(TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
@@ -43,7 +58,8 @@ install(FILES
   DESTINATION share/${PROJECT_NAME}/docs)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
-  mech_control_core mech_simulation mech_hardware_ros2_control mech_controllers)
+  mech_control_core mech_simulation mech_hardware_ros2_control
+  mech_controllers mech_protocol_cubemars)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

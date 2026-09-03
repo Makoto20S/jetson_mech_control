@@ -10,6 +10,7 @@
   <depend>mech_simulation</depend>
   <depend>mech_hardware_ros2_control</depend>
   <depend>mech_controllers</depend>
+  <depend>mech_protocol_cubemars</depend>
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_lint_cmake</test_depend>
   <test_depend>ament_cmake_xmllint</test_depend>
