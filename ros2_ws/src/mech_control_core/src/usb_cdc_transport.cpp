@@ -117,6 +117,30 @@ bool UsbCdcCodec::decode(const std::uint8_t* data, std::size_t size,
   }
   output.size = 0U;
   std::size_t offset = 7U;
+  // Firmware 4.8.8 prefixes every pass-through reply record with the CAN ID's
+  // low 24 bits in little-endian, ahead of the documented 32-bit ID field -
+  // observed on the bench as `68 29 00` before the 0x2968 record, ~50 Hz. The
+  // vendor struct (cdc_tr_fdcan_s) and the older code drops carry no such
+  // prefix, so both layouts are accepted: a 24-bit prefix whose value matches
+  // the following 32-bit ID is skipped; otherwise parsing starts at the
+  // documented offset. Any mismatch inside the record still rejects it.
+  if (size - offset >= 9U) {
+    const auto prefix = data[offset] | (data[offset + 1U] << 8U) |
+                        (static_cast<std::uint32_t>(data[offset + 2U]) << 16U);
+    const auto id_value = get_u32(data + offset + 3U);
+    const auto flags = data[offset + 7U];
+    const auto length = data[offset + 8U];
+    const auto frame_type = (flags & 0x02U) != 0U
+                                ? CanFrameType::FlexibleDataRate
+                                : CanFrameType::Classic;
+    const auto max_length =
+        frame_type == CanFrameType::Classic ? 8U : 64U;
+    if (prefix == (id_value & 0xFFFFFFU) && flags != 0U && length != 0U &&
+        length <= max_length &&
+        9U + static_cast<std::size_t>(length) <= size - offset) {
+      offset += 3U;
+    }
+  }
   while (offset < size) {
     if (size - offset < 6U || output.size >= output.frames.size()) {
       return false;
