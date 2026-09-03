@@ -12,8 +12,10 @@
 //
 // Exit codes: 0 normal completion, 2 aborted by a safety condition.
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -161,6 +163,13 @@ int run(const RunOptions& options) noexcept {
   CanonicalDeviceCommand command{};
   command.effort = options.torque_nm;
 
+  // Torque sub-mode evidence: effort is the canonical observable (position is
+  // B4-gated), so the summary must report what the session actually exported.
+  double last_effort_nm = 0.0;
+  double min_effort_nm = 0.0;
+  double max_effort_nm = 0.0;
+  bool have_effort = false;
+
   const auto deadline_offset_ns =
       static_cast<std::int64_t>(options.period_seconds * 1e9);
   std::uint64_t sent = 0U;
@@ -208,6 +217,15 @@ int run(const RunOptions& options) noexcept {
         if (state.status.quality ==
             mech::mech_control_core::SampleQuality::Valid) {
           ++samples;
+          const double effort_nm = state.effort;
+          if (!have_effort) {
+            min_effort_nm = effort_nm;
+            max_effort_nm = effort_nm;
+            have_effort = true;
+          }
+          last_effort_nm = effort_nm;
+          min_effort_nm = std::min(min_effort_nm, effort_nm);
+          max_effort_nm = std::max(max_effort_nm, effort_nm);
           const double position_deg = state.position * 57.29577951308232;
           if (!have_position) {
             first_position_deg = position_deg;
@@ -261,11 +279,14 @@ int run(const RunOptions& options) noexcept {
   transport.close();
 
   std::printf(
-      "END sent=%llu samples=%llu abort=%s position_deg=%.1f->%.1f\n",
+      "END sent=%llu samples=%llu abort=%s position_deg=%.1f->%.1f "
+      "effort_nm=%.3f..%.3f (last=%.3f)\n",
       static_cast<unsigned long long>(sent),
       static_cast<unsigned long long>(samples),
       aborted ? abort_reason.c_str() : "none", first_position_deg,
-      last_position_deg);
+      last_position_deg, have_effort ? min_effort_nm : 0.0,
+      have_effort ? max_effort_nm : 0.0,
+      have_effort ? last_effort_nm : 0.0);
   return aborted ? 2 : 0;
 }
 
