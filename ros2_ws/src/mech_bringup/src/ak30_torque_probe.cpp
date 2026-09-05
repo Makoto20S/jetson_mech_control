@@ -72,6 +72,12 @@ struct RunOptions final {
   double run_seconds{0.0};
   double neutral_seconds{0.5};
   double period_seconds{0.01};
+  // When velocity_rad_s is non-zero the probe runs the Velocity sub-mode with
+  // this command and Kd damping instead of pure Torque: torque stays bounded by
+  // Kd*velocity and speed cannot exceed the commanded velocity, which is what
+  // makes a 0.3-magnitude test safe on an unloaded motor.
+  double velocity_rad_s{0.0};
+  double kd{1.0};
   // Abort thresholds, all measured from decoded feedback.
   double max_abs_effort_nm{3.0};
   double max_abs_velocity_rad_s{8.0};
@@ -116,8 +122,16 @@ int run(const RunOptions& options) noexcept {
   Ak30Mapping mapping{};  // motor1's evidenced defaults, direction_sign now verified
   Ak30SessionConfig session_config{};
   session_config.drive_id = 104U;  // motor1, decimal, from the host tool
-  session_config.sub_mode = ForceControlSubMode::Torque;
+  // A non-zero velocity command switches to the Velocity sub-mode: the Kd path
+  // bounds both torque (<= Kd * velocity command) and speed (<= the command
+  // itself), which is the safe shape for a 0.3-magnitude bench test.
+  session_config.sub_mode = options.velocity_rad_s != 0.0
+                                ? ForceControlSubMode::Velocity
+                                : ForceControlSubMode::Torque;
   session_config.mapping = mapping;
+  if (options.velocity_rad_s != 0.0) {
+    session_config.gains.kd = options.kd;
+  }
   session_config.firmware_id = 1U;
   session_config.firmware_id_min = 1U;
   session_config.firmware_id_max = 1000U;
@@ -153,15 +167,20 @@ int run(const RunOptions& options) noexcept {
     transport.close();
     return 1;
   }
-  std::printf("CONFIGURED drive_id=104 sub_mode=Torque "
+  std::printf("CONFIGURED drive_id=104 sub_mode=%s "
               "command_id=0x%04X feedback_id=0x%04X torque=%.3f Nm "
-              "duration=%.1f s\n",
+              "velocity=%.3f rad/s kd=%.2f duration=%.1f s\n",
+              options.velocity_rad_s != 0.0 ? "Velocity" : "Torque",
               device_config.command_id->value,
               device_config.feedback_id->value, options.torque_nm,
-              options.run_seconds);
+              options.velocity_rad_s, options.kd, options.run_seconds);
 
   CanonicalDeviceCommand command{};
-  command.effort = options.torque_nm;
+  // In Velocity sub-mode effort rides along as feed-forward torque, so it must
+  // stay zero there; the Kd path alone produces the requested ~0.3 Nm peak.
+  command.effort =
+      options.velocity_rad_s != 0.0 ? 0.0 : options.torque_nm;
+  command.velocity = options.velocity_rad_s;
 
   // Torque sub-mode evidence: effort is the canonical observable (position is
   // B4-gated), so the summary must report what the session actually exported.
@@ -296,9 +315,12 @@ int main(int argc, char** argv) {
   RunOptions options{};
   if (argc < 3) {
     std::fprintf(stderr,
-                 "usage: %s <torque_nm> <run_seconds> [device]\n"
+                 "usage: %s <torque_nm> <run_seconds> [velocity_rad_s] [device]\n"
                  "  torque must be within +-15 Nm (AKE60-8); the probe "
-                 "enforces its own abort thresholds regardless.\n",
+                 "enforces its own abort thresholds regardless.\n"
+                 "  a non-zero velocity switches to the Velocity sub-mode with "
+                 "Kd damping: torque is bounded by Kd*velocity and speed by the "
+                 "command itself - the safe shape for unloaded-bench tests.\n",
                  argv[0]);
     return 1;
   }
@@ -313,8 +335,15 @@ int main(int argc, char** argv) {
                  "ERROR: torque out of +-15 Nm or duration out of (0, 300] s\n");
     return 1;
   }
-  if (argc >= 4) {
-    options.device = argv[3];
+  if (argc >= 5) {
+    if (!parse_double(argv[4], options.velocity_rad_s) ||
+        options.velocity_rad_s < -40.0 || options.velocity_rad_s > 40.0) {
+      std::fprintf(stderr, "ERROR: velocity must be a number within +-40 rad/s\n");
+      return 1;
+    }
+  }
+  if (argc >= 6) {
+    options.device = argv[5];
   }
   return run(options);
 }
