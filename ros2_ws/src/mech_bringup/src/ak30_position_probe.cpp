@@ -74,7 +74,8 @@ struct RunOptions final {
   std::string device{"/dev/ttyACM0"};
   bool hold_current{false};
   // Step-4 delta applied on top of the captured live position (hold mode
-  // only). Bounded to +-10 deg; larger moves are not what this probe is for.
+  // only). Bounded to +-45 deg (a quarter turn); larger moves are not
+  // what this probe is for.
   double hold_delta_rad{0.0};
   double target_rad{0.0};
   double kp{0.0};
@@ -82,7 +83,9 @@ struct RunOptions final {
   double seconds{0.0};
 };
 
-constexpr double kMaxHoldDeltaRad = 10.0 * mech::mech_protocol_cubemars::kPi / 180.0;
+// Step-4 owner-directed test: 30 deg. Bounded to +-45 deg so the move stays
+// inside a quarter turn; larger moves are not what this probe is for.
+constexpr double kMaxHoldDeltaRad = 45.0 * mech::mech_protocol_cubemars::kPi / 180.0;
 
 int run(const RunOptions& options) noexcept {
   PosixCdcSerialPort serial{options.device};
@@ -329,7 +332,7 @@ int main(int argc, char** argv) {
                  "  target_rad: canonical target within +-0.5 rad, or 'hold' "
                  "to capture the live position and command it back (zero "
                  "displacement by construction)\n"
-                 "  delta_rad: optional hold-mode offset within +-10 deg "
+                 "  delta_rad: optional hold-mode offset within +-45 deg "
                  "(step-4 small-move shape)\n"
                  "  kp/kd are bounded to 20/5; seconds to 10\n",
                  argv[0], argv[0]);
@@ -351,7 +354,7 @@ int main(int argc, char** argv) {
     if (!number(argv[2], options.hold_delta_rad) ||
         std::abs(options.hold_delta_rad) > kMaxHoldDeltaRad) {
       std::fprintf(stderr,
-                   "ERROR: hold delta must be a number within +-10 deg\n");
+                   "ERROR: hold delta must be a number within +-45 deg\n");
       return 1;
     }
     arg_index = 3;
