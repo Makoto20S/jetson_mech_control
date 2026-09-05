@@ -184,9 +184,12 @@ int run(const RunOptions& options) noexcept {
   }
 
   std::printf("CONFIGURED mode=%s target=%.3frad kp=%.3f kd=%.3f seconds=%.1f "
-              "aborts: displacement<%.0fdeg velocity<%.0frad_s effort<%.0fNm\n",
+              "aborts: target_miss<%.0fdeg velocity<%.0frad_s effort<%.0fNm\n",
               options.hold_current ? "hold" : "target", command_position_rad,
-              options.kp, options.kd, options.seconds, kMaxDisplacementDeg,
+              options.kp, options.kd, options.seconds,
+              std::max(kMaxDisplacementDeg,
+                       std::abs(options.hold_delta_rad * kRadToDeg) +
+                           kMaxDisplacementDeg),
               kMaxAbsVelocityRadS, kMaxAbsEffortNm);
 
   CanonicalDeviceCommand command{};
@@ -255,8 +258,17 @@ int run(const RunOptions& options) noexcept {
                      std::to_string(state.status.raw_fault_code);
             break;
           }
-          if (std::abs(position_deg - first_position_deg) >
-              kMaxDisplacementDeg) {
+          // Displacement bound: measured against the commanded target, not the
+          // starting position. A hold+delta run is EXPECTED to travel the
+          // delta, so its allowed displacement is delta + a small overshoot
+          // margin; a plain hold or numeric-target run stays at the fixed
+          // kMaxDisplacementDeg. Travel beyond that is an uncommanded move.
+          const double allowed_deg = std::max(
+              kMaxDisplacementDeg,
+              std::abs(options.hold_delta_rad * kRadToDeg) +
+                  kMaxDisplacementDeg);
+          if (std::abs(position_deg - command_position_rad * kRadToDeg) >
+              allowed_deg) {
             aborted = true;
             reason = "displaced_to=" + std::to_string(position_deg) + "deg";
             break;
