@@ -335,15 +335,15 @@ int main(int argc, char** argv) {
                  "ERROR: torque out of +-15 Nm or duration out of (0, 300] s\n");
     return 1;
   }
-  if (argc >= 5) {
-    if (!parse_double(argv[4], options.velocity_rad_s) ||
+  if (argc >= 4) {
+    if (!parse_double(argv[3], options.velocity_rad_s) ||
         options.velocity_rad_s < -40.0 || options.velocity_rad_s > 40.0) {
       std::fprintf(stderr, "ERROR: velocity must be a number within +-40 rad/s\n");
       return 1;
     }
   }
-  if (argc >= 6) {
-    options.device = argv[5];
+  if (argc >= 5) {
+    options.device = argv[4];
   }
   return run(options);
 }
