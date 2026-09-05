@@ -73,11 +73,16 @@ bool number(const char* text, double& value) noexcept {
 struct RunOptions final {
   std::string device{"/dev/ttyACM0"};
   bool hold_current{false};
+  // Step-4 delta applied on top of the captured live position (hold mode
+  // only). Bounded to +-10 deg; larger moves are not what this probe is for.
+  double hold_delta_rad{0.0};
   double target_rad{0.0};
   double kp{0.0};
   double kd{0.0};
   double seconds{0.0};
 };
+
+constexpr double kMaxHoldDeltaRad = 10.0 * mech::mech_protocol_cubemars::kPi / 180.0;
 
 int run(const RunOptions& options) noexcept {
   PosixCdcSerialPort serial{options.device};
@@ -163,7 +168,14 @@ int run(const RunOptions& options) noexcept {
       transport.close();
       return 1;
     }
-    std::printf("HOLD captured=%.3frad (%.1fdeg) zero_offset=%.1fdeg\n",
+    // Step-4 shape: a small delta on top of the captured live position, so
+    // the commanded displacement is exactly delta regardless of the mapping.
+    command_position_rad += options.hold_delta_rad;
+    std::printf("HOLD captured=%.3frad (%.1fdeg) delta=%.4frad (%.2fdeg) "
+                "target=%.3frad (%.1fdeg) zero_offset=%.1fdeg\n",
+                command_position_rad - options.hold_delta_rad,
+                (command_position_rad - options.hold_delta_rad) * kRadToDeg,
+                options.hold_delta_rad, options.hold_delta_rad * kRadToDeg,
                 command_position_rad, command_position_rad * kRadToDeg,
                 mapping.zero_offset_rad.value * kRadToDeg);
   }
@@ -310,14 +322,17 @@ int run(const RunOptions& options) noexcept {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 5 || argc > 6) {
+  if (argc < 5 || argc > 7) {
     std::fprintf(stderr,
-                 "usage: %s <target_rad|hold> <kp> <kd> <seconds> [device]\n"
+                 "usage: %s <target_rad|hold> <kp> <kd> <seconds> [device] or\n"
+                 "       %s hold <delta_rad> <kp> <kd> <seconds> [device]\n"
                  "  target_rad: canonical target within +-0.5 rad, or 'hold' "
                  "to capture the live position and command it back (zero "
                  "displacement by construction)\n"
+                 "  delta_rad: optional hold-mode offset within +-10 deg "
+                 "(step-4 small-move shape)\n"
                  "  kp/kd are bounded to 20/5; seconds to 10\n",
-                 argv[0]);
+                 argv[0], argv[0]);
     return 1;
   }
   RunOptions options{};
@@ -330,15 +345,27 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "ERROR: target must be 'hold' or within +-0.5 rad\n");
     return 1;
   }
-  if (!number(argv[2], options.kp) || !number(argv[3], options.kd) ||
-      !number(argv[4], options.seconds) || options.kp < 0.0 ||
+  int arg_index = 2;
+  if (options.hold_current && argc >= 7) {
+    // hold + delta form: the only way to reach argv[6..] is with a delta.
+    if (!number(argv[2], options.hold_delta_rad) ||
+        std::abs(options.hold_delta_rad) > kMaxHoldDeltaRad) {
+      std::fprintf(stderr,
+                   "ERROR: hold delta must be a number within +-10 deg\n");
+      return 1;
+    }
+    arg_index = 3;
+  }
+  if (!number(argv[arg_index], options.kp) ||
+      !number(argv[arg_index + 1], options.kd) ||
+      !number(argv[arg_index + 2], options.seconds) || options.kp < 0.0 ||
       options.kp > 20.0 || options.kd < 0.0 || options.kd > 5.0 ||
       options.seconds <= 0.0 || options.seconds > 10.0) {
     std::fprintf(stderr, "ERROR: limits kp<=20 kd<=5 seconds<=10\n");
     return 1;
   }
-  if (argc == 6) {
-    options.device = argv[5];
+  if (argc >= arg_index + 4) {
+    options.device = argv[arg_index + 3];
   }
   return run(options);
 }
