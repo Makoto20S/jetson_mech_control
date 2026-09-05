@@ -26,14 +26,13 @@ TEST(Ak30SessionConfigure, AcceptsAFullyEvidencedConfiguration) {
 // The default mapping is motor1's evidenced state (direction_sign verified on
 // the bench 2026-09-03: positive command -> clockwise rotation -> feedback
 // position increase), so torque and velocity configure on defaults. Position
-// must still refuse: its zero-offset chain and position source (B4) remain
-// unverified. If position ever passes here, either evidence landed or the gate
-// broke; both need a human to look.
-TEST(Ak30SessionConfigure, DefaultEvidenceConfiguresTorqueAndVelocityButNotPosition) {
+// position now uses the owner-approved provisional 330.07 deg/output-shaft
+// mapping. The dedicated position bring-up test can revise that mapping.
+TEST(Ak30SessionConfigure, DefaultEvidenceConfiguresAllThreeSubModes) {
   const std::pair<ForceControlSubMode, AdapterResult> cases[] = {
       {ForceControlSubMode::Torque, AdapterResult::Ok},
       {ForceControlSubMode::Velocity, AdapterResult::Ok},
-      {ForceControlSubMode::Position, AdapterResult::InvalidConfiguration}};
+      {ForceControlSubMode::Position, AdapterResult::Ok}};
   for (const auto& [sub_mode, expected] : cases) {
     fixtures::RecordingTransport transport{
         fixtures::classic_extended_capabilities()};

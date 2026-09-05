@@ -34,9 +34,11 @@ torque ±54 N·m. Tests citing manual examples use `ak10_9_ranges()`; AKE60-8 is
 
 `configure()` fails closed unless every mapping parameter the configured
 sub-mode consumes is verified. Motor1 now has verified `pole_pairs`,
-`gear_ratio`, `torque_constant` and `direction_sign`, so the torque and
-velocity sub-modes configure. The position sub-mode remains gated by the
-unverified zero-offset chain and encoder shaft source (B4).
+`gear_ratio`, `torque_constant` and `direction_sign`, plus an owner-approved
+provisional position mapping using `zero_offset = 330.07°` and an output-shaft
+interpretation. All three sub-modes therefore configure for controlled bench
+validation; Position semantics remain provisional until the low-gain sequence
+test settles B4/B14.
 
 The optional `mech_bringup/ak30_torque_probe` is a bench bring-up tool, not
 the production ros2_control integration. Its current canonical-state speed

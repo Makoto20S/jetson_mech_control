@@ -1,6 +1,6 @@
 # AK3.0 Force-Control Adapter Design
 
-- **Status:** Implemented — `mech_protocol_cubemars`, offline only. Real activation remains gated by ADR-006 and G0–G3.
+- **Status:** Implemented — `mech_protocol_cubemars`, with provisional Position mapping enabled for controlled bench validation. Production activation remains gated by ADR-006 and G0–G3.
 - **Date:** 2026-09-01
 - **Scope:** `mech_protocol_cubemars` — the AK3.0 force-control codec and device session, offline only
 - **Governs:** the first vendor protocol adapter under `AdapterContract v1`
@@ -115,8 +115,8 @@ Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, dr
 |---|---|---|
 | `pole_pairs` = 14 | **verified** | Screenshot and XML export agree |
 | `gear_ratio` = 8 | ~~unverified~~ **verified (2026-09-02)** | Three agreeing sources: the host tool's dedicated `减速器参数设置 → Ratio: 8`; L07's own model-naming convention (AK80-**9** is 9:1, AK60-**39** is 39:1, AKH70-**48** is 48:1, so AKE60-**8** is 8:1); and the displayed ratio. ~~Export `si_gear_ratio = 0` contradicts the displayed 8~~ — that was an error: `si_gear_ratio` is a different, unset VESC-lineage SI-display field, not a counter-source |
-| `zero_offset` | unverified | Screenshot `330.07°` vs export `336.28°` |
-| `position_source_shaft` | **unknown** | L07 writes 输出端 explicitly for torque and speed but not for position |
+| `zero_offset` | **provisional** | Owner-approved screenshot value `330.07°`; export still records `336.28°`, so bench validation may revise it |
+| `position_source_shaft` | **provisional** | Bench mapping currently treats `0x29` as output-shaft position; L07 does not state the position source explicitly |
 | `direction_sign` | unverified | `foc_encoder_inverted` and `m_invert_direction` act at different layers |
 | `firmware_id` = `AKE60_8_DE_V3.4` | unverified | Operator-asserted; no firmware query exists on this protocol |
 | `torque_constant` = 0.7382 N·m/A | **verified** | L07 p.37 for AKE60-8, owner-guaranteed for this variant (ADR-013 §4) |
@@ -124,7 +124,7 @@ Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, dr
 ### Hard rules
 
 1. **Fail closed at configure.** `configure()` returns `InvalidConfiguration` unless every mapping parameter consumed by the configured sub-mode is verified. The same mapping converts both directions, so suppressing only decode would still let the session emit a command computed from an unverified mapping — worse, because it moves the motor. `ADR-009` Decision 2 prescribes exactly this: configure rejects, it does not downgrade.
-   - **Consequence, accepted:** with motor1's evidence only `pole_pairs` and `torque_constant` are verified, so the position and velocity sub-modes will refuse to configure until vendor answers land. **The torque sub-mode consumes only `torque_constant` and `direction_sign`** — it is therefore the closest to usable, and the first thing to unblock if `direction_sign` is resolved.
+   - **Consequence, accepted:** Torque and Velocity use confirmed mappings. Position now uses the owner-approved `330.07°`/output-shaft mapping provisionally; a low-gain bench test must validate or revise it before production use.
 2. **`SampleQuality` is not the guard.** Nothing outside `status.hpp` reads it as of `9317d76`; marking a sample `Degraded` would enforce nothing. Quality still reports genuine per-sample conditions such as staleness.
 3. Effort may now be populated, because Kt is verified and the manual states T is output-shaft. This is the one thing the baseline change unblocked outright.
 
@@ -174,11 +174,11 @@ A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` pres
 
 ## 10. Still open, and what each blocks
 
-- **`0x29` encoder source** — blocks `position_source_shaft`, hence the position sub-mode. Vendor question B4.
+- **`0x29` encoder source** — currently provisionally mapped as output-shaft for the bench; the low-gain position-sequence test and vendor question B4 can revise this before production use.
 - **Direction and zero chain** — blocks `direction_sign`, hence all sub-modes including torque. Vendor question B9. **This is the shortest path to a usable adapter, and since `gear_ratio` was verified on 2026-09-02 it now unblocks the velocity sub-mode as well as torque.** It may be settled faster by measurement than by the vendor: on an unloaded motor, a passive listen while turning the output shaft by hand reveals the feedback direction without sending a single frame.
 - ~~**Gear ratio conflict** (`si_gear_ratio = 0` vs displayed 8) — vendor question B8.~~ **Closed 2026-09-02.** There was no conflict: `si_gear_ratio` is a different, unset SI-display field. See the §5 table. B8 is withdrawn.
 - **Force-control feedback frame** — L07 §4.3.1 is titled "servo mode feedback" and §4.2 defines only the command; the manual never states what feedback looks like in force-control mode. `0x29` as a command-family-independent status frame is the reasonable inference. Vendor question B13. Also observable directly during the passive listen.
-- **Single-turn / `0x2A` Flash state** — position semantics depend on a persisted setting invisible on the wire. Vendor question B14. **Note:** the `多圈模式` / `单圈模式` buttons visible in the host tool's trajectory-planning panel are a host-side command-shaping choice, **not** the device's persisted feedback mode, and must not be read as answering this item.
+- **Single-turn / `0x2A` Flash state** — position semantics may depend on a persisted setting invisible on the wire. Vendor question B14. The provisional mapping is allowed only for a controlled bench test; it does not close B14. **Note:** the `多圈模式` / `单圈模式` buttons visible in the host tool's trajectory-planning panel are a host-side command-shaping choice, **not** the device's persisted feedback mode, and must not be read as answering this item.
 - **Which shaft the command velocity refers to** — L07 documents the wire
   command velocity only as `电机速度 (rad/s)`, while feedback is ERPM requiring
   `÷ pole_pairs ÷ gear_ratio`. The implementation assumes output-side, matching

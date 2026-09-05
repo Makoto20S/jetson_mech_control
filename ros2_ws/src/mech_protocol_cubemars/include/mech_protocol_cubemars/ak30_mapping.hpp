@@ -40,10 +40,10 @@ struct ForceControlGains final {
   double kd{0.0};
 };
 
-// Defaults are motor1's evidence state as the repository records it today:
-// pole_pairs, gear_ratio, torque_constant and direction_sign are verified, so
-// the torque and velocity sub-modes configure; position still waits on B4
-// (position_source_shaft) and the zero-offset chain.
+// Defaults are motor1's current bench mapping. The position zero is a
+// provisional owner-approved value from the host-tool screenshot (330.07 deg)
+// and the position feedback is provisionally treated as output-shaft based;
+// the first low-gain position test is intended to validate or revise both.
 struct Ak30Mapping final {
   EvidencedValue pole_pairs{14.0, true};
   // Verified 2026-09-02 from three independent sources agreeing on 8:1 — the
@@ -55,7 +55,9 @@ struct Ak30Mapping final {
   // summary mistook the two for one field and recorded a conflict that does not
   // exist.
   EvidencedValue gear_ratio{8.0, true};
-  EvidencedValue zero_offset_rad{0.0, false};
+  // 330.07 deg from motor1/1.jpeg, converted once to radians. This is
+  // deliberately easy to replace if the position-sequence test disproves it.
+  EvidencedValue zero_offset_rad{5.760604931781636, true};
   // Verified 2026-09-03 by direct bench measurement: commanding +0.8 and
   // +1.0 rad/s (velocity sub-mode, Kd=1, Kp=0) turned the output shaft
   // clockwise (owner-observed) while feedback position increased and Iq stayed
@@ -66,10 +68,12 @@ struct Ak30Mapping final {
   EvidencedValue direction_sign{1.0, true};
   // L07 p.37 for AKE60-8, owner-guaranteed for this variant (ADR-013 section 4).
   EvidencedValue torque_constant_nm_per_a{0.7382, true};
-  // Vendor question B4: L07 writes 输出端 explicitly for torque and speed but
-  // not for position, so the source is undetermined.
-  bool position_source_known{false};
-  bool position_is_output_shaft{false};
+  // Provisional B4 interpretation: the position field follows the output
+  // shaft, consistent with the observed command/feedback speed relationship.
+  // Keep the source explicit so a later test can flip it without changing the
+  // conversion code.
+  bool position_source_known{true};
+  bool position_is_output_shaft{true};
   ForceControlRanges ranges{ake60_8_ranges()};
 };
 

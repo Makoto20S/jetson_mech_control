@@ -268,8 +268,10 @@ torque ±54 N·m. Tests citing manual examples use `ak10_9_ranges()`; AKE60-8 is
 sub-mode consumes is verified. At the time this plan was written, only
 `pole_pairs` and `torque_constant` were verified, so every sub-mode refused
 to configure. Subsequent bench evidence verified `gear_ratio` and
-`direction_sign`; the current implementation therefore configures the torque
-and velocity sub-modes, while position remains gated by B4.
+`direction_sign`; the current implementation configures all three sub-modes.
+Position uses an owner-approved provisional `zero_offset = 330.07°` and an
+output-shaft interpretation for controlled low-gain bench validation. B4/B14
+remain open and this provisional mapping is not production approval.
 ```
 
 - [ ] **Step 5: Verify the check now passes and the package builds**
@@ -964,7 +966,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ## Task 4: Mapping layer — evidence gate and canonical conversion
 
-Everything unevidenced lives here. The gate is the whole point of the task: with motor1's current evidence it must refuse all three sub-modes, and it must refuse them for the *right* reason so that resolving `direction_sign` alone visibly unblocks torque.
+Everything unevidenced lives here. The gate is the whole point of the task: at
+the time this slice was designed, motor1's evidence had to refuse all three
+sub-modes for the *right* reason. The later bench evidence and provisional
+position mapping are recorded below and in the design document.
 
 **Files:**
 - Create: `include/mech_protocol_cubemars/ak30_mapping.hpp`, `src/ak30_mapping.cpp`
@@ -3354,8 +3359,10 @@ The PR body must state, because none of it is visible in the diff:
 2. That firmware validation lives in the package-local session config because adding a `DeviceConfig` field would be a canonical contract change requiring an ADR first.
 3. That the staged watchdog is now duplicated a third time, and that ADR-012 already records unifying it as an open review trigger.
 4. The new unverified assumption about the command velocity's shaft, filed as vendor question B15.
-5. The protocol package's current evidence state: torque and velocity configure,
-   position remains blocked by B4. The optional `ak30_torque_probe` is a
+5. The protocol package's current evidence state: torque and velocity configure;
+   Position is provisionally configured for controlled bench validation with
+   `zero_offset = 330.07°` and output-shaft interpretation, while B4/B14 remain
+   open. The optional `ak30_torque_probe` is a
    bring-up tool only; its Torque-mode canonical velocity check is ineffective
    because velocity is not an evidenced field there, and raw-ERPM abort handling
    is a follow-up probe enhancement rather than an adapter contract requirement.
@@ -3383,7 +3390,10 @@ Run after all nine tasks were written, against the spec with fresh eyes.
 **What this plan does not achieve.** It does not implement the ros2_control
 hardware plugin or production deployment integration. The later bench work
 verified the torque and velocity sub-modes and demonstrated a controlled real-
-motor torque loop; position remains evidence-gated by B4.
+motor torque loop. Position is now provisionally enabled for a bounded,
+low-gain bench sequence; its encoder-source and persistence semantics remain
+open and must be revised if the observed sequence disproves the provisional
+mapping.
 
 ## Deviations from this plan, found during execution
 

@@ -38,11 +38,17 @@ ament_target_dependencies(
 option(MECH_BUILD_DEVICE_PROBES "Build device-touching bring-up probes" OFF)
 if(MECH_BUILD_DEVICE_PROBES)
   add_executable(ak30_torque_probe src/ak30_torque_probe.cpp)
+  add_executable(ak30_position_probe src/ak30_position_probe.cpp)
   target_include_directories(ak30_torque_probe PRIVATE include)
+  target_include_directories(ak30_position_probe PRIVATE include)
   target_link_libraries(ak30_torque_probe ${PROJECT_NAME})
+  target_link_libraries(ak30_position_probe ${PROJECT_NAME})
   ament_target_dependencies(ak30_torque_probe
     mech_control_core mech_protocol_cubemars)
+  ament_target_dependencies(ak30_position_probe
+    mech_control_core mech_protocol_cubemars)
   install(TARGETS ak30_torque_probe RUNTIME DESTINATION lib/${PROJECT_NAME})
+  install(TARGETS ak30_position_probe RUNTIME DESTINATION lib/${PROJECT_NAME})
 endif()
 
 install(TARGETS ${PROJECT_NAME}

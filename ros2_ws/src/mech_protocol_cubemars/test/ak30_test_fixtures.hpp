@@ -86,7 +86,7 @@ classic_extended_capabilities() {
   Ak30Mapping mapping{};
   mapping.pole_pairs = {14.0, true};
   mapping.gear_ratio = {8.0, true};
-  mapping.zero_offset_rad = {0.0, true};
+  mapping.zero_offset_rad = {5.760604931781636, true};
   mapping.direction_sign = {1.0, true};
   mapping.torque_constant_nm_per_a = {0.7382, true};
   mapping.position_source_known = true;
