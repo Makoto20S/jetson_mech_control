@@ -33,8 +33,13 @@ torque ±54 N·m. Tests citing manual examples use `ak10_9_ranges()`; AKE60-8 is
 ## Evidence gate
 
 `configure()` fails closed unless every mapping parameter the configured
-sub-mode consumes is verified. With motor1's present evidence `pole_pairs`,
-`gear_ratio` and `torque_constant` are verified, so **every sub-mode still
-refuses to configure**; `direction_sign` (vendor question B9) is the single
-parameter that unblocks both the torque and velocity sub-modes. The position
-sub-mode additionally needs the zero offset and the encoder's shaft (B4).
+sub-mode consumes is verified. Motor1 now has verified `pole_pairs`,
+`gear_ratio`, `torque_constant` and `direction_sign`, so the torque and
+velocity sub-modes configure. The position sub-mode remains gated by the
+unverified zero-offset chain and encoder shaft source (B4).
+
+The optional `mech_bringup/ak30_torque_probe` is a bench bring-up tool, not
+the production ros2_control integration. Its current canonical-state speed
+check is intentionally ineffective in Torque mode because that mode does not
+evidence `velocity`; raw-ERPM abort handling is a follow-up probe enhancement,
+not part of this protocol package's contract.

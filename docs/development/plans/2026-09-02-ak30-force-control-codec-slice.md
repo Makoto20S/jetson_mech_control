@@ -265,10 +265,11 @@ torque ±54 N·m. Tests citing manual examples use `ak10_9_ranges()`; AKE60-8 is
 ## Evidence gate
 
 `configure()` fails closed unless every mapping parameter the configured
-sub-mode consumes is verified. With motor1's present evidence only
-`pole_pairs` and `torque_constant` are verified, so **every sub-mode still
-refuses to configure**; `direction_sign` (vendor question B9) is the single
-parameter that unblocks the torque sub-mode.
+sub-mode consumes is verified. At the time this plan was written, only
+`pole_pairs` and `torque_constant` were verified, so every sub-mode refused
+to configure. Subsequent bench evidence verified `gear_ratio` and
+`direction_sign`; the current implementation therefore configures the torque
+and velocity sub-modes, while position remains gated by B4.
 ```
 
 - [ ] **Step 5: Verify the check now passes and the package builds**
@@ -1013,9 +1014,10 @@ using mech::mech_protocol_cubemars::to_device_command;
   return mapping;
 }
 
-// motor1 as the repository actually evidences it today: only pole_pairs and
-// torque_constant are verified. This is the state the evidence gate must
-// refuse, and it is why no sub-mode configures yet.
+// Historical fixture from the original plan: at plan authoring time only
+// pole_pairs and torque_constant were verified, so no sub-mode configured.
+// Current defaults include the later bench-verified gear_ratio and
+// direction_sign values; torque and velocity now configure.
 [[nodiscard]] Ak30Mapping motor1_as_evidenced() {
   Ak30Mapping mapping{};
   mapping.pole_pairs = {14.0, true};
@@ -1337,8 +1339,8 @@ struct ForceControlGains final {
   double kd{0.0};
 };
 
-// Defaults are motor1's evidence state as the repository records it today:
-// only pole_pairs and torque_constant are verified, so no sub-mode configures.
+// Defaults are motor1's evidence state as recorded when this plan was authored;
+// later bench evidence verified gear_ratio and direction_sign.
 struct Ak30Mapping final {
   EvidencedValue pole_pairs{14.0, true};
   EvidencedValue gear_ratio{8.0, false};
@@ -3352,7 +3354,11 @@ The PR body must state, because none of it is visible in the diff:
 2. That firmware validation lives in the package-local session config because adding a `DeviceConfig` field would be a canonical contract change requiring an ADR first.
 3. That the staged watchdog is now duplicated a third time, and that ADR-012 already records unifying it as an open review trigger.
 4. The new unverified assumption about the command velocity's shaft, filed as vendor question B15.
-5. That **no sub-mode configures with motor1's current evidence** — this PR does not bring the project closer to moving a motor; it brings it closer to being *ready* to, once B9 answers.
+5. The protocol package's current evidence state: torque and velocity configure,
+   position remains blocked by B4. The optional `ak30_torque_probe` is a
+   bring-up tool only; its Torque-mode canonical velocity check is ineffective
+   because velocity is not an evidenced field there, and raw-ERPM abort handling
+   is a follow-up probe enhancement rather than an adapter contract requirement.
 
 ---
 
@@ -3374,7 +3380,10 @@ Run after all nine tasks were written, against the spec with fresh eyes.
 
 **New unverified assumption this plan introduces**, and the only one: the wire command velocity is treated as output-side rad/s. L07 never says. It is gated behind `gear_ratio` evidence, pinned nowhere in a way that could silently drift, and filed as vendor question B15 in Task 9.
 
-**What this plan does not achieve.** With motor1's current evidence every sub-mode still fails to configure. The deliverable is an adapter that is *ready* to configure the moment `direction_sign` (vendor question B9) is answered — not one that can move a motor.
+**What this plan does not achieve.** It does not implement the ros2_control
+hardware plugin or production deployment integration. The later bench work
+verified the torque and velocity sub-modes and demonstrated a controlled real-
+motor torque loop; position remains evidence-gated by B4.
 
 ## Deviations from this plan, found during execution
 
