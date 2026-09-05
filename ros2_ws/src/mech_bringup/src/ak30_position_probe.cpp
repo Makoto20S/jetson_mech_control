@@ -1,11 +1,27 @@
 // Controlled AK3.0 position-mode bench probe.
 // This is an opt-in bring-up tool, not the production ros2_control plugin.
+//
+// Two modes:
+//   - "hold": capture the first valid feedback position, then command exactly
+//     that position for the run window. The zero-offset and direction sign
+//     cancel in the canonical<->device round trip, so a mapping error cannot
+//     create displacement; this is the progressive route's step ③ shape.
+//   - numeric target: command the given canonical position (step ④ shape).
+//
+// Safety envelope: fail-closed listen phase (hold mode sends nothing unless a
+// live position was captured), software aborts on displacement/velocity/
+// effort/fault, and a tail that holds the last observed position instead of
+// commanding the calibrated zero.
+//
+// Exit codes: 0 normal completion, 1 setup failure, 2 aborted by a safety
+// condition.
 
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include "mech_bringup/posix_cdc_serial_port.hpp"
@@ -28,6 +44,16 @@ using mech::mech_protocol_cubemars::Ak30SessionConfig;
 using mech::mech_protocol_cubemars::ForceControlGains;
 using mech::mech_protocol_cubemars::ForceControlSubMode;
 
+// Software abort thresholds, all measured from decoded feedback. The
+// displacement bound is generous (5 deg) so normal sensor noise never trips
+// it, while a genuine wrong-direction crawl is caught within a few samples.
+constexpr double kMaxDisplacementDeg = 5.0;
+constexpr double kMaxAbsVelocityRadS = 1.0;
+constexpr double kMaxAbsEffortNm = 1.0;
+// Hold mode must capture a live position within this window or send nothing.
+constexpr double kListenTimeoutSeconds = 1.0;
+constexpr double kRadToDeg = 180.0 / mech::mech_protocol_cubemars::kPi;
+
 MonotonicTime now() noexcept {
   const auto ticks = std::chrono::steady_clock::now().time_since_epoch();
   return *MonotonicTime::from_nanoseconds(
@@ -44,17 +70,26 @@ bool number(const char* text, double& value) noexcept {
   return end != text && *end == '\0' && std::isfinite(value);
 }
 
-int run(const char* device, double target_rad, double kp, double kd,
-        double seconds) noexcept {
-  PosixCdcSerialPort serial{device};
-  UsbCdcOptions options{};
-  options.logical_bus = 1U;
-  options.nominal_bitrate_hz = 0U;
-  options.receive_queue_capacity = 128U;
-  options.verified_board_version = {4U, 8U, 8U};
-  UsbCdcTransport transport{serial, options};
+struct RunOptions final {
+  std::string device{"/dev/ttyACM0"};
+  bool hold_current{false};
+  double target_rad{0.0};
+  double kp{0.0};
+  double kd{0.0};
+  double seconds{0.0};
+};
+
+int run(const RunOptions& options) noexcept {
+  PosixCdcSerialPort serial{options.device};
+  UsbCdcOptions cdc_options{};
+  cdc_options.logical_bus = 1U;
+  cdc_options.nominal_bitrate_hz = 0U;
+  cdc_options.receive_queue_capacity = 128U;
+  cdc_options.verified_board_version = {4U, 8U, 8U};
+  UsbCdcTransport transport{serial, cdc_options};
   if (!transport.open() || !serial.send_pass_through_init()) {
-    std::fprintf(stderr, "ERROR: CDC transport setup failed for %s\n", device);
+    std::fprintf(stderr, "ERROR: CDC transport setup failed for %s\n",
+                 options.device.c_str());
     transport.close();
     return 1;
   }
@@ -64,7 +99,7 @@ int run(const char* device, double target_rad, double kp, double kd,
   session_config.drive_id = 104U;
   session_config.sub_mode = ForceControlSubMode::Position;
   session_config.mapping = mapping;
-  session_config.gains = ForceControlGains{kp, kd};
+  session_config.gains = ForceControlGains{options.kp, options.kd};
   session_config.firmware_id = 1U;
   session_config.firmware_id_min = 1U;
   session_config.firmware_id_max = 1000U;
@@ -95,16 +130,64 @@ int run(const char* device, double target_rad, double kp, double kd,
   }
 
   const auto period_ns = static_cast<std::int64_t>(10e6);
-  const auto run_ns = static_cast<std::int64_t>(seconds * 1e9);
+  const auto run_ns = static_cast<std::int64_t>(options.seconds * 1e9);
   const auto tail_ns = static_cast<std::int64_t>(500e6);
+  const auto listen_ns =
+      static_cast<std::int64_t>(kListenTimeoutSeconds * 1e9);
+
+  // Listen phase (hold mode): capture the live position before commanding.
+  // Fail closed - if no valid feedback arrives, no position command is ever
+  // sent, because one computed from a guessed position could move the motor.
+  double command_position_rad = options.target_rad;
+  if (options.hold_current) {
+    const auto listen_start = now();
+    bool captured = false;
+    while (now().nanoseconds() - listen_start.nanoseconds() < listen_ns) {
+      RawCanFrame frame{};
+      if (transport.try_receive(frame) == TransportResult::Ok &&
+          session.process(frame, now()) == AdapterResult::Ok) {
+        const auto state = session.snapshot(now());
+        if (state.status.quality == SampleQuality::Valid) {
+          command_position_rad = state.position;
+          captured = true;
+          break;
+        }
+      }
+    }
+    if (!captured) {
+      std::fprintf(stderr,
+                   "ERROR: hold mode captured no feedback within %.1f s; "
+                   "no command was sent\n",
+                   kListenTimeoutSeconds);
+      session.deactivate();
+      transport.close();
+      return 1;
+    }
+    std::printf("HOLD captured=%.3frad (%.1fdeg) zero_offset=%.1fdeg\n",
+                command_position_rad, command_position_rad * kRadToDeg,
+                mapping.zero_offset_rad.value * kRadToDeg);
+  }
+
+  std::printf("CONFIGURED mode=%s target=%.3frad kp=%.3f kd=%.3f seconds=%.1f "
+              "aborts: displacement<%.0fdeg velocity<%.0frad_s effort<%.0fNm\n",
+              options.hold_current ? "hold" : "target", command_position_rad,
+              options.kp, options.kd, options.seconds, kMaxDisplacementDeg,
+              kMaxAbsVelocityRadS, kMaxAbsEffortNm);
+
   CanonicalDeviceCommand command{};
-  command.position = target_rad;
+  command.position = command_position_rad;
   command.deadline = offset(now(), period_ns * 2);
   std::uint64_t sent = 0U;
   std::uint64_t samples = 0U;
   bool aborted = false;
   std::string reason;
-  double hold_position_rad = target_rad;
+  double hold_position_rad = command_position_rad;
+  double first_position_deg = 0.0;
+  double last_position_deg = 0.0;
+  double min_effort_nm = 0.0;
+  double max_effort_nm = 0.0;
+  bool have_effort = false;
+  bool have_position = false;
   const auto start = now();
   auto next = start;
   while (now().nanoseconds() - start.nanoseconds() < run_ns) {
@@ -128,15 +211,49 @@ int run(const char* device, double target_rad, double kp, double kd,
         if (state.status.quality == SampleQuality::Valid) {
           ++samples;
           hold_position_rad = state.position;
+          const double position_deg = state.position * kRadToDeg;
+          if (!have_position) {
+            first_position_deg = position_deg;
+            have_position = true;
+          }
+          last_position_deg = position_deg;
+          const double effort_nm = state.effort;
+          if (!have_effort) {
+            min_effort_nm = effort_nm;
+            max_effort_nm = effort_nm;
+            have_effort = true;
+          }
+          if (effort_nm < min_effort_nm) {
+            min_effort_nm = effort_nm;
+          }
+          if (effort_nm > max_effort_nm) {
+            max_effort_nm = effort_nm;
+          }
           std::printf("sample=%llu pos=%.3fdeg vel=%.3frad_s effort=%.3fNm "
                       "temp=unavailable fault=%u\n",
                       static_cast<unsigned long long>(samples),
-                      state.position * 180.0 / mech::mech_protocol_cubemars::kPi,
-                      state.velocity, state.effort,
+                      position_deg, state.velocity, state.effort,
                       state.status.raw_fault_code);
           if (state.status.raw_fault_code != 0U) {
             aborted = true;
-            reason = "fault";
+            reason = "fault=" +
+                     std::to_string(state.status.raw_fault_code);
+            break;
+          }
+          if (std::abs(position_deg - first_position_deg) >
+              kMaxDisplacementDeg) {
+            aborted = true;
+            reason = "displaced_to=" + std::to_string(position_deg) + "deg";
+            break;
+          }
+          if (std::abs(state.velocity) > kMaxAbsVelocityRadS) {
+            aborted = true;
+            reason = "velocity=" + std::to_string(state.velocity);
+            break;
+          }
+          if (std::abs(state.effort) > kMaxAbsEffortNm) {
+            aborted = true;
+            reason = "effort=" + std::to_string(state.effort);
             break;
           }
         }
@@ -151,7 +268,7 @@ int run(const char* device, double target_rad, double kp, double kd,
   // Position-mode tail: the session's configured Kp/Kd remain active, so a
   // zero-valued CanonicalDeviceCommand would command the calibrated zero,
   // potentially causing an unexpected move. Hold the last observed position
-  // (or the requested target if no feedback arrived) with zero feed-forward.
+  // (or the commanded target if no feedback arrived) with zero feed-forward.
   const auto tail_start = now();
   CanonicalDeviceCommand neutral{};
   auto next_tail_send = tail_start;
@@ -176,10 +293,18 @@ int run(const char* device, double target_rad, double kp, double kd,
   }
   session.deactivate();
   transport.close();
-  std::printf("END sent=%llu samples=%llu abort=%s target=%.3frad kp=%.3f kd=%.3f\n",
+  std::printf("END sent=%llu samples=%llu abort=%s mode=%s "
+              "target=%.3frad kp=%.3f kd=%.3f pos=%.1f->%.1fdeg "
+              "effort_nm=%.3f..%.3f\n",
               static_cast<unsigned long long>(sent),
               static_cast<unsigned long long>(samples),
-              aborted ? reason.c_str() : "none", target_rad, kp, kd);
+              aborted ? reason.c_str() : "none",
+              options.hold_current ? "hold" : "target", command_position_rad,
+              options.kp, options.kd,
+              have_position ? first_position_deg : 0.0,
+              have_position ? last_position_deg : 0.0,
+              have_effort ? min_effort_nm : 0.0,
+              have_effort ? max_effort_nm : 0.0);
   return aborted ? 2 : 0;
 }
 }  // namespace
@@ -187,19 +312,33 @@ int run(const char* device, double target_rad, double kp, double kd,
 int main(int argc, char** argv) {
   if (argc < 5 || argc > 6) {
     std::fprintf(stderr,
-                 "usage: %s <target_rad> <kp> <kd> <seconds> [device]\n",
+                 "usage: %s <target_rad|hold> <kp> <kd> <seconds> [device]\n"
+                 "  target_rad: canonical target within +-0.5 rad, or 'hold' "
+                 "to capture the live position and command it back (zero "
+                 "displacement by construction)\n"
+                 "  kp/kd are bounded to 20/5; seconds to 10\n",
                  argv[0]);
     return 1;
   }
-  double target = 0.0;
-  double kp = 0.0;
-  double kd = 0.0;
-  double seconds = 0.0;
-  if (!number(argv[1], target) || !number(argv[2], kp) || !number(argv[3], kd) ||
-      !number(argv[4], seconds) || std::abs(target) > 0.5 || kp < 0.0 ||
-      kp > 20.0 || kd < 0.0 || kd > 5.0 || seconds <= 0.0 || seconds > 10.0) {
-    std::fprintf(stderr, "ERROR: limits target<=0.5rad kp<=20 kd<=5 seconds<=10\n");
+  RunOptions options{};
+  const char* target_text = argv[1];
+  if (std::strcmp(target_text, "hold") == 0) {
+    options.hold_current = true;
+    options.target_rad = 0.0;
+  } else if (!number(target_text, options.target_rad) ||
+             std::abs(options.target_rad) > 0.5) {
+    std::fprintf(stderr, "ERROR: target must be 'hold' or within +-0.5 rad\n");
     return 1;
   }
-  return run(argc == 6 ? argv[5] : "/dev/ttyACM0", target, kp, kd, seconds);
+  if (!number(argv[2], options.kp) || !number(argv[3], options.kd) ||
+      !number(argv[4], options.seconds) || options.kp < 0.0 ||
+      options.kp > 20.0 || options.kd < 0.0 || options.kd > 5.0 ||
+      options.seconds <= 0.0 || options.seconds > 10.0) {
+    std::fprintf(stderr, "ERROR: limits kp<=20 kd<=5 seconds<=10\n");
+    return 1;
+  }
+  if (argc == 6) {
+    options.device = argv[5];
+  }
+  return run(options);
 }
