@@ -1,6 +1,6 @@
 # AK3.0 Force-Control Adapter Design
 
-- **Status:** Draft for review
+- **Status:** Implemented — `mech_protocol_cubemars`, with provisional Position mapping enabled for controlled bench validation. Production activation remains gated by ADR-006 and G0–G3.
 - **Date:** 2026-09-01
 - **Scope:** `mech_protocol_cubemars` — the AK3.0 force-control codec and device session, offline only
 - **Governs:** the first vendor protocol adapter under `AdapterContract v1`
@@ -32,7 +32,7 @@
 | `adapter_contract_v1.md` | Codec is pure, no I/O or session state; session borrows an injected transport; one explicit `ProtocolProfile`, no runtime auto-detection |
 | `ADR-013` | L07 is the baseline; force control is the first profile; profile fixed at configure with **no ACTIVE-period mixing — by our choice, not a firmware limit**; golden vectors must be back-solved |
 | `ADR-009` (as amended) | The Kt blocker is lifted: `Kt = 0.7382 N·m/A`, `T = Kt × Iq` at the **output shaft**. Direction, zero chain, encoder source and physical accuracy stay gated |
-| `ADR-012` | Staged watchdog: follow → freeze last valid → explicit ERROR past a hard TTL; a position command never resolves to `0.0`; the whole watchdog fits `<=3` control cycles |
+| `ADR-012` | Staged watchdog: follow → freeze last valid → explicit ERROR past a hard TTL; a position command never resolves to `0.0`; the whole watchdog fits `<=3` control cycles. **This package classifies the watchdog stage via `command_stage()` and never synthesizes or re-sends a command; acting on `Holding`/`Expired` — freezing, erroring, or otherwise — is the caller's responsibility and is not implemented here** |
 | `02:81` / `02:82` | Codec owns byte order, bit fields, scaling, range, error codes. Session owns firmware capability, sample aggregation, freshness, command mode, device state machine |
 | `02:160` | `on_configure` must validate **firmware range**, frame format, codec, feedback set and command set, and bind the profile |
 | `06 §5` | 500 Hz for two motors plus two HI12 is 41.6%; enabling `0x2A` reaches 53.6% and is excluded |
@@ -81,6 +81,26 @@ Widths: `KP` 12, `KD` 12, position 16, velocity 12, torque 12 — 64 bits exactl
 
 Signed quantities map linearly onto the unsigned field with midpoint `(2^bits − 1) / 2`; `KP`/`KD` map from zero. Position, `KP` and `KD` ranges are merged cells spanning all models in the source table, confirmed by reading the page as an image rather than trusting `pdftotext`.
 
+**Two defects in L07 that the implementation deliberately does not reproduce.**
+
+1. §4.4's printed `float_to_uint()` scales by `(1 << bits) / span`. The manual's
+   own example table was generated with `((1 << bits) - 1) / span`, and the
+   printed formula reproduces none of the manual's examples: position `0 rad`
+   becomes `80 00` instead of `7F FF`, velocity `0` becomes `0x800` instead of
+   `0x7FF`, and velocity `-6 rad/s` becomes `64 98` instead of `64 87`. At
+   `p_des = P_MAX` it yields `p_int = 65536`, which overflows the 16-bit field
+   to `0x0000` and decodes as `-12.56 rad` — **maximum position commands
+   minimum position**. `EncodingMaxPositionDoesNotWrapToMinimum` pins this.
+2. §4.4's worked examples are stated to use **AK10-9** constants (`±12.56 rad`,
+   `±28.0 rad/s`, `±54.0 N·m`), not AKE60-8's. Decoding an example row with
+   AKE60-8's ranges gives a wrong answer, which is why the test suite carries
+   `ak10_9_ranges()` purely for manual cross-checking.
+
+Quantization therefore truncates with divisor `((1 << bits) - 1)`, and encoding
+**rejects** out-of-range input rather than clamping as the vendor code does:
+clamping converts an invalid command into a valid-looking one, which is the
+degradation ADR-012 forbids.
+
 ### 4.4 Feedback decoder — function ID `0x29`, DLC 8
 
 Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, driver-board temperature `int8`, `DATA[7]` status byte.
@@ -94,9 +114,9 @@ Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, dr
 | Parameter | Initial state for motor1 | Basis |
 |---|---|---|
 | `pole_pairs` = 14 | **verified** | Screenshot and XML export agree |
-| `gear_ratio` = 8 | unverified | Export `si_gear_ratio = 0` contradicts the displayed 8 |
-| `zero_offset` | unverified | Screenshot `330.07°` vs export `336.28°` |
-| `position_source_shaft` | **unknown** | L07 writes 输出端 explicitly for torque and speed but not for position |
+| `gear_ratio` = 8 | ~~unverified~~ **verified (2026-09-02)** | Three agreeing sources: the host tool's dedicated `减速器参数设置 → Ratio: 8`; L07's own model-naming convention (AK80-**9** is 9:1, AK60-**39** is 39:1, AKH70-**48** is 48:1, so AKE60-**8** is 8:1); and the displayed ratio. ~~Export `si_gear_ratio = 0` contradicts the displayed 8~~ — that was an error: `si_gear_ratio` is a different, unset VESC-lineage SI-display field, not a counter-source |
+| `zero_offset` | **provisional** | Owner-approved screenshot value `330.07°`; export still records `336.28°`, so bench validation may revise it |
+| `position_source_shaft` | **provisional** | Bench mapping currently treats `0x29` as output-shaft position; L07 does not state the position source explicitly |
 | `direction_sign` | unverified | `foc_encoder_inverted` and `m_invert_direction` act at different layers |
 | `firmware_id` = `AKE60_8_DE_V3.4` | unverified | Operator-asserted; no firmware query exists on this protocol |
 | `torque_constant` = 0.7382 N·m/A | **verified** | L07 p.37 for AKE60-8, owner-guaranteed for this variant (ADR-013 §4) |
@@ -104,7 +124,7 @@ Position `int16 × 0.1°`, velocity `int16 × 10` ERPM, Iq `int16 × 0.01 A`, dr
 ### Hard rules
 
 1. **Fail closed at configure.** `configure()` returns `InvalidConfiguration` unless every mapping parameter consumed by the configured sub-mode is verified. The same mapping converts both directions, so suppressing only decode would still let the session emit a command computed from an unverified mapping — worse, because it moves the motor. `ADR-009` Decision 2 prescribes exactly this: configure rejects, it does not downgrade.
-   - **Consequence, accepted:** with motor1's evidence only `pole_pairs` and `torque_constant` are verified, so the position and velocity sub-modes will refuse to configure until vendor answers land. **The torque sub-mode consumes only `torque_constant` and `direction_sign`** — it is therefore the closest to usable, and the first thing to unblock if `direction_sign` is resolved.
+   - **Consequence, accepted:** Torque and Velocity use confirmed mappings. Position now uses the owner-approved `330.07°`/output-shaft mapping provisionally; a low-gain bench test must validate or revise it before production use.
 2. **`SampleQuality` is not the guard.** Nothing outside `status.hpp` reads it as of `9317d76`; marking a sample `Degraded` would enforce nothing. Quality still reports genuine per-sample conditions such as staleness.
 3. Effort may now be populated, because Kt is verified and the manual states T is output-shaft. This is the one thing the baseline change unblocked outright.
 
@@ -126,7 +146,7 @@ The sub-mode is **explicit configuration**, not inferred from the payload. Force
 
 Force control has **no host-side activation handshake** and, being impedance control, none of the servo position mode's "runs to target at maximum speed" hazard. The first-command plausibility check designed for the superseded servo-first draft is therefore **not carried over**; it guarded a hazard this profile does not have.
 
-Watchdog follows `ADR-012` unchanged: follow → freeze last valid → explicit ERROR past the hard TTL, and a position command never resolves to `0.0`.
+The session classifies the command's watchdog stage — following, holding, or expired — through `command_stage()`, and guarantees it will never synthesize or re-send a command on the caller's behalf; a position command never resolves to `0.0`. Acting on a `Holding` or `Expired` stage — freezing the last valid command, raising an explicit ERROR, or anything else `ADR-012` prescribes — is the caller's responsibility and is not implemented in this package.
 
 A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` preserves the raw byte; the decoded meaning never overwrites it.
 
@@ -154,8 +174,15 @@ A fault code in `1`–`7` latches a fault. `StatusSnapshot::raw_fault_code` pres
 
 ## 10. Still open, and what each blocks
 
-- **`0x29` encoder source** — blocks `position_source_shaft`, hence the position sub-mode. Vendor question B4.
-- **Direction and zero chain** — blocks `direction_sign`, hence all sub-modes including torque. Vendor question B9. **This is the shortest path to a usable adapter.**
-- **Gear ratio conflict** (`si_gear_ratio = 0` vs displayed 8) — vendor question B8.
-- **Force-control feedback frame** — L07 §4.3.1 is titled "servo mode feedback" and §4.2 defines only the command; the manual never states what feedback looks like in force-control mode. `0x29` as a command-family-independent status frame is the reasonable inference. Vendor question B13.
-- **Single-turn / `0x2A` Flash state** — position semantics depend on a persisted setting invisible on the wire. Vendor question B14.
+- **`0x29` encoder source** — currently provisionally mapped as output-shaft for the bench; the low-gain position-sequence test and vendor question B4 can revise this before production use.
+- **Direction and zero chain** — blocks `direction_sign`, hence all sub-modes including torque. Vendor question B9. **This is the shortest path to a usable adapter, and since `gear_ratio` was verified on 2026-09-02 it now unblocks the velocity sub-mode as well as torque.** It may be settled faster by measurement than by the vendor: on an unloaded motor, a passive listen while turning the output shaft by hand reveals the feedback direction without sending a single frame.
+- ~~**Gear ratio conflict** (`si_gear_ratio = 0` vs displayed 8) — vendor question B8.~~ **Closed 2026-09-02.** There was no conflict: `si_gear_ratio` is a different, unset SI-display field. See the §5 table. B8 is withdrawn.
+- **Force-control feedback frame** — L07 §4.3.1 is titled "servo mode feedback" and §4.2 defines only the command; the manual never states what feedback looks like in force-control mode. `0x29` as a command-family-independent status frame is the reasonable inference. Vendor question B13. Also observable directly during the passive listen.
+- **Single-turn / `0x2A` Flash state** — position semantics may depend on a persisted setting invisible on the wire. Vendor question B14. The provisional mapping is allowed only for a controlled bench test; it does not close B14. **Note:** the `多圈模式` / `单圈模式` buttons visible in the host tool's trajectory-planning panel are a host-side command-shaping choice, **not** the device's persisted feedback mode, and must not be read as answering this item.
+- **Which shaft the command velocity refers to** — L07 documents the wire
+  command velocity only as `电机速度 (rad/s)`, while feedback is ERPM requiring
+  `÷ pole_pairs ÷ gear_ratio`. The implementation assumes output-side, matching
+  the torque field, which the manual does state is 输出端. Vendor question B15.
+  **Now that `gear_ratio` is verified this assumption is no longer gated behind
+  it, so B15 must be answered before the velocity sub-mode drives a real motor.**
+- **`ADR-012`'s staged freeze/error actions** — this package implements only the classification half: `command_stage()` reports `Following`/`Holding`/`Expired` and the session never synthesizes or re-sends a command. It does not freeze the last valid command or raise an explicit ERROR past the hard TTL; there is no caller yet to drive that behavior. This blocks nothing offline. The ros2_control hardware-plugin slice must close it by polling `command_stage()` and acting on `Holding` and `Expired` itself; shipping that plugin without consuming `command_stage()` would leave the watchdog decorative.

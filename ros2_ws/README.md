@@ -1,13 +1,15 @@
 # Foundation ROS 2 workspace
 
-The workspace contains only the five Foundation v0.1 packages planned in
-`docs/planning/07_framework_bootstrap_plan.md`:
+The workspace contains the five Foundation v0.1 packages planned in
+`docs/planning/07_framework_bootstrap_plan.md`, plus one protocol adapter:
 
 - `mech_control_core`
 - `mech_simulation`
 - `mech_hardware_ros2_control`
 - `mech_controllers`
 - `mech_bringup`
+- `mech_protocol_cubemars` — the CubeMars AK3.0 force-control adapter. It is
+  offline-only: it opens no device and performs no real device access.
 
 From Ubuntu 22.04 with ROS 2 Humble installed, run from the repository root:
 

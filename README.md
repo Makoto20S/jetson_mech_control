@@ -65,8 +65,9 @@ flowchart TB
 | `mech_hardware_ros2_control` | 连接通用核心的复合 `ros2_control` 硬件插件 |
 | `mech_controllers` | 带边界、变化率和超时约束的 C++ controller 插件 |
 | `mech_bringup` | 仿真与部署组合、URDF/xacro、launch 和 controller 配置 |
+| `mech_protocol_cubemars` | CubeMars AK3.0 力控 profile：wire 编解码、证据门映射、会话与看门狗 |
 
-CubeMars AK3.0 与 HI12 等供应商协议包不属于当前 `main` 的已交付组件；它们将在设备证据和离线验证满足要求后独立合入。
+`mech_protocol_cubemars` 是本分支新增的第六个包：CubeMars AK3.0 力控 profile 的实现，已在单电机取证台架上完成真机闭环验证（力矩、速度、位置三个子模式）。真实设备激活仍受硬件安全闸门（G0–G3）与 ADR-006 约束；HI12 等其他供应商协议包仍推迟。
 
 ## 环境要求
 

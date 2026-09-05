@@ -61,6 +61,87 @@ TEST(UsbCdcCodec, SupportsExtendedFdBatchedPayloadAndRejectsBadCrc) {
       *MonotonicTime::from_nanoseconds(20), decoded));
 }
 
+// Firmware 4.8.8 prefixes each pass-through reply record with the CAN ID's
+// low 24 bits (little-endian) ahead of the documented 32-bit ID field. The
+// prefix was observed on the bench: `68 29 00` before the 0x2968 record,
+// ~50 Hz periodic feedback. The codec must accept that layout without
+// loosening the record checks for the un-prefixed layout.
+TEST(UsbCdcCodec, DecodesFirmware488IdPrefixReplyRecord) {
+  // Hand-built from the bench capture: prefix 68 29 00, then id 68 29 00 00
+  // (LE 0x00002968), flags 0x0C (extended), dlc 8, then an 0x29 feedback
+  // payload of a healthy idle motor.
+  std::array<std::uint8_t, 7U + 17U> packet{};
+  packet[0] = UsbCdcCodec::kHeader;
+  packet[1] = UsbCdcCodec::kPassCommand;
+  packet[2] = 17U;
+  packet[3] = 0U;
+  packet[4] = 0x82U;  // crc8 over 12 00 11 00 -> patched below by recompute
+  packet[5] = 0U;
+  packet[6] = 0U;
+  const std::uint8_t prefix[3] = {0x68U, 0x29U, 0x00U};
+  const std::uint8_t record[14] = {0x68U, 0x29U, 0x00U, 0x00U, 0x0CU, 0x08U,
+                                   0x7DU, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+                                   0x2CU, 0x00U};
+  std::copy(std::begin(prefix), std::end(prefix), packet.begin() + 7U);
+  std::copy(std::begin(record), std::end(record), packet.begin() + 10U);
+  // Recompute both CRCs so the packet is internally consistent, exactly like
+  // the board produces.
+  std::uint8_t crc8 = 0xFFU;
+  for (std::size_t index = 1U; index < 4U; ++index) {
+    crc8 ^= packet[index];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc8 = (crc8 & 1U) != 0U
+                 ? static_cast<std::uint8_t>((crc8 >> 1U) ^ 0x8CU)
+                 : static_cast<std::uint8_t>(crc8 >> 1U);
+    }
+  }
+  packet[4] = crc8;
+  std::uint16_t crc16 = 0xFFFFU;
+  for (std::size_t index = 7U; index < packet.size(); ++index) {
+    crc16 ^= packet[index];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc16 = (crc16 & 1U) != 0U
+                  ? static_cast<std::uint16_t>((crc16 >> 1U) ^ 0x8408U)
+                  : static_cast<std::uint16_t>(crc16 >> 1U);
+    }
+  }
+  packet[5] = static_cast<std::uint8_t>(crc16 & 0xFFU);
+  packet[6] = static_cast<std::uint8_t>(crc16 >> 8U);
+
+  CdcFrameBatch decoded;
+  ASSERT_TRUE(UsbCdcCodec::decode(
+      packet.data(), packet.size(), 1U,
+      *MonotonicTime::from_nanoseconds(20), decoded));
+  ASSERT_EQ(decoded.size, 1U);
+  EXPECT_EQ(decoded.frames[0].id.value, 0x2968U);
+  EXPECT_EQ(decoded.frames[0].id.format, CanFrameFormat::Extended);
+  EXPECT_EQ(decoded.frames[0].type, CanFrameType::Classic);
+  EXPECT_EQ(decoded.frames[0].direction, FrameDirection::Rx);
+  EXPECT_EQ(decoded.frames[0].payload_size, 8U);
+  EXPECT_EQ(decoded.frames[0].payload[0], 0x7DU);
+  EXPECT_EQ(decoded.frames[0].payload[7], 0x00U);
+
+  // A prefix that does not match the following 32-bit ID must not be skipped:
+  // the record then fails to parse and the packet is rejected rather than
+  // misdecoded.
+  packet[7] = 0x00U;
+  // Re-crc the tampered packet so only the prefix mismatch can reject it.
+  std::uint16_t crc16_bad = 0xFFFFU;
+  for (std::size_t index = 7U; index < packet.size(); ++index) {
+    crc16_bad ^= packet[index];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc16_bad = (crc16_bad & 1U) != 0U
+                      ? static_cast<std::uint16_t>((crc16_bad >> 1U) ^ 0x8408U)
+                      : static_cast<std::uint16_t>(crc16_bad >> 1U);
+    }
+  }
+  packet[5] = static_cast<std::uint8_t>(crc16_bad & 0xFFU);
+  packet[6] = static_cast<std::uint8_t>(crc16_bad >> 8U);
+  EXPECT_FALSE(UsbCdcCodec::decode(
+      packet.data(), packet.size(), 1U,
+      *MonotonicTime::from_nanoseconds(20), decoded));
+}
+
 TEST(UsbCdcCodec, RejectsUnknownAndTooOldBoardVersions) {
   EXPECT_FALSE(UsbCdcCodec::supports_version(CdcProtocolVersion{0U, 0U, 0U}));
   EXPECT_FALSE(UsbCdcCodec::supports_version(CdcProtocolVersion{4U, 8U, 7U}));
