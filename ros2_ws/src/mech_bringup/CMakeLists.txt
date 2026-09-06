@@ -20,6 +20,7 @@ add_library(${PROJECT_NAME}
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
   src/ak30_force_runtime.cpp
+  src/ak30_runtime_params.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -76,6 +77,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
+    test/test_ak30_runtime_params.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
