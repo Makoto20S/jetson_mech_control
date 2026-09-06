@@ -61,6 +61,8 @@ install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION bin
 )
 install(DIRECTORY include/ DESTINATION include)
+install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config)
+install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
 install(FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../docs/development/foundation_validation.md
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../docs/development/adapter_contract_v1.md
@@ -79,8 +81,11 @@ if(BUILD_TESTING)
     test/test_ak30_runtime.cpp
     test/test_ak30_runtime_params.cpp
     test/test_ak30_system_integration.cpp
+    test/test_deployment_files.cpp
     test/test_package_marker.cpp
   )
+  target_compile_definitions(${PROJECT_NAME}_test PRIVATE
+    MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
   ament_lint_cmake()
   ament_xmllint()

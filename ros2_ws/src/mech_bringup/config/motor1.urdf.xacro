@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<!-- Single-motor AK3.0 force-control deployment example (Position sub-mode).
+
+     WARNING: launching this URDF against real hardware sends position
+     commands to the motor. Real-device activation is gated by ADR-006
+     (Proposed) and G0-G3 evidence, and every real-motor run needs the
+     owner's explicit per-test authorization per the ADR-006 Decision-7
+     forensic-bench profile. The default parameters below are motor1's
+     bench-evidenced values (drive id 104, zero offset 330.07 deg,
+     direction +1, Kp/Kd = 1.0/1.0, ADR-012 watchdog 4 ms / 6 ms).
+
+     The parameters map one-to-one onto mech_bringup's
+     Ak30RuntimeParams; an unknown or missing key fails configure. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="motor1_ak30">
+  <link name="world"/>
+  <link name="motor1_joint">
+    <visual>
+      <geometry>
+        <cylinder radius="0.03" length="0.10"/>
+      </geometry>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    </visual>
+  </link>
+  <joint name="motor1_joint" type="revolute">
+    <parent link="world"/>
+    <child link="motor1_joint"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-12.56" upper="12.56" effort="15.0" velocity="40.0"/>
+  </joint>
+
+  <ros2_control name="motor1_ak30_system" type="system">
+    <hardware>
+      <plugin>mech_hardware_ros2_control/CompositeSystem</plugin>
+      <param name="device_path">/dev/ttyACM0</param>
+      <param name="logical_bus">1</param>
+      <param name="drive_id">104</param>
+      <param name="kp">1.0</param>
+      <param name="kd">1.0</param>
+      <param name="control_period_ns">2000000</param>
+      <param name="command_ttl_ns">4000000</param>
+      <param name="command_hard_ttl_ns">6000000</param>
+      <param name="feedback_ttl_ns">20000000</param>
+      <param name="zero_offset_rad">5.760604931781636</param>
+      <param name="position_is_output_shaft">true</param>
+    </hardware>
+    <joint name="motor1_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </ros2_control>
+</robot>
