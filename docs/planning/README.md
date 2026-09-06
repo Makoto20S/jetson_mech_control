@@ -2,7 +2,7 @@
 
 > 规划基线：2026-07-28
 > 最近收敛：2026-09-06（PR #9 合并：`mech_protocol_cubemars` AK3.0 力控 codec/session 及真机台架证据进入 `main`；规划状态页同步）
-> 当前状态：Foundation RC2 已打 tag（`v0.1.0-foundation-rc2`）；AK3.0 力控适配器第一切片已合并（PR #9），力控三个子模式均有单电机空载台架闭环证据；ros2_control hardware plugin 接线与 `command_stage()` 生产消费方为下一软件切片；生产激活仍受 ADR-006（Proposed）与 G0–G4 约束
+> 当前状态：Foundation RC2 已打 tag（`v0.1.0-foundation-rc2`）；AK3.0 力控适配器第一切片已合并（PR #9），力控三个子模式均有单电机空载台架闭环证据；**阶段 3 软件切片（ros2_control 接线 + `command_stage()` 生产消费方，Position 子模式）已完成离线实现**；生产激活仍受 ADR-006（Proposed）与 G0–G4 约束
 
 FND-004 已完成，FND-004A 也已通过并完成 tag/主分支保护切换；Foundation RC2 取证（含 FND-015）已于 2026-08-31 收口并打 tag `v0.1.0-foundation-rc2`。当前活动阶段是 **AK3.0 力控适配器**：协议基线 L07（ADR-013），codec/session/探针已随 PR #9 进入 `main`，单电机台架渐进验证（纯力矩 → Kd 阻尼速度 → 零位移位置 → 位置步进）四步全部通过。
 
@@ -41,7 +41,7 @@ ADR-001/002/003/004/005/009/012/013 为 Accepted；[ADR-006](../adr/ADR-006-cond
 | ADR-013 协议基线切换 | 已完成（2026-09-01） | 协议基线由 L02（AK2.0）更正为 L07（AK3.0 V3.2.0）；力控扩展帧为第一实现 profile，伺服扩展帧第二；`ProtocolProfile` 重定义并合入 `main`（PR #7，`718b35a`） |
 | AK3.0 力控适配器第一切片 | **已合并（2026-09-05，PR #9 `f382324`）** | `mech_protocol_cubemars`：wire 编解码、证据门映射层、`DeviceCodec`/`DeviceSession`（分级看门狗分类 + 故障锁存）、`mech_bringup` 探针（torque/velocity/position，`MECH_BUILD_DEVICE_PROBES=ON`）；双格式透传解码（含 FW 4.8.8 3 字节前缀） |
 | 单电机取证台架（ADR-006 Decision 7） | **阶段 2 完成（2026-09-05）** | 渐进验证四步全过：①纯力矩 0.1 N·m effort 回显闭环 → ②Kd 阻尼速度 0.3 rad/s（位移 +0.2°）→ ③hold 零位移位置（位置逐位恒定）→ ④位置步进 +2°/+5°（Kp 误差力矩观测）与 +30° 全程（Kp=1 摩擦稳态误差，物理预期）；`direction_sign=+1.0`、`gear_ratio=8`、B15 输出端速度假设均落实测证据；生产激活仍需 ADR-006 转 Accepted + G0–G3 完整证据 |
-| 下一软件切片 | 待启动 | ros2_control hardware plugin 接线 + deployment 配置 + `command_stage()` 生产消费方（先离线/simulation，再台架）；B14 位置单圈/多圈语义专项与 B4/B9/B14/B15 厂商复核并行 |
+| 阶段 3 软件切片（Position 子模式） | **离线实现完成（2026-09-06，PR 待合并）** | `mech_bringup` 新增 `Ak30ForceControlRuntime`（RuntimePort 接线 `Ak30ForceControlSession`，`command_stage()` 首个生产消费方：Following 提交/Holding 冻结/Expired 在 3 周期预算内显式失败且不合成 0.0）+ `Ak30RuntimeParams`（fail-closed 参数解析）+ deployment 示例（URDF/controllers.yaml/launch，位置控制器 spawner 默认注释）；236 离线测试全绿；Torque/Velocity 命令接口待后续切片（需先行 ADR）；B14 专项与 B4/B9/B14/B15 厂商复核并行 |
 
 如果烟测后需要修复，必须在新 commit 上重新完整执行 FND-004A；里程碑 tag 不得指向未实际通过的 commit。
 
