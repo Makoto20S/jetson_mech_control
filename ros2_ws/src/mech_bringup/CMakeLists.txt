@@ -19,6 +19,7 @@ add_library(${PROJECT_NAME}
   src/package_marker.cpp
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
+  src/ak30_force_runtime.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -30,7 +31,8 @@ ament_target_dependencies(
   mech_control_core
   mech_simulation
   mech_hardware_ros2_control
-  mech_controllers)
+  mech_controllers
+  mech_protocol_cubemars)
 
 # First real-device entry point: drives a motor through the repository's own
 # UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
@@ -73,6 +75,7 @@ if(BUILD_TESTING)
   find_package(ament_cmake_xmllint REQUIRED)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
+    test/test_ak30_runtime.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
