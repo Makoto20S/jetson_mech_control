@@ -78,6 +78,7 @@ if(BUILD_TESTING)
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
     test/test_ak30_runtime_params.cpp
+    test/test_ak30_system_integration.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
