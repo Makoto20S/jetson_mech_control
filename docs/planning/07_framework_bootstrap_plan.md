@@ -1,10 +1,9 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
-> 最近收敛：2026-08-24（FND-010～FND-014、RSP-002 与 INT-001 实现完成；FND-015 RC 验证中）
-> 当前实施入口：本文件
-> 当前状态：FND-000～FND-014、RSP-001/RSP-002 与 INT-001 已完成实现；FND-015 待补齐 ARM64、30 分钟稳定性与 vcan 证据
-> 执行方向：先完成无真实硬件依赖的软件基础框架；电机、IMU 和实机配置在接口稳定后分工接入
+> 最近收敛：2026-09-06（Foundation RC2 完成后本文件转为实施记录；当前活动阶段是 AK3.0 力控适配器，状态见[规划索引](README.md) §3）
+> 当前状态：**FND-000～FND-015、RSP-001/RSP-002 与 INT-001 全部完成**——RC2 取证（Jetson ARM64 clean build/test、sanitizers、30 min 稳定性 10670 runs、首次 vcan 往返）收口于 `9317d76` 并打 tag `v0.1.0-foundation-rc2`；`main` 为六包结构（含 PR #9 合并的 `mech_protocol_cubemars`）
+> 执行方向：Foundation 已收口；后续按 §12 分工进入 AK3.0 力控适配器（第一切片已合并）与 ros2_control hardware plugin 接线
 
 ## 1. 决策结论
 
@@ -35,7 +34,7 @@
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context/ADR 检查脚本已存在 | 先完成 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
 | 目标平台 | 目标 Jetson 已于 2026-08-23 迁移为 Ubuntu 22.04.5 / JetPack 6.2 并装好 ROS 2 Humble；当前主开发工作区为 Ubuntu 22.04 x86_64 | 构建与 vcan 测试在 Ubuntu 22.04 环境执行；ARM64 结论只来自目标 Jetson |
 
-`03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件取代它作为当前 Foundation 阶段的具体执行顺序。
+`03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件保留 Foundation 阶段的执行顺序、核心契约和 Foundation 后的分工方式。**Foundation 已于 2026-08-31 收口**，当前实施入口改为[规划索引](README.md) §3 的 AK3.0 适配器阶段。
 
 ## 3. Foundation v0.1 的成功定义
 
@@ -453,18 +452,17 @@ Foundation API 冻结并打 `v0.1.0-foundation` RC 后再拆分：
 
 权威通用流程是根 [`AGENTS.md`](../../AGENTS.md) 和 [AI 协作 SOP](../development/ai_collaboration_workflow.md)，本节不复制其 project-memory、handoff 和结束检查点规则。Foundation 只补充三个恢复入口：
 
-1. 读 [规划索引](README.md)、本文件、[ADR 索引](../adr/README.md)和当前 GitHub Milestone/Issue；
+1. 读 [规划索引](README.md)、本文件、[ADR 索引](../adr/README.md)、[AK3.0 力控适配器设计](../development/ak30_force_control_adapter_design.md)和当前 GitHub Milestone/Issue；
 2. 核对实际 branch/HEAD/status 与最近验证，不从归档、旧 memory 或旧 handoff 推断当前状态；
-3. 当前以 [Foundation RC 验证清单](../development/foundation_validation.md)为 FND-015 闸门；确认自己位于任务分支而不是受保护 `main` 再编辑。
+3. Foundation 阶段（已收口）的 RC 验证清单见 [foundation_validation.md](../development/foundation_validation.md)；当前编辑必须在任务分支上进行，不直接改受保护 `main`。
 
 ## 16. 立即执行顺序
 
-当前下一步不是写真实设备协议，也不是连接硬件，而是：
+~~当前下一步不是写真实设备协议，也不是连接硬件。~~ **Foundation 已完成（2026-08-31 收口），本节转为历史记录：**
 
-1. FND-000～FND-014、RSP-001/RSP-002 与 INT-001 的实现已在任务分支形成三个语义 commit；
-2. 本机五包 clean build/test（116 tests）和 ASan/UBSan 已通过；该计数包含 Foundation RC 评审后补充的回归测试。
-3. **当前下一步是 FND-015 RC 取证**：在 exact commit 上完成 vcan 软件集成、Jetson ARM64 clean build/test 和 30 分钟模拟稳定性运行；
-4. 通过同一个受保护 PR 合并，不在证据未完整前创建 `v0.1.0-foundation-rc1` tag；
-5. RC 完成后才能开始真实 AK3.0/HI12 adapter，且仍需分别通过 G0～G3。
+1. FND-000～FND-014、RSP-001/RSP-002 与 INT-001 的实现经 PR #3 合并为 `a056492`（RC1 tag），PR #4（`f3012ee`）修复 2026-08-27 RC 全源码评审的全部 22 项发现并产生 ADR-012（PR #5 `2e5879f` 转正）；
+2. FND-015 RC2 取证在 `9317d76` 上完成：Jetson ARM64 clean build/test（116 tests）、ARM64 sanitizers、30 min 稳定性（10670 runs）与首次 vcan 往返，tag `v0.1.0-foundation-rc2`（RC1 保留为含已知缺陷的历史标记 `a056492`）；
+3. ~~当前下一步是 FND-015 RC 取证~~ **已完成**；ADR-013（PR #7 `718b35a`）完成协议基线切换后，AK3.0 力控适配器第一切片已实现并随 PR #9（`f382324`，2026-09-05）合入 `main`，单电机取证台架渐进验证四步通过（ADR-006 Decision 7 边界内）；
+4. **当前下一步**（详见[规划索引](README.md) §3）：ros2_control hardware plugin 接线 + deployment 配置 + `command_stage()` 生产消费方（先离线/simulation）；生产激活仍需 ADR-006 转 Accepted 与 G0～G3 完整证据，任何真实电机命令需逐次授权。
 
-目标机依赖已满足，但仍未授权启用物理 CAN、发送电机命令或操作真实设备。ARM64 验证不得借此启用 CAN；如需安装缺失系统依赖，继续遵守目标机“只 `apt update` + `apt install`、禁止 `apt upgrade`”纪律（升级教程 §12.1）。
+目标机依赖已满足，但未授权启用物理 CAN 前不得发送任何电机命令；ARM64 验证不启用 CAN；目标机继续遵守"只 `apt update` + `apt install`、禁止 `apt upgrade`"纪律（升级教程 §12.1）。
