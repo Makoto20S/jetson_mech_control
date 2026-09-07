@@ -1,6 +1,7 @@
 #include "mech_hardware_ros2_control/composite_system.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <utility>
 
@@ -9,6 +10,28 @@
 
 namespace mech::mech_hardware_ros2_control {
 namespace {
+
+// A joint's single command interface may be any of the three canonical
+// command kinds (ADR-014); the name decides which CanonicalCommand member
+// the exported CommandInterface writes into. This is the complete accepted
+// set - an URDF declaring anything else (or more than one) fails on_init.
+constexpr std::array<const char*, 3U> kCommandInterfaceNames{
+    hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
+    hardware_interface::HW_IF_EFFORT};
+
+[[nodiscard]] bool is_command_interface_name(const std::string& name) noexcept {
+  for (const char* candidate : kCommandInterfaceNames) {
+    if (name == candidate) return true;
+  }
+  return false;
+}
+
+[[nodiscard]] double* command_member(CanonicalCommand& command,
+                                     const std::string& name) noexcept {
+  if (name == hardware_interface::HW_IF_POSITION) return &command.position;
+  if (name == hardware_interface::HW_IF_VELOCITY) return &command.velocity;
+  return &command.effort;
+}
 
 class LoopbackRuntime final : public RuntimePort {
  public:
@@ -32,11 +55,17 @@ class LoopbackRuntime final : public RuntimePort {
   bool read(CanonicalState* states, std::size_t count) noexcept override {
     if (!running_ || states == nullptr || count != states_.size()) return false;
     for (std::size_t index = 0U; index < count; ++index) {
+      // Loopback semantics (ADR-014): the position command ramps toward its
+      // target as before, and velocity/effort commands feed straight through
+      // into the matching state field. A joint exports exactly one command
+      // interface, so at most one of these members is ever non-zero - the
+      // additive form is deterministic and value-independent without the
+      // runtime needing to know which kind each joint declared.
       const auto delta = commands_[index].position - states_[index].position;
       const auto step = std::clamp(delta, -0.01, 0.01);
       states_[index].position += step;
-      states_[index].velocity = step;
-      states_[index].effort = 0.0;
+      states_[index].velocity = step + commands_[index].velocity;
+      states_[index].effort = commands_[index].effort;
       states[index] = states_[index];
     }
     return true;
@@ -55,19 +84,18 @@ class LoopbackRuntime final : public RuntimePort {
 };
 
 bool exactly_interfaces(const hardware_interface::ComponentInfo& joint,
-                        const std::vector<std::string>& expected_state,
-                        const std::vector<std::string>& expected_command) {
-  if (joint.state_interfaces.size() != expected_state.size() ||
-      joint.command_interfaces.size() != expected_command.size()) {
+                        const std::vector<std::string>& expected_state) {
+  if (joint.state_interfaces.size() != expected_state.size()) {
     return false;
   }
   for (std::size_t index = 0U; index < expected_state.size(); ++index) {
     if (joint.state_interfaces[index].name != expected_state[index]) return false;
   }
-  for (std::size_t index = 0U; index < expected_command.size(); ++index) {
-    if (joint.command_interfaces[index].name != expected_command[index]) return false;
-  }
-  return true;
+  // Exactly one command interface whose name is one of the three canonical
+  // kinds (ADR-014); the name's meaning is per-joint configuration, so the
+  // order-sensitive exact list only applies to state interfaces here.
+  return joint.command_interfaces.size() == 1U &&
+         is_command_interface_name(joint.command_interfaces[0].name);
 }
 
 }  // namespace
@@ -89,12 +117,10 @@ bool CompositeSystem::validate_info(
   const std::vector<std::string> state_interfaces{
       hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
       hardware_interface::HW_IF_EFFORT};
-  const std::vector<std::string> command_interfaces{
-      hardware_interface::HW_IF_POSITION};
   for (std::size_t index = 0U; index < info.joints.size(); ++index) {
     const auto& joint = info.joints[index];
     if (joint.name.empty() ||
-        !exactly_interfaces(joint, state_interfaces, command_interfaces)) {
+        !exactly_interfaces(joint, state_interfaces)) {
       return false;
     }
     for (std::size_t previous = 0U; previous < index; ++previous) {
@@ -113,7 +139,13 @@ hardware_interface::CallbackReturn CompositeSystem::on_init(
   }
   joint_names_.clear();
   joint_names_.reserve(info.joints.size());
-  for (const auto& joint : info.joints) joint_names_.push_back(joint.name);
+  joint_command_interface_names_.clear();
+  joint_command_interface_names_.reserve(info.joints.size());
+  for (const auto& joint : info.joints) {
+    joint_names_.push_back(joint.name);
+    joint_command_interface_names_.push_back(
+        joint.command_interfaces[0].name);
+  }
   commands_.assign(info.joints.size(), CanonicalCommand{});
   states_.assign(info.joints.size(), CanonicalState{});
   claimed_.assign(info.joints.size(), false);
@@ -141,8 +173,10 @@ CompositeSystem::export_command_interfaces() {
   std::vector<hardware_interface::CommandInterface> result;
   result.reserve(joint_names_.size());
   for (std::size_t index = 0U; index < joint_names_.size(); ++index) {
-    result.emplace_back(joint_names_[index], hardware_interface::HW_IF_POSITION,
-                        &commands_[index].position);
+    const std::string& interface_name = joint_command_interface_names_[index];
+    result.emplace_back(
+        joint_names_[index], interface_name,
+        command_member(commands_[index], interface_name));
   }
   return result;
 }
@@ -211,10 +245,15 @@ std::optional<std::size_t> CompositeSystem::resolve_joint_index(
   return static_cast<std::size_t>(found - joint_names_.begin());
 }
 
+const std::string& CompositeSystem::joint_command_interface_name(
+    std::size_t index) const noexcept {
+  return joint_command_interface_names_[index];
+}
+
 bool CompositeSystem::known_command_interface(const std::string& name) const noexcept {
   const auto index = resolve_joint_index(name);
   if (!index.has_value()) return false;
-  return name == joint_names_[*index] + "/" + hardware_interface::HW_IF_POSITION;
+  return name == joint_names_[*index] + "/" + joint_command_interface_name(*index);
 }
 
 bool CompositeSystem::validate_switch(
@@ -294,9 +333,12 @@ hardware_interface::return_type CompositeSystem::write(
     const rclcpp::Time&, const rclcpp::Duration&) {
   if (!active_ || fault_latched_) return hardware_interface::return_type::ERROR;
   // Every element of commands_ is handed to runtime_->write() below,
-  // including unclaimed interfaces, so every element must be validated.
+  // including unclaimed interfaces, so every element must be validated -
+  // all three members, because the runtime maps them per sub-mode and a
+  // stale velocity/effort value must not reach the device either.
   for (const auto& command : commands_) {
-    if (!std::isfinite(command.position)) {
+    if (!std::isfinite(command.position) || !std::isfinite(command.velocity) ||
+        !std::isfinite(command.effort)) {
       fault_latched_ = true;
       return hardware_interface::return_type::ERROR;
     }
