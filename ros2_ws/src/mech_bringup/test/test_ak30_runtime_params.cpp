@@ -46,16 +46,60 @@ TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   EXPECT_EQ(parsed->device_path, "/dev/ttyACM0");
 }
 
-// The sub-mode is NOT a parameter: the Position shape is fixed by this slice
-// because that is what CompositeSystem's interface shape exports. Torque/
-// Velocity command interfaces would be a canonical contract change needing
-// an ADR first (adapter_contract_v1.md item 7).
-TEST(Ak30RuntimeParams, SubModeIsAlwaysPosition) {
-  Params params;
-  params["device_path"] = "/dev/ttyACM0";
-  const auto parsed = Ak30RuntimeParams::parse(params);
+// Since ADR-014 the sub-mode is an explicit parameter; the default stays
+// Position so existing deployments parse unchanged. The URDF command
+// interface must match (pinned offline by test_deployment_files.cpp).
+TEST(Ak30RuntimeParams, SubModeDefaultsToPositionAndParsesAllThreeValues) {
+  Params defaults;
+  defaults["device_path"] = "/dev/ttyACM0";
+  const auto parsed = Ak30RuntimeParams::parse(defaults);
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->config.sub_mode, ForceControlSubMode::Position);
+
+  Params velocity;
+  velocity["device_path"] = "/dev/ttyACM0";
+  velocity["sub_mode"] = "velocity";
+  const auto parsed_velocity = Ak30RuntimeParams::parse(velocity);
+  ASSERT_TRUE(parsed_velocity.has_value());
+  EXPECT_EQ(parsed_velocity->config.sub_mode, ForceControlSubMode::Velocity);
+
+  Params torque;
+  torque["device_path"] = "/dev/ttyACM0";
+  torque["sub_mode"] = "torque";
+  const auto parsed_torque = Ak30RuntimeParams::parse(torque);
+  ASSERT_TRUE(parsed_torque.has_value());
+  EXPECT_EQ(parsed_torque->config.sub_mode, ForceControlSubMode::Torque);
+
+  Params explicit_position;
+  explicit_position["device_path"] = "/dev/ttyACM0";
+  explicit_position["sub_mode"] = "position";
+  const auto parsed_position = Ak30RuntimeParams::parse(explicit_position);
+  ASSERT_TRUE(parsed_position.has_value());
+  EXPECT_EQ(parsed_position->config.sub_mode, ForceControlSubMode::Position);
+
+  // Explicit configuration, never guessed: an unrecognized value rejects
+  // the whole config rather than falling back to the default.
+  Params bad;
+  bad["device_path"] = "/dev/ttyACM0";
+  bad["sub_mode"] = "servo";
+  EXPECT_FALSE(Ak30RuntimeParams::parse(bad).has_value());
+
+  Params empty;
+  empty["device_path"] = "/dev/ttyACM0";
+  empty["sub_mode"] = "";
+  EXPECT_FALSE(Ak30RuntimeParams::parse(empty).has_value());
+}
+
+// The command-interface name a deployment's URDF must declare for each
+// sub-mode (ADR-014): the interface shape and the sub-mode are two
+// spellings of the same choice.
+TEST(Ak30RuntimeParams, ExpectedCommandInterfaceNameMatchesSubMode) {
+  EXPECT_STREQ(expected_command_interface_name(ForceControlSubMode::Position),
+               "position");
+  EXPECT_STREQ(expected_command_interface_name(ForceControlSubMode::Velocity),
+               "velocity");
+  EXPECT_STREQ(expected_command_interface_name(ForceControlSubMode::Torque),
+               "effort");
 }
 
 TEST(Ak30RuntimeParams, DefaultsAreTheBenchEvidencedMotor1Values) {

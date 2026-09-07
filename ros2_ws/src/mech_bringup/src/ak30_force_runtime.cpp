@@ -54,6 +54,23 @@ constexpr std::size_t kReceiveBudget = 8U;
   return true;
 }
 
+// The CanonicalCommand member this runtime's sub-mode consumes (ADR-014):
+// CompositeSystem routes the joint's single command interface into one
+// member, and the sub-mode decides which member reaches the device command.
+[[nodiscard]] double consumed_command_value(
+    const Ak30RuntimeConfig& config,
+    const mech_hardware_ros2_control::CanonicalCommand& command) noexcept {
+  switch (config.sub_mode) {
+    case mech::mech_protocol_cubemars::ForceControlSubMode::Velocity:
+      return command.velocity;
+    case mech::mech_protocol_cubemars::ForceControlSubMode::Torque:
+      return command.effort;
+    case mech::mech_protocol_cubemars::ForceControlSubMode::Position:
+      break;
+  }
+  return command.position;
+}
+
 [[nodiscard]] Ak30SessionConfig session_config_from(
     const Ak30RuntimeConfig& config) noexcept {
   Ak30SessionConfig session_config{};
@@ -156,7 +173,11 @@ bool Ak30ForceControlRuntime::write(const CanonicalCommand* commands,
     return false;
   }
   for (std::size_t index = 0; index < count; ++index) {
-    if (!std::isfinite(commands[index].position)) {
+    // Validate the field(s) the sub-mode consumes (ADR-014): a Torque-mode
+    // device reads effort, a Velocity-mode device reads velocity, and a
+    // Position-mode device reads position. The other members stay at their
+    // constructed zeros and are never mapped into the device command.
+    if (!std::isfinite(consumed_command_value(config_, commands[index]))) {
       return false;
     }
   }
@@ -200,7 +221,25 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
   // stage == Following with a fresh command, or the first submit ever (the
   // session's Expired there only means "no command yet").
   mech::mech_control_core::CanonicalDeviceCommand command{};
-  command.position = pending_[0].position;
+  // ADR-014: map only the member the sub-mode consumes into the device
+  // command; the others keep CanonicalDeviceCommand's zeros, so a Torque
+  // device never sees a position/velocity and a Position device never sees
+  // an effort. Velocity forces effort = 0: the wire's effort field rides
+  // along as feedforward t_ff in every sub-mode, and the bench-proven Kd
+  // bound (torque <= Kd * velocity command) only holds without feedforward
+  // - the probe discipline, now enforced by the runtime instead of trusting
+  // the caller.
+  switch (config_.sub_mode) {
+    case mech::mech_protocol_cubemars::ForceControlSubMode::Velocity:
+      command.velocity = pending_[0].velocity;
+      break;
+    case mech::mech_protocol_cubemars::ForceControlSubMode::Torque:
+      command.effort = pending_[0].effort;
+      break;
+    case mech::mech_protocol_cubemars::ForceControlSubMode::Position:
+      command.position = pending_[0].position;
+      break;
+  }
   command.deadline = *MonotonicTime::from_nanoseconds(
       now.nanoseconds() + 2 * config_.control_period_nanoseconds);
   const auto result = session_.submit(command, now);
