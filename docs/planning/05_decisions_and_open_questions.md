@@ -19,6 +19,7 @@
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort` 必须经过物理语义证据闸门；Kt 已按 ADR-013 §4 解除阻塞 |
 | [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | 命令看门狗分级语义（跟随/冻结/失败，整体 ≤3 控制周期）、transport 能力三态上报与 RTR 表达；2026-08-31 转正，仅约束接口语义、不解除设备启用闸门 |
 | [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md) | Accepted | 协议基线由 L02（AK2.0）切换为 L07（AK3.0 V3.2.0），依据驱动板 `AK54-4810-1C-A2` 只出现在 L07；力控提为第一 profile |
+| [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md) | Proposed | CompositeSystem 单命令接口形状（position/velocity/effort）与 AK3.0 子模式命令映射；Velocity 子模式 effort=0 由 runtime 强制；批准前实现不进 `main` |
 
 Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真实 CAN、设备兼容、500 Hz 或物理力矩精度已经验证。任何冲突以 ADR 状态和正文为准。
 

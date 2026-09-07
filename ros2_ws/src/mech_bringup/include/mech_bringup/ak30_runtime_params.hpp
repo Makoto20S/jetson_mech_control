@@ -15,10 +15,11 @@ namespace mech::mech_bringup {
 // or out-of-range value rejects the whole configuration - a deployment with
 // a typo must fail at configure, never run on guessed values.
 //
-// The sub-mode is deliberately not a parameter: this slice is Position-only
-// because that is the interface shape CompositeSystem exports. Torque/
-// Velocity command interfaces would be a canonical contract change requiring
-// an ADR first (adapter_contract_v1.md item 7).
+// Since ADR-014 the sub-mode is an explicit parameter ("position",
+// "velocity", "torque"; default "position"). The deployment's URDF command
+// interface must match it (Position->position, Velocity->velocity,
+// Torque->effort); the deployment-files structure test pins that
+// correspondence offline.
 struct Ak30RuntimeParams final {
   Ak30RuntimeConfig config{};
   std::string device_path;
@@ -27,5 +28,11 @@ struct Ak30RuntimeParams final {
   [[nodiscard]] static std::optional<Ak30RuntimeParams> parse(
       const std::map<std::string, std::string>& params) noexcept;
 };
+
+// The ros2_control command-interface name a joint must declare for the
+// given sub-mode (ADR-014): the interface shape and the sub-mode are two
+// spellings of the same choice, and the deployment files must agree.
+[[nodiscard]] const char* expected_command_interface_name(
+    mech::mech_protocol_cubemars::ForceControlSubMode sub_mode) noexcept;
 
 }  // namespace mech::mech_bringup

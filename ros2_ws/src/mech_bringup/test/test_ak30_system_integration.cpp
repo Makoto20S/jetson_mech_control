@@ -23,7 +23,9 @@
 #include "mech_control_core/time.hpp"
 #include "mech_control_core/transport.hpp"
 #include "mech_hardware_ros2_control/composite_system.hpp"
+#include "mech_protocol_cubemars/ak30_force_session.hpp"
 #include "mech_protocol_cubemars/ak30_force_wire.hpp"
+#include "mech_protocol_cubemars/ak30_mapping.hpp"
 #include "mech_simulation/fake_transport.hpp"
 
 namespace mech::mech_bringup {
@@ -296,6 +298,141 @@ TEST_F(Ak30SystemTest, NonFiniteCommandIsRejectedWithRuntimeAttached) {
   EXPECT_EQ(system_.write(time, period), hardware_interface::return_type::ERROR);
   EXPECT_TRUE(system_.fault_latched());
 }
+
+// ADR-014 end-to-end: a Torque-shaped system (effort command interface,
+// sub_mode=torque) round-trips through CompositeSystem - claim under the
+// effort name, write an effort command, and the frame on the wire carries
+// exactly the recomputed AKE60-8 torque golden. The staged watchdog and
+// the NaN rejection must surface identically, because ADR-014 keeps
+// those semantics sub-mode-independent.
+class Ak30SubModeSystemTest :
+    public Ak30SystemTest,
+    public ::testing::WithParamInterface<
+        std::tuple<mech::mech_protocol_cubemars::ForceControlSubMode,
+                   const char*>> {};
+
+TEST_P(Ak30SubModeSystemTest, RoundTripsThroughTheSubModeCommandInterface) {
+  const auto [sub_mode, command_interface] = GetParam();
+  SCOPED_TRACE(command_interface);
+
+  // Rebuild the system for the parametrized shape: Torque -> effort,
+  // Velocity -> velocity (Position is covered by the fixture's own tests).
+  FakeTransport transport{16U};
+  TestClock clock;
+  CompositeSystem system;
+  Ak30RuntimeConfig config{};
+  config.drive_id = kDriveId;
+  config.logical_bus = kLogicalBus;
+  config.sub_mode = sub_mode;
+  if (sub_mode == mech::mech_protocol_cubemars::ForceControlSubMode::Velocity) {
+    config.gains.kp = 0.0;
+    config.gains.kd = 1.0;
+  } else {
+    config.gains.kp = 1.0;
+    config.gains.kd = 1.0;
+  }
+  config.control_period_nanoseconds = 2000000;
+  ASSERT_TRUE(system.set_runtime(std::make_unique<Ak30ForceControlRuntime>(
+      transport, [&clock]() { return clock.now(); }, config)));
+
+  hardware_interface::HardwareInfo sub_info;
+  sub_info.name = "ak30_system";
+  sub_info.type = "system";
+  sub_info.hardware_class_type = "mech_hardware_ros2_control/CompositeSystem";
+  hardware_interface::ComponentInfo joint;
+  joint.name = "motor1_joint";
+  joint.type = "joint";
+  joint.command_interfaces = {interface(command_interface)};
+  joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
+                            interface(hardware_interface::HW_IF_VELOCITY),
+                            interface(hardware_interface::HW_IF_EFFORT)};
+  sub_info.joints.push_back(std::move(joint));
+  ASSERT_EQ(system.on_init(sub_info), hardware_interface::CallbackReturn::SUCCESS);
+  auto states = system.export_state_interfaces();
+  auto commands = system.export_command_interfaces();
+  ASSERT_EQ(states.size(), 3U);
+  ASSERT_EQ(commands.size(), 1U);
+  EXPECT_EQ(commands[0].get_name(),
+            std::string("motor1_joint/") + command_interface);
+  ASSERT_EQ(system.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  const std::vector<std::string> claim{
+      std::string("motor1_joint/") + command_interface};
+  ASSERT_EQ(system.prepare_command_mode_switch(claim, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(system.perform_command_mode_switch(claim, {}),
+            hardware_interface::return_type::OK);
+
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
+
+  // Cycle 1-2: write the sub-mode's commanded value, read submits it.
+  clock.set(2000000);
+  ASSERT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+  commands[0].set_value(sub_mode ==
+                                mech::mech_protocol_cubemars::
+                                    ForceControlSubMode::Velocity
+                            ? 0.3
+                            : 0.2);
+  EXPECT_EQ(system.write(time, period), hardware_interface::return_type::OK);
+  clock.set(4000000);
+  EXPECT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+  ASSERT_EQ(transport.pending_transmit(), 1U);
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport.take_transmit(sent));
+  EXPECT_EQ(sent.id.value,
+            mech::mech_protocol_cubemars::force_control_can_id(kDriveId));
+  ASSERT_GE(sent.payload_size, 8U);
+
+  // Golden payloads recomputed from the L07 AKE60-8 ranges with the
+  // ((1<<bits)-1) quantization, matching the protocol layer's own tests:
+  // Torque 0.2 N*m -> 00 00 00 7F FF 7F F8 1A;
+  // Velocity kd=1, 0.3 rad/s, effort forced 0 -> 00 03 33 7F FF 80 E7 FF.
+  const std::array<std::uint8_t, 8U>* expected = nullptr;
+  static const std::array<std::uint8_t, 8U> kTorqueGolden{
+      0x00, 0x00, 0x00, 0x7F, 0xFF, 0x7F, 0xF8, 0x1A};
+  static const std::array<std::uint8_t, 8U> kVelocityGolden{
+      0x00, 0x03, 0x33, 0x7F, 0xFF, 0x80, 0xE7, 0xFF};
+  if (sub_mode == mech::mech_protocol_cubemars::ForceControlSubMode::Torque) {
+    expected = &kTorqueGolden;
+  } else {
+    expected = &kVelocityGolden;
+  }
+  for (std::size_t index = 0; index < 8U; ++index) {
+    EXPECT_EQ(sent.payload[index], (*expected)[index]) << "byte " << index;
+  }
+
+  // Feedback decodes into the exported state interfaces; Torque's B4 gate
+  // means position/velocity are zero-filled and only effort is evidenced.
+  ASSERT_EQ(transport.inject_receive(feedback_frame(clock.now().nanoseconds())),
+            TransportResult::Ok);
+  clock.set(6000000);
+  EXPECT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+  if (sub_mode == mech::mech_protocol_cubemars::ForceControlSubMode::Torque) {
+    EXPECT_EQ(states[0].get_value(), 0.0);
+    EXPECT_EQ(states[1].get_value(), 0.0);
+    EXPECT_NEAR(states[2].get_value(), 1.4764, 1e-3);
+  } else {
+    EXPECT_NEAR(states[1].get_value(), 9.3499, 1e-3);
+    EXPECT_NEAR(states[2].get_value(), 1.4764, 1e-3);
+  }
+
+  // Non-finite rejection through the composite path with this runtime.
+  commands[0].set_value(std::nan(""));
+  EXPECT_EQ(system.write(time, period), hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(system.fault_latched());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SubModes, Ak30SubModeSystemTest,
+    ::testing::Values(
+        std::make_tuple(mech::mech_protocol_cubemars::ForceControlSubMode::Torque,
+                        hardware_interface::HW_IF_EFFORT),
+        std::make_tuple(
+            mech::mech_protocol_cubemars::ForceControlSubMode::Velocity,
+            hardware_interface::HW_IF_VELOCITY)));
 
 }  // namespace
 }  // namespace mech::mech_bringup

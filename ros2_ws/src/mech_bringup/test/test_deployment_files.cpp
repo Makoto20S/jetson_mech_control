@@ -23,6 +23,8 @@
 
 #include "mech_bringup/ak30_runtime_params.hpp"
 
+#include "mech_protocol_cubemars/ak30_mapping.hpp"
+
 namespace mech::mech_bringup {
 namespace {
 
@@ -41,74 +43,125 @@ class DeploymentFilesTest : public ::testing::Test {
  protected:
   void SetUp() override {
     const std::string root = MECH_BRINGUP_SOURCE_DIR;
-    urdf_ = read_file(root + "/config/motor1.urdf.xacro");
     controllers_ = read_file(root + "/config/motor1_controllers.yaml");
     launch_ = read_file(root + "/launch/motor1_bringup.launch.py");
-    ASSERT_FALSE(urdf_.empty());
     ASSERT_FALSE(controllers_.empty());
     ASSERT_FALSE(launch_.empty());
+    for (const auto& [name, sub_mode] : urdf_variants()) {
+      const std::string urdf = read_file(root + "/config/" + name);
+      ASSERT_FALSE(urdf.empty()) << name;
+      urdfs_[name] = urdf;
+      variants_.push_back({name, sub_mode});
+    }
   }
 
-  std::string urdf_;
+  // Each deployment variant's URDF and the sub-mode its hardware block
+  // declares. The command interface in the URDF must equal
+  // expected_command_interface_name(sub_mode) - two spellings of the
+  // same choice, checked below (ADR-014).
+  struct Variant {
+    std::string file;
+    mech::mech_protocol_cubemars::ForceControlSubMode sub_mode;
+  };
+
+  std::map<std::string, std::string> urdfs_;
+  std::vector<Variant> variants_;
   std::string controllers_;
   std::string launch_;
+
+  [[nodiscard]] static const std::vector<
+      std::pair<std::string,
+                mech::mech_protocol_cubemars::ForceControlSubMode>>&
+  urdf_variants() {
+    using mech::mech_protocol_cubemars::ForceControlSubMode;
+    static const std::vector<
+        std::pair<std::string, ForceControlSubMode>>
+        variants{
+            {"motor1.urdf.xacro", ForceControlSubMode::Position},
+            {"motor1_torque.urdf.xacro", ForceControlSubMode::Torque},
+            {"motor1_velocity.urdf.xacro", ForceControlSubMode::Velocity},
+        };
+    return variants;
+  }
 };
 
 TEST_F(DeploymentFilesTest, UrdfParamsAreAllKnownToTheParser) {
-  // Extract every <param name="..."> from the ros2_control hardware block.
-  std::set<std::string> names;
-  std::size_t position = 0;
-  while (true) {
-    const auto hit = urdf_.find("<param name=\"", position);
-    if (hit == std::string::npos) {
-      break;
+  for (const auto& [name, urdf] : urdfs_) {
+    SCOPED_TRACE(name);
+    // Extract every <param name="..."> from the ros2_control hardware block.
+    std::set<std::string> names;
+    std::size_t position = 0;
+    while (true) {
+      const auto hit = urdf.find("<param name=\"", position);
+      if (hit == std::string::npos) {
+        break;
+      }
+      const auto start = hit + 13;
+      const auto end = urdf.find('"', start);
+      ASSERT_NE(end, std::string::npos);
+      names.insert(urdf.substr(start, end - start));
+      position = end;
     }
-    const auto start = hit + 13;
-    const auto end = urdf_.find('"', start);
-    ASSERT_NE(end, std::string::npos);
-    names.insert(urdf_.substr(start, end - start));
-    position = end;
-  }
-  ASSERT_FALSE(names.empty());
+    ASSERT_FALSE(names.empty());
 
-  // Round-trip: the URDF's own parameter map must parse cleanly.
-  std::map<std::string, std::string> params;
-  for (const auto& name : names) {
-    const auto tag = "<param name=\"" + name + "\">";
-    const auto value_start = urdf_.find(tag) + tag.size();
-    const auto value_end = urdf_.find("</param>", value_start);
-    ASSERT_NE(value_end, std::string::npos);
-    params[name] = urdf_.substr(value_start, value_end - value_start);
+    // Round-trip: the URDF's own parameter map must parse cleanly.
+    std::map<std::string, std::string> params;
+    for (const auto& param_name : names) {
+      const auto tag = "<param name=\"" + param_name + "\">";
+      const auto value_start = urdf.find(tag) + tag.size();
+      const auto value_end = urdf.find("</param>", value_start);
+      ASSERT_NE(value_end, std::string::npos);
+      params[param_name] = urdf.substr(value_start, value_end - value_start);
+    }
+    const auto parsed = Ak30RuntimeParams::parse(params);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->device_path, "/dev/ttyACM0");
+    EXPECT_EQ(parsed->config.drive_id, 104U);
+    // ADR-012: hard TTL <= 6 ms (<=3 control cycles at 500 Hz) in every
+    // shipped variant.
+    EXPECT_LE(parsed->config.command_hard_ttl_nanoseconds, 6000000);
+    EXPECT_GT(parsed->config.command_ttl_nanoseconds, 0);
+    EXPECT_GT(parsed->config.command_hard_ttl_nanoseconds,
+              parsed->config.command_ttl_nanoseconds);
   }
-  const auto parsed = Ak30RuntimeParams::parse(params);
-  ASSERT_TRUE(parsed.has_value());
-  EXPECT_EQ(parsed->device_path, "/dev/ttyACM0");
-  EXPECT_EQ(parsed->config.drive_id, 104U);
 }
 
-TEST_F(DeploymentFilesTest, UrdfInterfacesMatchCompositeSystemShape) {
-  EXPECT_NE(urdf_.find("<command_interface name=\"position\"/>"),
-            std::string::npos);
-  EXPECT_EQ(urdf_.find("<command_interface name=\"velocity\""),
-            std::string::npos);
-  EXPECT_EQ(urdf_.find("<command_interface name=\"effort\""),
-            std::string::npos);
-  EXPECT_NE(urdf_.find("<state_interface name=\"position\"/>"),
-            std::string::npos);
-  EXPECT_NE(urdf_.find("<state_interface name=\"velocity\"/>"),
-            std::string::npos);
-  EXPECT_NE(urdf_.find("<state_interface name=\"effort\"/>"),
-            std::string::npos);
-}
-
-TEST_F(DeploymentFilesTest, UrdfWatchdogStaysInsideTheAdr012Budget) {
-  const auto ttl = urdf_.find("<param name=\"command_ttl_ns\">4000000");
-  const auto hard = urdf_.find("<param name=\"command_hard_ttl_ns\">6000000");
-  ASSERT_NE(ttl, std::string::npos);
-  ASSERT_NE(hard, std::string::npos);
-  // ADR-012: hard TTL <= 6 ms (<=3 control cycles at 500 Hz).
-  EXPECT_TRUE(urdf_.find("<param name=\"command_hard_ttl_ns\">6000000") <
-              urdf_.find("</hardware>"));
+// The single command interface in each variant's URDF must be exactly the
+// interface its sub_mode requires (ADR-014): Position -> position,
+// Velocity -> velocity, Torque -> effort. States stay [position, velocity,
+// effort] in every variant.
+TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
+  for (const auto& variant : variants_) {
+    SCOPED_TRACE(variant.file);
+    const std::string& urdf = urdfs_[variant.file];
+    const std::string expected_interface =
+        expected_command_interface_name(variant.sub_mode);
+    EXPECT_NE(urdf.find("<command_interface name=\"" + expected_interface +
+                        "\"/>"),
+              std::string::npos);
+    // Exactly one command interface: the three canonical names occur only
+    // once combined (the expected one), and the other two never appear as
+    // command interfaces. <state_interface> lines reuse the same names, so
+    // count command_interface tags specifically.
+    std::size_t command_tags = 0;
+    std::size_t position = 0;
+    while (true) {
+      const auto hit = urdf.find("<command_interface name=\"", position);
+      if (hit == std::string::npos) {
+        break;
+      }
+      ++command_tags;
+      position = urdf.find('>', hit);
+      ASSERT_NE(position, std::string::npos);
+    }
+    EXPECT_EQ(command_tags, 1U);
+    for (const auto& states :
+         {std::string("position"), std::string("velocity"),
+          std::string("effort")}) {
+      EXPECT_NE(urdf.find("<state_interface name=\"" + states + "\"/>"),
+                std::string::npos);
+    }
+  }
 }
 
 TEST_F(DeploymentFilesTest, ControllersYamlUsesTheRegisteredPluginName) {
