@@ -70,3 +70,7 @@ ros2_control 的 hardware component 负责生命周期、资源 claim、`read/up
 - [Foundation 依赖方向与 Issue 顺序](../planning/07_framework_bootstrap_plan.md)，第 4、8.1、9.2、9.4 节。
 - [ros2_control Humble controller manager 文档](https://control.ros.org/humble/doc/ros2_control/controller_manager/doc/userdoc.html)。
 - [FND-004 ADR index](README.md)。
+
+## 2026-09-07 修订记录 / Amendment 2026-09-07
+
+本 ADR 冻结时的复合组件接口形状为「每关节 position 命令接口 + position/velocity/effort 状态接口」。[ADR-014](ADR-014-ak30-submode-command-interfaces.md)（Proposed）将命令接口形状扩展为「每关节恰好一个命令接口，名称 ∈ {position, velocity, effort}」，以支持 AK3.0 力控 Velocity/Torque 子模式经 `RuntimePort` 部署；状态接口形状与第 3 条的检查语义不变。第 1～5 条的组件边界、生命周期与拆分规则不受影响。

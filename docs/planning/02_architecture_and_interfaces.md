@@ -408,6 +408,7 @@ FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort [N*m]` 受物理语义证据闸门约束；demo 与物理精度分开验收 |
 | [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | 命令看门狗分级语义（跟随/冻结/失败）、transport 能力三态上报与远程帧表达；Foundation RC 评审后的追认记录，2026-08-31 复核转 Accepted，仅约束接口语义、不解除设备启用闸门 |
 | [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md) | Accepted | 协议基线由 L02（AK2.0）切换为 L07（AK3.0）；`ProtocolProfile` 重定义为伺服（模式 0–6、15、16）与力控（控制模式 ID 8），两者均为扩展帧；力控为第一实现 profile；`Kt = 0.7382 N·m/A` 经项目负责人担保后解锁 `effort`；配置期固定 profile 的规则保留但理由改为主动选择而非固件限制 |
+| [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md) | Proposed | `CanonicalCommand` 扩展为 position/velocity/effort 三字段；CompositeSystem 每关节恰好一个命令接口（名称 ∈ {position, velocity, effort}，URDF 声明）；AK3.0 部署中接口名必须与 `sub_mode` 匹配（fail-closed）；Velocity 子模式 runtime 强制 effort=0 防前馈叠加；状态接口形状与 ADR-012 看门狗语义不变 |
 
 状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
 
