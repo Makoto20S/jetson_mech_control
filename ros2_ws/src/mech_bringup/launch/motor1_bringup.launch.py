@@ -10,6 +10,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -21,6 +22,12 @@ def generate_launch_description():
             FindPackageShare('mech_bringup'), 'config', 'motor1.urdf.xacro'
         ]),
     ])
+    # ParameterValue(value, value_type=str) keeps launch_ros from trying to
+    # yaml-parse the xacro output - without it, ros2 launch fails with
+    # "Unable to parse the value of parameter robot_description as yaml".
+    # Found on the bench: the first broadcaster-only run (2026-09-08) could
+    # not start until this wrapper was applied.
+    robot_description = ParameterValue(robot_description_content, value_type=str)
 
     controllers_file = PathJoinSubstitution([
         FindPackageShare('mech_bringup'), 'config', 'motor1_controllers.yaml'
@@ -38,12 +45,12 @@ def generate_launch_description():
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
-            parameters=[{'robot_description': robot_description_content}],
+            parameters=[{'robot_description': robot_description}],
         ),
         Node(
             package='controller_manager',
             executable='ros2_control_node',
-            parameters=[robot_description_content, controllers_file],
+            parameters=[{'robot_description': robot_description}, controllers_file],
             output='both',
         ),
         Node(
