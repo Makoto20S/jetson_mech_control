@@ -8,6 +8,9 @@
 //   carry any);
 // - the URDF's interface set must be exactly what CompositeSystem validates
 //   (position command + position/velocity/effort states);
+// - the URDF's hardware plugin must be the Ak30System composition point
+//   (mech_bringup/Ak30System), not the bare CompositeSystem (which would
+//   silently run the loopback runtime against real-hardware parameters);
 // - the YAML controller type must be the registered plugin name;
 // - the URDF's watchdog parameters must satisfy the ADR-012 budget.
 
@@ -161,6 +164,20 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
       EXPECT_NE(urdf.find("<state_interface name=\"" + states + "\"/>"),
                 std::string::npos);
     }
+  }
+}
+
+// The hardware plugin in every variant must be the Ak30System composition
+// point: pluginlib-constructing the bare CompositeSystem would run its
+// built-in loopback runtime, which is not a real-device bring-up shape.
+TEST_F(DeploymentFilesTest, UrdfUsesAk30SystemCompositionPlugin) {
+  for (const auto& [name, urdf] : urdfs_) {
+    SCOPED_TRACE(name);
+    EXPECT_NE(urdf.find("<plugin>mech_bringup/Ak30System</plugin>"),
+              std::string::npos);
+    EXPECT_EQ(urdf.find("<plugin>mech_hardware_ros2_control/CompositeSystem"
+                        "</plugin>"),
+              std::string::npos);
   }
 }
 

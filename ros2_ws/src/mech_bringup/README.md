@@ -1,8 +1,10 @@
 # mech_bringup
 
 Deployment composition boundary: bring-up harnesses, device probes, and the
-AK3.0 force-control runtime wiring that connects `mech_protocol_cubemars` to
-`mech_hardware_ros2_control`'s `CompositeSystem`.
+AK3.0 force-control runtime wiring. The `Ak30System` plugin
+(`mech_bringup/Ak30System`) is the production composition point that connects
+`mech_protocol_cubemars` to `mech_hardware_ros2_control`'s `CompositeSystem`;
+all three deployment xacro examples load it.
 
 ## Components
 
@@ -15,6 +17,12 @@ AK3.0 force-control runtime wiring that connects `mech_protocol_cubemars` to
   [ADR-014](../../../docs/adr/ADR-014-ak30-submode-command-interfaces.md)
   it maps commands per sub-mode (Position reads position, Velocity reads
   velocity with effort forced to 0, Torque reads effort).
+- **`Ak30System`** — the production composition point as a pluginlib
+  plugin (`mech_bringup/Ak30System`): it injects the serial→transport→runtime
+  chain (`PosixCdcSerialPort` -> `UsbCdcTransport` ->
+  `Ak30ForceControlRuntime`) into `CompositeSystem`, and `on_configure` is
+  the first device I/O (transport open plus the 0x12 pass-through init). The
+  three deployment xacro examples point at it.
 - **`Ak30RuntimeParams`** — fail-closed parsing of the URDF `ros2_control`
   hardware parameters into the runtime config. `device_path` is mandatory;
   unknown keys, non-numeric values, and over-budget TTLs reject configure.
