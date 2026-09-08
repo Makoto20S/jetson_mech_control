@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-08
 - **Branch / PR:** `feat/ak30-bench-composition`（已创建，基于 PR #12 分支 @ `649ed1f`），未来开 **PR #13**，base = `feat/ak30-torque-velocity-command-interfaces`（stacked 链 #11→#12→#13，合并顺序严格同序，每层合并后 `gh pr edit <n> --base <下一层>` 重定向）。
-- **Status:** 计划已获 owner 批准（2026-09-08 plan mode）；实施未开始——交接给下一个 AI 执行。
+- **Status:** 计划已获 owner 批准（2026-09-08 plan mode）；**实施完成（2026-09-08 同日，Commits 2-5 全部落地，见文末 Deviations）**。
 - **Goal:** 补上 2026-09-07 调查确认的缺口：launch → 真机之间没有生产组合点。交付 pluginlib 可加载的组合插件，使 `ros2 launch mech_bringup motor1_bringup.launch.py`（broadcaster-only）能收到真电机 50 Hz 反馈。**全部离线验证；真机首跑是下一任务，需 owner 逐次授权 + 到场。**
 
 ## Owner 语境（实施前必读）
@@ -84,3 +84,15 @@ plan doc Deviations 填写实际执行偏差；`architecture_package_map.md` §5
 - 析构顺序：派生类成员（serial/transport）先析构、基类 runtime 后析构——确保 stop 路径后 runtime 不再触碰 transport（现状满足：read/write 都有 started_ 守卫；写测试时用 ASan 复核）。
 - pluginlib 宏的 include 路径是 `pluginlib/class_list_macros.hpp`（Humble）。
 - 0x12 帧的 CRC **不要重算**——用上文金帧字面值（重算一次踩过坑：09-07 会话的 0.2 N·m 金帧手算 nibble 装包出错，靠逐字节测试拦下）。
+
+## Deviations（实施期发现与计划的事实失配/偏差，2026-09-08）
+
+实施时逐条核实了「已核实的事实基础」，以下偏差全部是执行层面的发现，未推翻任何设计决策：
+
+1. **0x12 金帧的来源重构（偏离计划的 PosixCdcSerialPort::send_pass_through_init 调用路径）。** 计划让插件调用 `serial_->send_pass_through_init()`，但该方法在 `PosixCdcSerialPort` 上、`CdcSerialPort` 接口上没有——工厂返回接口指针，插件拿不到具体类型。修复：金帧提升为共享字面值 `pass_through_init.hpp` 的 `kPassThroughInitFrame` + 自由函数 `send_pass_through_init(CdcSerialPort&)`；`PosixCdcSerialPort::send_pass_through_init()` 改为委托它（删除了运行期 CRC 重算，字面值先经独立 python 复现逐字节核对一致）。这同时消除了一个隐患：原实现每次调用都重算 CRC，与「勿重算金帧」纪律相悖。
+2. **`std::function` 工厂不能捕获 `unique_ptr`（move-only 不可拷贝）。** 第一版测试工厂 lambda move 捕获 `unique_ptr<FakeSerial>`，`std::function` 要求可拷贝目标，编译失败。改为 `shared_ptr`（插件持有 `shared_ptr<CdcSerialPort>`），语义不变——插件每个 on_init 生命周期仍只持有一个串口。
+3. **串口/transport 对象必须在 on_init 构造、on_configure 只做 I/O（比计划更精确的生命周期分配）。** 计划写「on_configure 经工厂构造串口→transport」，但 runtime 构造签名借用 `Transport&`，若 transport 在 on_configure 才构造，on_init 注入的 runtime 引用将悬垂（实现第一版正是在这里 segfault，被插件测试当场拦下）。修正为：on_init 完成纯对象构造（PosixCdcSerialPort 构造只存路径、UsbCdcTransport 构造只存引用+能力，均不碰设备），整个硬件生命周期内地址稳定；on_configure 才发生第一次设备 I/O（open + 0x12 init），与 ros2_control「INACTIVE=通信已开始」语义和探针顺序一致。
+4. **mech_bringup 转 SHARED 引发全仓 PIC 联动。** 计划指出「CMake 两个硬阻塞」（非 SHARED + 缺 pluginlib export），但未预见：静态链接下游五包的 `libmech_bringup.so` 需要 PIC，而 `mech_control_core` 等全部是默认静态库。修复：`tools/ci/build_workspace.sh` 与 `run_sanitizers.sh` 增加 `-DBUILD_SHARED_LIBS=ON`（全部六包转为共享库；gtest 目标链接同一批对象，不受影响——254 tests 0 failures）。Docker CI 走 build_workspace.sh，自动继承。
+5. **pluginlib 离线加载验证的 ClassLoader 构造参数易错（计划外补充验证）。** 用独立程序验证 ament 索引注册时，`ClassLoader` 第一参数必须是基类包名 `hardware_interface`（第三参数 attrib_name 默认 `plugin`）；最初传 `mech_bringup` 导致 0 声明类的假阴性。修正后：声明类含 `mech_bringup/Ak30System` 且 `createSharedInstance` 成功——注册链端到端验证（未写入测试，属一次性验证，事实记录于此与 commit message）。
+6. **on_cleanup 在 active 状态会被基类拒绝（测试预期修正，非实现缺陷）。** `CompositeSystem::on_cleanup` 有 `if (active_) return ERROR` 守卫，Reactivation 测试按计划草案直接 cleanup 而未先 deactivate，返回 ERROR 而非 SUCCESS。测试改为标准生命周期路径（deactivate→cleanup）——这是基类已测试语义的正确行为，不是 bug。
+7. **执行偏差（流程）**：Commit 2 的 CMake 测试源列表编辑与 Commit 3 的测试文件分开提交时顺序颠倒（列表先行、文件后到），已在提交信息中说明；无功能影响。
