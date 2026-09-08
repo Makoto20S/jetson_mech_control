@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<library path="mech_bringup">
+  <class name="mech_bringup/Ak30System"
+         type="mech::mech_bringup::Ak30System"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>Production composition point wiring the AK3.0 force-control
+    runtime chain (PosixCdcSerialPort, UsbCdcTransport, Ak30ForceControlRuntime)
+    into the composite SystemInterface.</description>
+  </class>
+</library>

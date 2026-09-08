@@ -6,6 +6,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "mech_bringup/pass_through_init.hpp"
+
 namespace mech::mech_bringup {
 namespace {
 
@@ -110,48 +112,7 @@ bool PosixCdcSerialPort::send_pass_through_init() noexcept {
   if (fd_ < 0) {
     return false;
   }
-  // MODE_FDCAN_PASS payload: six zero bytes (bus id, flags, send_flag...).
-  // The CRCs are computed over the payload exactly as UsbCdcCodec does.
-  constexpr std::uint8_t kCommand = 0x12U;
-  std::array<std::uint8_t, 6U> payload{};
-  std::array<std::uint8_t, 13U> packet{};
-  packet[0] = mech_control_core::UsbCdcCodec::kHeader;
-  packet[1] = kCommand;
-  packet[2] = static_cast<std::uint8_t>(payload.size() & 0xFFU);
-  packet[3] = static_cast<std::uint8_t>(payload.size() >> 8U);
-  // crc8 over cmd+len, crc16 over the payload - same algorithm as the codec.
-  std::uint8_t crc8 = 0xFFU;
-  for (std::size_t index = 1U; index < 4U; ++index) {
-    crc8 ^= packet[index];
-    for (int bit = 0; bit < 8; ++bit) {
-      crc8 = (crc8 & 1U) != 0U
-                 ? static_cast<std::uint8_t>((crc8 >> 1U) ^ 0x8CU)
-                 : static_cast<std::uint8_t>(crc8 >> 1U);
-    }
-  }
-  packet[4] = crc8;
-  std::uint16_t crc16 = 0xFFFFU;
-  for (const auto byte : payload) {
-    crc16 ^= byte;
-    for (int bit = 0; bit < 8; ++bit) {
-      crc16 = (crc16 & 1U) != 0U
-                  ? static_cast<std::uint16_t>((crc16 >> 1U) ^ 0x8408U)
-                  : static_cast<std::uint16_t>(crc16 >> 1U);
-    }
-  }
-  packet[5] = static_cast<std::uint8_t>(crc16 & 0xFFU);
-  packet[6] = static_cast<std::uint8_t>(crc16 >> 8U);
-  for (std::size_t index = 0U; index < payload.size(); ++index) {
-    packet[7U + index] = payload[index];
-  }
-  mech_control_core::TransportResult result;
-  std::size_t attempts = 0U;
-  do {
-    result = write_all(packet.data(), packet.size());
-    ++attempts;
-  } while (result == mech_control_core::TransportResult::WouldBlock &&
-           attempts < 100U);
-  return result == mech_control_core::TransportResult::Ok;
+  return mech::mech_bringup::send_pass_through_init(*this);
 }
 
 }  // namespace mech::mech_bringup

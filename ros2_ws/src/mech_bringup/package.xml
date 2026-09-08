@@ -11,10 +11,13 @@
   <depend>mech_hardware_ros2_control</depend>
   <depend>mech_controllers</depend>
   <depend>mech_protocol_cubemars</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_lint_cmake</test_depend>
   <test_depend>ament_cmake_xmllint</test_depend>
   <export>
     <build_type>ament_cmake</build_type>
+    <hardware_interface plugin="${prefix}/mech_bringup_plugins.xml"/>
   </export>
 </package>

@@ -14,13 +14,19 @@ find_package(mech_simulation REQUIRED)
 find_package(mech_hardware_ros2_control REQUIRED)
 find_package(mech_controllers REQUIRED)
 find_package(mech_protocol_cubemars REQUIRED)
+find_package(hardware_interface REQUIRED)
+find_package(pluginlib REQUIRED)
 
-add_library(${PROJECT_NAME}
+# SHARED is required for the pluginlib-loaded Ak30System: pluginlib dlopens
+# the library by name, which cannot work against a static archive.
+add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
   src/ak30_force_runtime.cpp
   src/ak30_runtime_params.cpp
+  src/pass_through_init.cpp
+  src/ak30_system.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -33,7 +39,12 @@ ament_target_dependencies(
   mech_simulation
   mech_hardware_ros2_control
   mech_controllers
-  mech_protocol_cubemars)
+  mech_protocol_cubemars
+  hardware_interface
+  pluginlib)
+
+pluginlib_export_plugin_description_file(
+  hardware_interface mech_bringup_plugins.xml)
 
 # First real-device entry point: drives a motor through the repository's own
 # UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
@@ -81,6 +92,7 @@ if(BUILD_TESTING)
     test/test_ak30_runtime.cpp
     test/test_ak30_runtime_params.cpp
     test/test_ak30_system_integration.cpp
+    test/test_ak30_system_plugin.cpp
     test/test_deployment_files.cpp
     test/test_package_marker.cpp
   )

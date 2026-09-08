@@ -30,7 +30,7 @@
 
   <ros2_control name="motor1_ak30_system" type="system">
     <hardware>
-      <plugin>mech_hardware_ros2_control/CompositeSystem</plugin>
+      <plugin>mech_bringup/Ak30System</plugin>
       <param name="device_path">/dev/ttyACM0</param>
       <param name="logical_bus">1</param>
       <param name="drive_id">104</param>
