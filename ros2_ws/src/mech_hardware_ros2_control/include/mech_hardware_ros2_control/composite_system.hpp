@@ -36,7 +36,13 @@ class RuntimePort {
                                    std::size_t count) noexcept = 0;
 };
 
-class CompositeSystem final : public hardware_interface::SystemInterface {
+// Subclassable since the composition-point slice (PR #13): mech_bringup's
+// Ak30System inherits the tested lifecycle/claim/switch/watchdog machinery
+// and injects a production runtime via set_runtime before on_init. This is a
+// composition point, not a brand branch - the brand stays confined to
+// mech_protocol_* and mech_bringup (AdapterContract item 1; see
+// docs/development/architecture_package_map.md section 6 for the checks).
+class CompositeSystem : public hardware_interface::SystemInterface {
  public:
   CompositeSystem();
 
