@@ -61,6 +61,28 @@ hardware_interface::CallbackReturn Ak30System::on_init(
   if (!parsed.has_value()) {
     return hardware_interface::CallbackReturn::ERROR;
   }
+
+  // ADR-014 Decision 3: the sub-mode and the URDF command interface name are
+  // two spellings of the same choice, so disagreeing spellings are a
+  // deployment error rather than a preference to reconcile. The base
+  // CompositeSystem checks the shape but is deliberately vendor-neutral - it
+  // accepts any one of the three canonical names and knows nothing about
+  // sub_mode - so the correspondence can only be enforced here, where the
+  // parameter is known.
+  //
+  // This sits ahead of the transport chain below because everything that
+  // reaches the device hangs off the serial port: refusing before the port is
+  // acquired is the earliest point at which a mismatched deployment can be
+  // rejected with nothing transmitted, and it keeps the rejection independent
+  // of whether the base happens to catch the same shape later.
+  const char* const expected_command_interface =
+      expected_command_interface_name(parsed->config.sub_mode);
+  for (const auto& joint : info.joints) {
+    if (joint.command_interfaces.size() != 1U ||
+        joint.command_interfaces[0].name != expected_command_interface) {
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+  }
   device_path_ = parsed->device_path;
 
   if (!serial_factory_) {

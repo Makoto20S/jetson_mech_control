@@ -13,7 +13,9 @@
 //   the codec, decoding into the exported state interfaces;
 // - the default factory's fail-closed behaviour on a nonexistent device
 //   (PosixCdcSerialPort::open returns false; on_configure must ERROR, not
-//   hang).
+//   hang);
+// - ADR-014 Decision 3's sub-mode/command-interface correspondence, enforced
+//   at on_init before a serial port is ever asked for.
 
 #include "mech_bringup/ak30_system.hpp"
 
@@ -99,6 +101,27 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
           {"position_is_output_shaft", "true"}};
 }
 
+// The same deployment shape with the joint's command interfaces replaced, so
+// a test can state exactly which interface names the URDF declares - the
+// half of ADR-014 Decision 3 that lives in the URDF rather than in sub_mode.
+[[nodiscard]] hardware_interface::HardwareInfo hardware_info(
+    const std::map<std::string, std::string>& params,
+    const std::vector<std::string>& command_interface_names) {
+  auto info = position_hardware_info(params);
+  info.joints[0].command_interfaces.clear();
+  for (const auto& name : command_interface_names) {
+    info.joints[0].command_interfaces.push_back(interface(name));
+  }
+  return info;
+}
+
+[[nodiscard]] std::map<std::string, std::string> params_with_sub_mode(
+    const std::string& sub_mode) {
+  auto params = valid_params();
+  params["sub_mode"] = sub_mode;
+  return params;
+}
+
 // Feedback payload 90.0 deg / 10000 ERPM / 2.0 A / 40 C / no fault - the
 // same fixture payload as test_ak30_system_integration.cpp, wrapped in the
 // on-wire CDC packet the 4.8.8 firmware actually emits (each 0x12 reply
@@ -167,11 +190,17 @@ class Ak30SystemPluginTest : public ::testing::Test {
   // plugin only ever asks for the device path its parameters named. shared_ptr
   // because the factory must be copy-constructible (std::function); the test
   // keeps its own reference for inject_rx/take_tx assertions.
+  //
+  // The factory also counts how many times it was asked. That count is the
+  // observable for "reject before any device I/O": a rejected configuration
+  // must not even acquire a port, which is a strictly stronger statement than
+  // an empty TX buffer.
   void use_fake_serial() {
     auto serial = std::make_shared<FakeSerial>(4096U);
     serial_ = serial.get();
     system_.set_serial_port_factory_for_testing(
-        [owned = std::move(serial)](const std::string& device_path) {
+        [this, owned = std::move(serial)](const std::string& device_path) {
+          ++serial_requests_;
           EXPECT_EQ(device_path, "/dev/ttyACM0");
           return std::shared_ptr<mech::mech_control_core::CdcSerialPort>(
               std::move(owned));
@@ -179,6 +208,7 @@ class Ak30SystemPluginTest : public ::testing::Test {
   }
 
   FakeSerial* serial_{nullptr};
+  int serial_requests_{0};
   Ak30System system_;
 };
 
@@ -328,6 +358,136 @@ TEST_F(Ak30SystemPluginTest, DefaultFactoryFailsClosedOnMissingDevice) {
             hardware_interface::CallbackReturn::SUCCESS);
   EXPECT_EQ(system_.on_configure(lifecycle_state()),
             hardware_interface::CallbackReturn::ERROR);
+}
+
+// ADR-014 Decision 3: the sub-mode and the URDF command interface name are
+// two spellings of the same choice, so disagreeing spellings are a deployment
+// error, not a preference to reconcile. The base CompositeSystem cannot catch
+// this - it is deliberately vendor-neutral and accepts any one of the three
+// canonical names - so the correspondence has to be enforced here, where the
+// sub-mode parameter is known.
+//
+// Why it matters on the wire: the AK3.0 force-control frame carries a fixed
+// 8-byte payload whose fields are interpreted by sub-mode. A torque-mode
+// device fed a position command interface would take the number a controller
+// wrote as a torque, silently, with no field left to complain about.
+TEST_F(Ak30SystemPluginTest, SubModeMismatchRejectsOnInit) {
+  struct Mismatch {
+    const char* sub_mode;
+    const char* declared_interface;
+  };
+  constexpr std::array<Mismatch, 3U> kMismatches{
+      Mismatch{"torque", hardware_interface::HW_IF_POSITION},
+      Mismatch{"velocity", hardware_interface::HW_IF_EFFORT},
+      Mismatch{"position", hardware_interface::HW_IF_VELOCITY}};
+
+  for (const auto& mismatch : kMismatches) {
+    SCOPED_TRACE(std::string("sub_mode=") + mismatch.sub_mode +
+                 " interface=" + mismatch.declared_interface);
+    Ak30System system;
+    EXPECT_EQ(system.on_init(hardware_info(params_with_sub_mode(
+                                               mismatch.sub_mode),
+                                           {mismatch.declared_interface})),
+              hardware_interface::CallbackReturn::ERROR);
+  }
+}
+
+// The ordering half of the same contract. Every shape the plugin refuses must
+// be refused before the serial port is acquired - the transport chain, the
+// pass-through init and the session activate all hang off that port, so "no
+// port was requested" is the earliest and strictest place to stand.
+//
+// The two interface-count shapes already return ERROR without this, but only
+// after the factory has run, which is the gap this pins.
+TEST_F(Ak30SystemPluginTest, RejectedShapeNeverRequestsASerialPort) {
+  struct Rejected {
+    const char* description;
+    const char* sub_mode;
+    std::vector<std::string> declared_interfaces;
+  };
+  const std::array<Rejected, 4U> kRejected{
+      Rejected{"sub-mode mismatch", "torque",
+               {hardware_interface::HW_IF_POSITION}},
+      Rejected{"no command interface", "position", {}},
+      Rejected{"two command interfaces",
+               "position",
+               {hardware_interface::HW_IF_POSITION,
+                hardware_interface::HW_IF_EFFORT}},
+      Rejected{"unknown interface name", "position", {"temperature"}}};
+
+  for (const auto& rejected : kRejected) {
+    SCOPED_TRACE(rejected.description);
+    Ak30System system;
+    auto serial = std::make_shared<FakeSerial>(4096U);
+    FakeSerial* observed = serial.get();
+    int requests = 0;
+    system.set_serial_port_factory_for_testing(
+        [&requests, owned = std::move(serial)](const std::string&) {
+          ++requests;
+          return std::shared_ptr<mech::mech_control_core::CdcSerialPort>(owned);
+        });
+
+    // EXPECT, not ASSERT: each row is an independent shape, and a row that
+    // wrongly returns SUCCESS must not hide the port-acquisition check for
+    // the rows after it.
+    EXPECT_EQ(system.on_init(hardware_info(
+                  params_with_sub_mode(rejected.sub_mode),
+                  rejected.declared_interfaces)),
+              hardware_interface::CallbackReturn::ERROR);
+    EXPECT_EQ(requests, 0);
+    EXPECT_TRUE(observed->take_tx().empty());
+  }
+}
+
+// Guard against the fail-closed check over-reaching: each sub-mode's own
+// interface name must still be accepted. A mismatch check that rejected
+// everything would pass the tests above and break every real deployment.
+TEST_F(Ak30SystemPluginTest, MatchingSubModeAndInterfaceAreAccepted) {
+  struct Match {
+    const char* sub_mode;
+    const char* declared_interface;
+  };
+  constexpr std::array<Match, 3U> kMatches{
+      Match{"position", hardware_interface::HW_IF_POSITION},
+      Match{"velocity", hardware_interface::HW_IF_VELOCITY},
+      Match{"torque", hardware_interface::HW_IF_EFFORT}};
+
+  for (const auto& match : kMatches) {
+    SCOPED_TRACE(std::string("sub_mode=") + match.sub_mode);
+    Ak30System system;
+    auto serial = std::make_shared<FakeSerial>(4096U);
+    system.set_serial_port_factory_for_testing(
+        [owned = serial](const std::string&) {
+          return std::shared_ptr<mech::mech_control_core::CdcSerialPort>(owned);
+        });
+    EXPECT_EQ(system.on_init(hardware_info(
+                  params_with_sub_mode(match.sub_mode),
+                  {match.declared_interface})),
+              hardware_interface::CallbackReturn::SUCCESS);
+  }
+}
+
+// An omitted sub_mode means Position (ak30_runtime_params.hpp), so the
+// default deployment shape keeps working without stating the parameter.
+TEST_F(Ak30SystemPluginTest, OmittedSubModeDefaultsToPositionAndAccepts) {
+  use_fake_serial();
+  EXPECT_EQ(system_.on_init(hardware_info(
+                valid_params(), {hardware_interface::HW_IF_POSITION})),
+            hardware_interface::CallbackReturn::SUCCESS);
+}
+
+// Regression guard, not a new behaviour: Ak30RuntimeParams::parse already
+// rejects an unknown sub_mode rather than defaulting. Pinned here because the
+// mismatch check above makes "just fall back to position" an attractive
+// simplification, and that fallback would silently run a device in the wrong
+// mode. Asserted at the plugin boundary where the damage would happen.
+TEST_F(Ak30SystemPluginTest, UnknownSubModeIsRejectedRatherThanDefaulted) {
+  use_fake_serial();
+  EXPECT_EQ(system_.on_init(hardware_info(
+                params_with_sub_mode("servo"),
+                {hardware_interface::HW_IF_POSITION})),
+            hardware_interface::CallbackReturn::ERROR);
+  EXPECT_EQ(serial_requests_, 0);
 }
 
 }  // namespace
