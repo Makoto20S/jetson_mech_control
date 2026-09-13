@@ -95,6 +95,13 @@ class Ak30ForceControlRuntime final
   Ak30RuntimeConfig config_;
   mech::mech_protocol_cubemars::Ak30ForceControlSession session_;
   std::vector<mech_hardware_ros2_control::CanonicalCommand> pending_;
+  // The pending command's validity window, minted once in write() from the
+  // time the command was received - never re-derived on a retry. ADR-012
+  // budgets the whole staged watchdog at <=3 control cycles, and recomputing
+  // this per attempt turns transport backpressure into an unbounded extension
+  // that lets a milliseconds-stale target reach the motor. Only meaningful
+  // while have_pending_ is true.
+  mech::mech_control_core::MonotonicTime pending_deadline_{};
   std::size_t resource_count_{0U};
   bool configured_{false};
   bool started_{false};

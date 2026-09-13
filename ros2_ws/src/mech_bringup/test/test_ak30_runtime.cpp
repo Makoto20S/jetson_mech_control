@@ -187,7 +187,7 @@ TEST_F(Ak30RuntimeTest, FollowingSubmitsWrittenCommand) {
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
   EXPECT_TRUE(write_authorized(*runtime_, command));
 
-  clock_.set(4000000);  // next cycle
+  clock_.set(2000000);  // next cycle: one control period after the write
   mech_hardware_ros2_control::CanonicalState states[1] = {};
   EXPECT_TRUE(runtime_->read(states, 1U));
   ASSERT_EQ(transport_->pending_transmit(), 1U);
@@ -205,7 +205,7 @@ TEST_F(Ak30RuntimeTest, ReadDecodesFeedbackIntoStates) {
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
   EXPECT_TRUE(write_authorized(*runtime_, command));
 
-  clock_.set(4000000);
+  clock_.set(2000000);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
   EXPECT_TRUE(runtime_->read(states, 1U));
 
@@ -300,8 +300,97 @@ TEST_F(Ak30RuntimeTest, WouldBlockRetriesAndDoesNotFault) {
   EXPECT_TRUE(runtime_->read(states, 1U));  // not a fault
   EXPECT_EQ(transport_->pending_transmit(), 0U);
 
-  // Next cycle retries and succeeds.
+  // Next cycle retries and succeeds. The retry has to land strictly inside the
+  // command's own deadline - written at t=0, so it expires at t=4 ms (two
+  // control periods). Before the deadline was made immutable this read could
+  // sit anywhere, because every retry minted a fresh two-period window.
+  clock_.set(3000000);
+  EXPECT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 1U);
+}
+
+// ADR-012's budget is the whole staged watchdog inside <=3 control cycles, so
+// a command's validity window cannot be re-derived from the current time on
+// every retry - that turns backpressure into an unbounded extension and lets a
+// target that is milliseconds stale reach the motor. The window is minted once,
+// when the controller's command is received.
+TEST_F(Ak30RuntimeTest, BackpressureDoesNotExtendTheCommandDeadline) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  // Written at t=0: valid until t=4 ms.
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  transport_->force_next_send_results(
+      {TransportResult::WouldBlock, TransportResult::WouldBlock,
+       TransportResult::WouldBlock});
+  for (const std::int64_t at_nanoseconds : {1000000, 2000000, 3000000}) {
+    clock_.set(at_nanoseconds);
+    EXPECT_TRUE(runtime_->read(states, 1U)) << "at " << at_nanoseconds;
+    EXPECT_EQ(transport_->pending_transmit(), 0U) << "at " << at_nanoseconds;
+  }
+
+  // The transport is healthy again, but the command is past its deadline. The
+  // opportunity to send must not be taken: this frame would carry a target the
+  // controller produced 5 ms ago.
+  clock_.set(5000000);
+  EXPECT_FALSE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+// The deadline binds the first submission too. "Nothing has been sent yet"
+// is not a reason to keep an aged command alive - that is the loophole
+// submitted_once_ would open if the expiry check sat behind it.
+TEST_F(Ak30RuntimeTest, FirstSubmissionIsAlsoBoundByTheCommandDeadline) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+
+  // No transport failure at all - simply nobody read until after the window.
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
   clock_.set(4000000);
+  EXPECT_FALSE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+// ADR-012's Holding stage means "do not RE-send the frozen command", not "do
+// not send anything". The two are easy to conflate because the session reports
+// the stage from the age of its last ACCEPTED command - a property of the past,
+// not of the command currently in hand. Conflating them drops genuinely new
+// commands: a controller that resumes after a gap, or a joint re-claimed by a
+// different controller, has its first command silently swallowed for the width
+// of the Holding window.
+TEST_F(Ak30RuntimeTest, FreshCommandDuringHoldingIsStillSubmitted) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+
+  const mech_hardware_ros2_control::CanonicalCommand first{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, first));
+  clock_.set(2000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport_->take_transmit(sent));
+
+  // Nobody refreshes: at t=6.000001 ms the last accepted command is past the
+  // 4 ms soft TTL, so the session reports Holding.
+  clock_.set(6000001);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_TRUE(runtime_->holding());
+  ASSERT_EQ(transport_->pending_transmit(), 0U);
+
+  // A brand-new command arrives while that Holding window is still open. It is
+  // not the frozen command being replayed - it is a fresh target, and it must
+  // go out.
+  clock_.set(6500000);
+  const mech_hardware_ros2_control::CanonicalCommand second{0.30};
+  ASSERT_TRUE(write_authorized(*runtime_, second));
+  clock_.set(7000000);
   EXPECT_TRUE(runtime_->read(states, 1U));
   EXPECT_EQ(transport_->pending_transmit(), 1U);
 }
@@ -486,8 +575,12 @@ TEST_F(Ak30RuntimeTest, StaleFeedbackYieldsZeroStatesWithoutFault) {
   ASSERT_TRUE(runtime.start());
 
   // One Following cycle: write -> read submits at t=10 ms and the feedback
-  // injected just before is processed at t=10 ms (fresh).
+  // injected just before is processed at t=10 ms (fresh). The write is placed
+  // at t=9 ms so the submission lands inside the command's own two-period
+  // window; the window is minted at write time and no longer re-derived per
+  // attempt.
   mech_hardware_ros2_control::CanonicalState states[1] = {};
+  clock_.set(9000000);
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
   ASSERT_TRUE(write_authorized(runtime, command));
   ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)),
@@ -576,16 +669,9 @@ TEST_F(Ak30RuntimeTest, CancelPendingStopsSubmissionBeforeAnyTransmit) {
 
 // Cancelling after a command was already submitted must not fault, and a new
 // authorized write must be able to resume transmission - a re-claim is a
-// normal, repeatable transition.
-//
-// The re-claim here happens inside the previous command's Following window on
-// purpose. A genuinely new command that arrives while the session is in
-// Holding is currently swallowed by submit_stored()'s Holding early return,
-// because that check looks at the session's last ACCEPTED command rather than
-// at the freshness of the command in hand. That is a lease-semantics defect,
-// not an authorization one, so it is out of ADR-015's scope and belongs to the
-// runtime lease/backpressure work; this test deliberately does not assert the
-// broken behaviour as correct.
+// normal, repeatable transition. The re-claim here stays inside the previous
+// command's Following window; the Holding-window case has its own test
+// (FreshCommandDuringHoldingIsStillSubmitted).
 TEST_F(Ak30RuntimeTest, CancelPendingAfterSubmitAllowsLaterReclaim) {
   ASSERT_TRUE(runtime_->configure(1U));
   ASSERT_TRUE(runtime_->start());

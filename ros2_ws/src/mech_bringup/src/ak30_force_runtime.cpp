@@ -132,6 +132,7 @@ bool Ak30ForceControlRuntime::configure(
   }
   pending_.assign(resource_count, CanonicalCommand{});
   resource_count_ = resource_count;
+  pending_deadline_ = MonotonicTime{};
   have_pending_ = false;
   fresh_write_ = false;
   submitted_once_ = false;
@@ -161,6 +162,7 @@ void Ak30ForceControlRuntime::stop() noexcept {
   }
   session_.deactivate();
   started_ = false;
+  pending_deadline_ = MonotonicTime{};
   have_pending_ = false;
   fresh_write_ = false;
   submitted_once_ = false;
@@ -193,9 +195,17 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
   if (!authorized_any) {
     return true;
   }
+  // The validity window is minted here, once, from the moment the command was
+  // received - not in submit_stored(), which runs again on every retry.
+  const auto deadline = MonotonicTime::from_nanoseconds(
+      clock_().nanoseconds() + 2 * config_.control_period_nanoseconds);
+  if (!deadline.has_value()) {
+    return false;
+  }
   for (std::size_t index = 0; index < count; ++index) {
     if (commands[index].authorized) pending_[index] = commands[index].command;
   }
+  pending_deadline_ = *deadline;
   have_pending_ = true;
   // The controller refreshed its command: the next read submits it, and
   // every write (even an unchanged one) counts as a refresh.
@@ -212,6 +222,7 @@ void Ak30ForceControlRuntime::cancel_pending(std::size_t index) noexcept {
   // command stage is left alone: submit() is simply never called again until
   // a new authorized write arrives, which is what stops transmission.
   pending_[index] = CanonicalCommand{};
+  pending_deadline_ = MonotonicTime{};
   have_pending_ = false;
   fresh_write_ = false;
 }
@@ -230,21 +241,39 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
   }
   if (!have_pending_ || !fresh_write_) {
     // Nothing was written yet, or the stored command is not a fresh
-    // controller refresh: send nothing. Re-submitting a stale command would
-    // hold the session's watchdog in Following forever and mask a dead
-    // controller; inventing 0.0 would command a move to the zero position
-    // (ADR-012 Decision 3).
+    // controller refresh: send nothing. This is what implements ADR-012's
+    // Holding freeze - the last accepted command stays the device's commanded
+    // state and the session's stage clock keeps advancing on real time, so the
+    // escalation to Expired actually happens. Re-submitting would reset that
+    // clock and mask a dead controller; inventing 0.0 would command a move to
+    // the zero position (ADR-012 Decision 3).
     return true;
   }
-  if (stage == mech::mech_protocol_cubemars::CommandStage::Holding) {
-    // Frozen: the last accepted command stays the device's commanded state.
-    // Submitting again would reset the session's stage clock and swallow the
-    // escalation to Expired.
-    return true;
+  if (pending_deadline_.nanoseconds() <= now.nanoseconds()) {
+    // The command outlived its own window while the transport was blocked (or
+    // while nobody read). Drop it and fail explicitly. This check sits ahead
+    // of submitted_once_ on purpose: "nothing has gone out yet" is not a
+    // reason to keep an aged target alive, and the session would reject the
+    // frame anyway - failing here makes the reason legible instead of
+    // arriving as a generic InvalidCommand.
+    pending_[0] = CanonicalCommand{};
+    pending_deadline_ = MonotonicTime{};
+    have_pending_ = false;
+    fresh_write_ = false;
+    return false;
   }
-
-  // stage == Following with a fresh command, or the first submit ever (the
-  // session's Expired there only means "no command yet").
+  // Reaching here means a FRESH command is in hand, so a Holding stage must
+  // not block it. The stage describes the age of the session's last ACCEPTED
+  // command - a fact about the past - while the freeze that stage calls for is
+  // about not replaying that command, which the fresh_write_ check above
+  // already enforces. Refusing here instead would silently swallow the first
+  // command of a controller that resumes after a gap, or of a controller that
+  // just re-claimed the joint, for the width of the Holding window. Submitting
+  // resets the stage clock, which is correct: a new target really does put the
+  // session back into Following.
+  //
+  // The session's Expired stage before the first submit only means "no command
+  // yet" and was already separated from the real failure above.
   mech::mech_control_core::CanonicalDeviceCommand command{};
   // ADR-014: map only the member the sub-mode consumes into the device
   // command; the others keep CanonicalDeviceCommand's zeros, so a Torque
@@ -265,8 +294,7 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
       command.position = pending_[0].position;
       break;
   }
-  command.deadline = *MonotonicTime::from_nanoseconds(
-      now.nanoseconds() + 2 * config_.control_period_nanoseconds);
+  command.deadline = pending_deadline_;
   const auto result = session_.submit(command, now);
   if (result == AdapterResult::Ok) {
     fresh_write_ = false;
