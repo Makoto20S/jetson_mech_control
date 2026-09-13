@@ -1,7 +1,7 @@
 # ADR-014：CompositeSystem 单命令接口形状扩展与 AK3.0 子模式命令接口
 
 - **Decision ID:** ADR-014
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-07
 - **Owner:** 项目负责人
 - **Scope:** `CompositeSystem` 的命令接口形状（`CanonicalCommand` 与每关节命令接口导出集合）、AK3.0 力控 Velocity/Torque 子模式经 `RuntimePort` 的命令映射语义、`sub_mode` 部署参数，以及状态接口形状维持不变的声明
@@ -12,7 +12,9 @@
 
 2026-09-06 的阶段 3 切片（PR #11）刻意把本变更挡在范围外，并在 `ak30_runtime_params.hpp` 写明：「sub-mode 不是参数：本切片仅 Position，因为那就是 CompositeSystem 导出的接口形状；Torque/Velocity 命令接口是 canonical 契约变更，需先出 ADR」。本 ADR 兑现该承诺。
 
-**转 `Accepted` 的条件**：项目负责人批准后方可合并实现；在此之前实现可以在此分支上进行，但不得进入 `main`。批准范围仅为接口形状与命令映射语义，**不解除任何设备启用闸门**——真机上的 Velocity/Torque 命令仍需逐次授权并遵守 ADR-006 Decision 7 的台架边界。
+**2026-09-13 转 `Accepted`**：项目负责人在决策条款的实质内容被复述后批准——每关节恰好一个命令接口（名称 ∈ {`position`, `velocity`, `effort`}）、与 `sub_mode` fail-closed 匹配、Velocity 子模式由 runtime 强制 `effort = 0` 以封死 wire 帧 `t_ff` 的静默前馈通道、状态接口形状不变。批准范围仅为接口形状与命令映射语义，**不解除任何设备启用闸门**——真机上的 Velocity/Torque 命令仍需逐次授权并遵守 ADR-006 Decision 7 的台架边界。
+
+本 ADR 的 Negative 一节记录了「URDF 声明与 `sub_mode` 参数是两个来源，不一致时靠离线结构校验兜底」这一代价。批准后该缺口在运行期补齐：`Ak30System::on_init` 在构造 runtime、打开 transport 与任何设备 I/O 之前拒绝错配，使 Decision 3 的 fail-closed 不再只是离线 CI 断言。
 
 ## Context / 上下文
 
@@ -77,7 +79,7 @@ AK3.0 力控（L07 §4.2）的三个子模式共用控制模式 ID `8` 与同一
 
 ## Validation / 验证
 
-- `python3 tools/ci/check_adrs.py` 通过，且 ADR-014 在 `docs/adr/README.md` 与规划文档 02/07 的状态行同步为 `Proposed`。
+- `python3 tools/ci/check_adrs.py` 通过，且 ADR-014 在 `docs/adr/README.md` 与规划文档 02/05/07 的状态行同步为 `Accepted`。
 - `python3 tools/ci/context_check.py` 通过（六包与依赖集不变）。
 - 完整本地验证集：`build_workspace.sh`（预期 >236 tests 0 failures）、`run_sanitizers.sh`（`-fsanitize` 经 CMake cache 核实）、`git diff --check`；新 xacro 过 `xmllint --noout`。
 - CompositeSystem 层：effort/velocity 形状 on_init 通过、双命令接口/未知名拒绝、每字段 NaN 拒绝 + fault latch、LoopbackRuntime 镜像语义测试。

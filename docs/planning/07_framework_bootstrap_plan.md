@@ -255,7 +255,7 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort` 的物理语义闸门，框架 demo 与力矩精度分开验收 |
 | [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | 命令看门狗分级语义（跟随/冻结/失败）、transport 能力三态上报与远程帧表达；Foundation RC 评审后的追认记录，2026-08-31 复核转 Accepted，仅约束接口语义、不解除设备启用闸门 |
 | [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md) | Accepted | 协议资料基线由 L02（AK2.0 驱动器手册）切换为 L07（AK3.0 产品手册）；客观依据是本项目驱动板 `AK54-4810-1C-A2` 只出现在 L07。`ProtocolProfile` 随之重定义，力控提为第一 profile |
-| [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md) | Proposed | CompositeSystem 命令接口形状扩展：每关节恰好一个命令接口 ∈ {position, velocity, effort}；AK3.0 子模式命令映射（Velocity 强制 effort=0），`sub_mode` 部署参数与接口名匹配校验；状态接口形状与看门狗语义不变 |
+| [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md) | Accepted | CompositeSystem 命令接口形状扩展：每关节恰好一个命令接口 ∈ {position, velocity, effort}；AK3.0 子模式命令映射（Velocity 强制 effort=0），`sub_mode` 部署参数与接口名匹配校验；状态接口形状与看门狗语义不变 |
 | [ADR-015](../adr/ADR-015-command-transmit-authorization.md) | Accepted | claim 即逐 joint 发送授权；`RuntimePort::write` 入参改为 `CommandDispatch` 并新增 `cancel_pending(index) noexcept`，stop/deactivate/cleanup/error 立即撤销 pending 命令；硬件 `write()` 被周期调用本身不刷新命令有效期 |
 | [ADR-016](../adr/ADR-016-feedback-quality-fail-closed.md) | Accepted | 反馈质量失效关闭：未知/陈旧/无效不得填零；陈旧与无效锁存故障；从未采样时关节不可被 claim；反馈有效期不得小于设备回报周期（默认 6 ms 与实测约 50 Hz 回报不自洽） |
 
