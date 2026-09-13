@@ -18,12 +18,13 @@
 | [ADR-012](ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | [Command watchdog and capability honesty](ADR-012-command-watchdog-and-capability-honesty.md) | 命令看门狗分级语义、能力三态上报与远程帧表达 | 项目负责人复核追认记录；真实抖动/位速率证据；vcan 与硬件验证 |
 | [ADR-013](ADR-013-ak30-protocol-baseline.md) | Accepted | [AK3.0 protocol baseline](ADR-013-ak30-protocol-baseline.md) | 协议基线由 L02（AK2.0）切换为 L07（AK3.0）、`ProtocolProfile` 重定义、力控优先、`effort` 解锁 | 驱动板 `AK54-4810-1C-A2` 对应关系；项目负责人复核 Kt 对定制版的适用性；带宽重算结论 |
 | [ADR-014](ADR-014-ak30-submode-command-interfaces.md) | Proposed | [Sub-mode command interfaces](ADR-014-ak30-submode-command-interfaces.md) | `CanonicalCommand` 扩展三字段、CompositeSystem 单命令接口 ∈ {position, velocity, effort}、AK3.0 子模式命令映射与 Velocity 模式 effort=0 强制 | 项目负责人批准接口形状与命令映射语义后方可合并实现；实机运行仍逐次授权并遵守 ADR-006 Decision 7 |
+| [ADR-015](ADR-015-command-transmit-authorization.md) | Accepted | [Command transmit authorization](ADR-015-command-transmit-authorization.md) | resource claim 即逐 joint 发送授权；`RuntimePort::write` 入参改为 `CommandDispatch`（命令 + 授权位）并新增 `cancel_pending(index)`；stop/deactivate/cleanup/error 立即撤销 pending 命令；硬件循环本身不构成命令刷新 | 2026-09-13 项目负责人批准接口变更；离线证据为 264 项测试全绿 + 无 sanitizer 报告（已核实 sanitizer 启用）；`controller_manager`+fake hardware 集成层未运行，实机运行仍受 ADR-006 Decision 7 约束 |
 
 ## Reading and status rules / 阅读与状态规则
 
 - `Accepted` 表示本 ADR 的架构/语义约束已经作为 Foundation 实施边界采用；它不表示真实设备、CAN 总线或物理性能已经验证。
 - `Proposed` 表示方向和安全边界已写清，但仍缺少本文件列出的决定性证据或批准。实现可以据此保守拒绝未知配置，不能据此激活真实设备。
-- 本轮 FND-004 冻结的是 ADR-001～ADR-006 与 ADR-009。ADR-012 是 Foundation RC 评审后的追认记录，已于 2026-08-31 复核转 Accepted；其批准范围仅限接口语义，不解除任何设备启用闸门。ADR-013 于 2026-09-01 提交并在同日复核转 Accepted，它在任何实现进入 `main` 之前完成，与 ADR-012 的追认路径相反；其批准范围为协议基线与接口语义，同样不解除任何设备启用闸门。ADR-014 于 2026-09-07 以 `Proposed` 提交（CompositeSystem 接口形状与 AK3.0 子模式命令接口），同样走「批准 → 合并」路径。规划中提到的 ADR-007、ADR-008、ADR-010 和 ADR-011 仍是候选后续决策，尚未形成独立规范文件。
+- 本轮 FND-004 冻结的是 ADR-001～ADR-006 与 ADR-009。ADR-012 是 Foundation RC 评审后的追认记录，已于 2026-08-31 复核转 Accepted；其批准范围仅限接口语义，不解除任何设备启用闸门。ADR-013 于 2026-09-01 提交并在同日复核转 Accepted，它在任何实现进入 `main` 之前完成，与 ADR-012 的追认路径相反；其批准范围为协议基线与接口语义，同样不解除任何设备启用闸门。ADR-014 于 2026-09-07 以 `Proposed` 提交（CompositeSystem 接口形状与 AK3.0 子模式命令接口），同样走「批准 → 合并」路径。ADR-015 于 2026-09-13 在实现之前以 `Proposed` 提交（命令发送授权与 pending 撤销），同日经项目负责人批准转 Accepted；其离线证据止于单元测试与 fake runtime 层级，`controller_manager` 生命周期与实机行为均未据此验收。规划中提到的 ADR-007、ADR-008、ADR-010 和 ADR-011 仍是候选后续决策，尚未形成独立规范文件。
 - 供应商资料、配置导出、抓包、测量或测试与 ADR 冲突时，先停止受影响路径并按各 ADR 的“重审触发”更新记录；不得静默改写协议常量或标准接口语义。
 
 ## FND-004 verification / FND-004 验证
