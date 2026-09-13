@@ -218,5 +218,52 @@ TEST_F(DeploymentFilesTest, LaunchFileReferencesExistingFilesAndStaysSafe) {
             std::string::npos);
 }
 
+// Deliberately a separate test from the one above, which is due to fail at T7:
+// that guard says the position-controller spawner must stay commented out, so
+// arming it legitimately turns it red and whoever is at the bench will edit it
+// away. This guard has to outlive that edit, because arming is exactly when it
+// starts to matter.
+//
+// ADR-016 refuses the command claim until valid feedback has flowed, and the
+// spawner asks switch_controller exactly once with STRICT strictness
+// (controller_manager/spawner.py): a refused claim is a valid service response,
+// so its max_attempts retry does not apply and it logs "Failed to activate
+// controller" and exits 1. A plainly spawned position controller therefore
+// races the first feedback frame - up to 20 ms at motor1's configured 50 Hz -
+// and losing leaves the controller off with a failed launch process.
+//
+// Scanned per arguments= list rather than per line so reformatting the call
+// across several lines cannot quietly drop the guard.
+TEST_F(DeploymentFilesTest, PositionControllerSpawnerIsNeverArmedActive) {
+  const std::string controller = "motor1_position_controller";
+  const std::string marker = "arguments=[";
+  std::size_t spawners = 0U;
+  auto open = launch_.find(marker);
+  while (open != std::string::npos) {
+    const auto close = launch_.find(']', open);
+    ASSERT_NE(close, std::string::npos)
+        << "unterminated " << marker << " at offset " << open;
+    const auto arguments = launch_.substr(open, close - open);
+    // A nested list would end the scan at the inner ']' and could hide the
+    // controller name, turning this guard into a vacuous pass. Fail loudly
+    // and rewrite the scan instead.
+    ASSERT_EQ(arguments.find('[', marker.size()), std::string::npos)
+        << "nested list inside " << marker << " at offset " << open
+        << "; this guard's bracket scan stops early - update it";
+    if (arguments.find(controller) != std::string::npos) {
+      ++spawners;
+      EXPECT_NE(arguments.find("--inactive"), std::string::npos)
+          << "the " << controller << " spawner must load it inactive and be "
+          << "activated only after feedback is confirmed; found: " << arguments;
+    }
+    open = launch_.find(marker, close);
+  }
+  // Without this the loop passes vacuously on a file that stopped spawning the
+  // controller in any form.
+  EXPECT_GT(spawners, 0U)
+      << "no spawner arguments mention " << controller
+      << "; this guard is no longer guarding anything";
+}
+
 }  // namespace
 }  // namespace mech::mech_bringup
