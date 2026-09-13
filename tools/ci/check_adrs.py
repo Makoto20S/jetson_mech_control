@@ -24,6 +24,7 @@ ADR_FILES = {
     "ADR-014": ("ADR-014-ak30-submode-command-interfaces.md", "Accepted"),
     "ADR-015": ("ADR-015-command-transmit-authorization.md", "Accepted"),
     "ADR-016": ("ADR-016-feedback-quality-fail-closed.md", "Accepted"),
+    "ADR-017": ("ADR-017-command-freshness-generation-interface.md", "Proposed"),
 }
 
 REQUIRED_HEADINGS = (
