@@ -26,6 +26,16 @@
 /.cache/
 /.pytest_cache/
 /.colcon/
+# The colcon workspace lives under ros2_ws/, so the root-anchored rules above
+# do not cover a build run from its default location. Without these three, a
+# plain `cd ros2_ws && colcon build` leaves install/setup.bash, CMakeCache.txt
+# and copied package.xml files showing as untracked, one `git add -A` away from
+# being committed. The supported path sets MECH_OUTPUT_ROOT outside the repo
+# (tools/ci/build_workspace.sh); these rules are the backstop for when someone
+# forgets, which has now happened more than once.
+/ros2_ws/build/
+/ros2_ws/install/
+/ros2_ws/log/
 compile_commands.json
 *.coverage
 coverage/
