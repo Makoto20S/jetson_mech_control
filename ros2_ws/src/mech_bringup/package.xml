@@ -16,6 +16,8 @@
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_lint_cmake</test_depend>
   <test_depend>ament_cmake_xmllint</test_depend>
+  <test_depend>controller_interface</test_depend>
+  <test_depend>controller_manager</test_depend>
   <export>
     <build_type>ament_cmake</build_type>
     <hardware_interface plugin="${prefix}/mech_bringup_plugins.xml"/>

@@ -99,6 +99,33 @@ if(BUILD_TESTING)
   target_compile_definitions(${PROJECT_NAME}_test PRIVATE
     MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+
+  # ADR-015 E1's last layer: the authorization boundary driven by a real
+  # controller_manager. Kept in its own target because it needs an rclcpp
+  # context and a ControllerManager node, which the offline unit tests do not.
+  find_package(controller_manager REQUIRED)
+  find_package(controller_interface REQUIRED)
+  ament_add_gtest(${PROJECT_NAME}_controller_manager_test
+    test/test_controller_manager_integration.cpp
+  )
+  target_link_libraries(${PROJECT_NAME}_controller_manager_test ${PROJECT_NAME})
+  ament_target_dependencies(${PROJECT_NAME}_controller_manager_test
+    controller_manager
+    controller_interface)
+  # This is the first test in the repository to construct an rclcpp::Node, and
+  # under -fsanitize=address that trips a mismatch inside ROS 2 itself:
+  # rcutils_string_map_init() allocates 72 bytes through operator new while
+  # rcutils_string_map_fini() releases it through
+  # operator delete(void*, size_t) with size 1. The stack is entirely in
+  # librcutils/librcl/librclcpp, reached from ControllerManager's constructor -
+  # no project code appears in it. Only that single check is switched off, and
+  # by appending rather than replacing, so the value run_sanitizers.sh sets
+  # survives and every other AddressSanitizer check plus all of
+  # UndefinedBehaviorSanitizer stay active on this test.
+  set_tests_properties(${PROJECT_NAME}_controller_manager_test PROPERTIES
+    ENVIRONMENT_MODIFICATION
+      "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
+
   ament_lint_cmake()
   ament_xmllint()
 endif()
