@@ -27,6 +27,7 @@ using mech::mech_control_core::SampleQuality;
 using mech::mech_control_core::TransportResult;
 using mech::mech_hardware_ros2_control::CanonicalCommand;
 using mech::mech_hardware_ros2_control::CanonicalState;
+using mech::mech_hardware_ros2_control::CommandDispatch;
 using mech::mech_protocol_cubemars::Ak30SessionConfig;
 using mech::mech_protocol_cubemars::feedback_can_id;
 using mech::mech_protocol_cubemars::force_control_can_id;
@@ -167,28 +168,52 @@ void Ak30ForceControlRuntime::stop() noexcept {
   expired_ = false;
 }
 
-bool Ak30ForceControlRuntime::write(const CanonicalCommand* commands,
+bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
                                     std::size_t count) noexcept {
   if (!started_ || commands == nullptr || count != resource_count_) {
     return false;
   }
+  // ADR-015: an unauthorized dispatch is not a command. It must not become a
+  // pending command and must not refresh an earlier one - "the
+  // controller_manager called write()" is not "a controller commanded
+  // something", because ros2_control command interfaces are raw double
+  // pointers and the hardware layer cannot observe set_value() calls.
+  bool authorized_any = false;
   for (std::size_t index = 0; index < count; ++index) {
+    if (!commands[index].authorized) continue;
+    authorized_any = true;
     // Validate the field(s) the sub-mode consumes (ADR-014): a Torque-mode
     // device reads effort, a Velocity-mode device reads velocity, and a
     // Position-mode device reads position. The other members stay at their
     // constructed zeros and are never mapped into the device command.
-    if (!std::isfinite(consumed_command_value(config_, commands[index]))) {
+    if (!std::isfinite(consumed_command_value(config_, commands[index].command))) {
       return false;
     }
   }
+  if (!authorized_any) {
+    return true;
+  }
   for (std::size_t index = 0; index < count; ++index) {
-    pending_[index] = commands[index];
+    if (commands[index].authorized) pending_[index] = commands[index].command;
   }
   have_pending_ = true;
   // The controller refreshed its command: the next read submits it, and
   // every write (even an unchanged one) counts as a refresh.
   fresh_write_ = true;
   return true;
+}
+
+void Ak30ForceControlRuntime::cancel_pending(std::size_t index) noexcept {
+  if (index >= resource_count_) {
+    return;
+  }
+  // This runtime carries a single joint (configure() rejects more), so
+  // dropping its pending command clears the whole lease. The session's own
+  // command stage is left alone: submit() is simply never called again until
+  // a new authorized write arrives, which is what stops transmission.
+  pending_[index] = CanonicalCommand{};
+  have_pending_ = false;
+  fresh_write_ = false;
 }
 
 bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {

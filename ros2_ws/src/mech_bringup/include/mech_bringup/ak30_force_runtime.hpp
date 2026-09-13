@@ -65,11 +65,17 @@ class Ak30ForceControlRuntime final
   // fault, which routes through CompositeSystem's ERROR path.
   [[nodiscard]] bool read(mech_hardware_ros2_control::CanonicalState* states,
                           std::size_t count) noexcept override;
-  // Stores the latest finite commands; they are submitted by the NEXT read,
-  // matching ros2_control's read -> update -> write ordering.
+  // Stores the latest authorized commands; they are submitted by the NEXT
+  // read, matching ros2_control's read -> update -> write ordering. A
+  // dispatch whose authorized flag is false contributes nothing: no pending
+  // command, and no refresh of an earlier one (ADR-015).
   [[nodiscard]] bool write(
-      const mech_hardware_ros2_control::CanonicalCommand* commands,
+      const mech_hardware_ros2_control::CommandDispatch* commands,
       std::size_t count) noexcept override;
+  // Drops the stored command and its freshness for one resource, so a
+  // released claim or a lifecycle exit stops submission immediately instead
+  // of waiting for the hard TTL (ADR-015 Decision 3).
+  void cancel_pending(std::size_t index) noexcept override;
 
   [[nodiscard]] bool holding() const noexcept { return holding_; }
   [[nodiscard]] bool expired() const noexcept { return expired_; }

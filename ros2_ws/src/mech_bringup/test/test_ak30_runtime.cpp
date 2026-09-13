@@ -47,6 +47,26 @@ constexpr std::uint32_t kLogicalBus = 1U;
   return MonotonicTime::from_nanoseconds(nanoseconds).value();
 }
 
+// Writes one command with transmit authorization - the shape CompositeSystem
+// produces for a joint whose command interface is claimed (ADR-015). Every
+// test that models a live controller goes through here; the unauthorized
+// dispatch has its own dedicated tests.
+[[nodiscard]] bool write_authorized(
+    Ak30ForceControlRuntime& runtime,
+    const mech_hardware_ros2_control::CanonicalCommand& command) noexcept {
+  const mech_hardware_ros2_control::CommandDispatch dispatch{command, true};
+  return runtime.write(&dispatch, 1U);
+}
+
+// Writes one dispatch WITHOUT authorization: the joint is not claimed, so the
+// runtime must treat it as "no command at all" (ADR-015 Decision 2).
+[[nodiscard]] bool write_unauthorized(
+    Ak30ForceControlRuntime& runtime,
+    const mech_hardware_ros2_control::CanonicalCommand& command) noexcept {
+  const mech_hardware_ros2_control::CommandDispatch dispatch{command, false};
+  return runtime.write(&dispatch, 1U);
+}
+
 // A test clock the test advances by hand; the production runtime injects
 // steady_clock. Backwards moves are rejected by MonotonicTime semantics and
 // must be surfaced by the runtime, never silently accepted.
@@ -165,7 +185,7 @@ TEST_F(Ak30RuntimeTest, FollowingSubmitsWrittenCommand) {
   ASSERT_TRUE(runtime_->start());
 
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
-  EXPECT_TRUE(runtime_->write(&command, 1U));
+  EXPECT_TRUE(write_authorized(*runtime_, command));
 
   clock_.set(4000000);  // next cycle
   mech_hardware_ros2_control::CanonicalState states[1] = {};
@@ -183,7 +203,7 @@ TEST_F(Ak30RuntimeTest, ReadDecodesFeedbackIntoStates) {
   ASSERT_TRUE(runtime_->start());
 
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
-  EXPECT_TRUE(runtime_->write(&command, 1U));
+  EXPECT_TRUE(write_authorized(*runtime_, command));
 
   clock_.set(4000000);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
@@ -211,7 +231,7 @@ TEST_F(Ak30RuntimeTest, WatchdogFreezesThenFaultsWithinThreeCycles) {
   ASSERT_TRUE(runtime_->start());
 
   const mech_hardware_ros2_control::CanonicalCommand command{0.5};
-  EXPECT_TRUE(runtime_->write(&command, 1U));
+  EXPECT_TRUE(write_authorized(*runtime_, command));
 
   // t=2 ms: first read submits the freshly written command (age 0).
   clock_.set(2000000);
@@ -256,7 +276,7 @@ TEST_F(Ak30RuntimeTest, RefreshingControllerKeepsWatchdogFollowing) {
   constexpr std::int64_t period = 2000000;
   for (int cycle = 1; cycle <= 10; ++cycle) {
     const mech_hardware_ros2_control::CanonicalCommand command{0.25};
-    ASSERT_TRUE(runtime_->write(&command, 1U));
+    ASSERT_TRUE(write_authorized(*runtime_, command));
     clock_.set(cycle * period);
     ASSERT_TRUE(runtime_->read(states, 1U));
     ASSERT_EQ(transport_->pending_transmit(), 1U);
@@ -272,7 +292,7 @@ TEST_F(Ak30RuntimeTest, WouldBlockRetriesAndDoesNotFault) {
   ASSERT_TRUE(runtime_->start());
 
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
-  EXPECT_TRUE(runtime_->write(&command, 1U));
+  EXPECT_TRUE(write_authorized(*runtime_, command));
 
   transport_->force_next_send_results({TransportResult::WouldBlock});
   clock_.set(2000000);
@@ -303,7 +323,7 @@ TEST_F(Ak30RuntimeTest, TorqueSubModeEmitsEffortOnlyGoldenFrame) {
   mech_hardware_ros2_control::CanonicalCommand command{};
   command.effort = 2.0;
   command.position = 9.0;  // ignored by the Torque sub-mode, must not leak
-  EXPECT_TRUE(runtime.write(&command, 1U));
+  EXPECT_TRUE(write_authorized(runtime, command));
 
   clock_.set(2000000);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
@@ -339,7 +359,7 @@ TEST_F(Ak30RuntimeTest, VelocitySubModeEmitsVelocityAndForcesZeroEffort) {
   mech_hardware_ros2_control::CanonicalCommand command{};
   command.velocity = 0.3;
   command.effort = 1.0;  // must be forced to zero, never feedforwarded
-  EXPECT_TRUE(runtime.write(&command, 1U));
+  EXPECT_TRUE(write_authorized(runtime, command));
 
   clock_.set(2000000);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
@@ -370,7 +390,7 @@ TEST_F(Ak30RuntimeTest, TorqueSubModeWatchdogFreezesThenFaults) {
 
   mech_hardware_ros2_control::CanonicalCommand command{};
   command.effort = 0.1;
-  EXPECT_TRUE(runtime.write(&command, 1U));
+  EXPECT_TRUE(write_authorized(runtime, command));
 
   clock_.set(2000000);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
@@ -399,10 +419,10 @@ TEST_F(Ak30RuntimeTest, WriteRejectsNonFiniteCommand) {
   ASSERT_TRUE(runtime_->start());
 
   const mech_hardware_ros2_control::CanonicalCommand bad{std::nan("")};
-  EXPECT_FALSE(runtime_->write(&bad, 1U));
+  EXPECT_FALSE(write_authorized(*runtime_, bad));
   const mech_hardware_ros2_control::CanonicalCommand inf{
       std::numeric_limits<double>::infinity()};
-  EXPECT_FALSE(runtime_->write(&inf, 1U));
+  EXPECT_FALSE(write_authorized(*runtime_, inf));
 }
 
 // ADR-014: write() validates the member the sub-mode consumes. In Torque
@@ -422,9 +442,9 @@ TEST_F(Ak30RuntimeTest, WriteValidatesConsumedFieldPerSubMode) {
     // Non-finite effort (the consumed member) rejects.
     mech_hardware_ros2_control::CanonicalCommand bad{};
     bad.effort = std::nan("");
-    EXPECT_FALSE(runtime.write(&bad, 1U));
+    EXPECT_FALSE(write_authorized(runtime, bad));
     bad.effort = std::numeric_limits<double>::infinity();
-    EXPECT_FALSE(runtime.write(&bad, 1U));
+    EXPECT_FALSE(write_authorized(runtime, bad));
 
     // A finite effort accepts even with garbage in the ignored members: a
     // Torque device never sees position/velocity (to_device_command drops
@@ -432,7 +452,7 @@ TEST_F(Ak30RuntimeTest, WriteValidatesConsumedFieldPerSubMode) {
     mech_hardware_ros2_control::CanonicalCommand odd{};
     odd.effort = 0.2;
     odd.position = std::numeric_limits<double>::infinity();
-    EXPECT_TRUE(runtime.write(&odd, 1U));
+    EXPECT_TRUE(write_authorized(runtime, odd));
   }
   {
     Ak30RuntimeConfig config = runtime_config();
@@ -444,11 +464,11 @@ TEST_F(Ak30RuntimeTest, WriteValidatesConsumedFieldPerSubMode) {
 
     mech_hardware_ros2_control::CanonicalCommand bad{};
     bad.velocity = std::numeric_limits<double>::infinity();
-    EXPECT_FALSE(runtime.write(&bad, 1U));
+    EXPECT_FALSE(write_authorized(runtime, bad));
     mech_hardware_ros2_control::CanonicalCommand ok{};
     ok.velocity = 0.3;
     ok.position = std::nan("");
-    EXPECT_TRUE(runtime.write(&ok, 1U));
+    EXPECT_TRUE(write_authorized(runtime, ok));
   }
 }
 
@@ -469,7 +489,7 @@ TEST_F(Ak30RuntimeTest, StaleFeedbackYieldsZeroStatesWithoutFault) {
   // injected just before is processed at t=10 ms (fresh).
   mech_hardware_ros2_control::CanonicalState states[1] = {};
   const mech_hardware_ros2_control::CanonicalCommand command{0.25};
-  ASSERT_TRUE(runtime.write(&command, 1U));
+  ASSERT_TRUE(write_authorized(runtime, command));
   ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)),
             TransportResult::Ok);
   clock_.set(10000000);
@@ -482,7 +502,7 @@ TEST_F(Ak30RuntimeTest, StaleFeedbackYieldsZeroStatesWithoutFault) {
   // t=10 ms; at t=12.000001 ms its age exceeds feedback_ttl (2 ms) and the
   // snapshot is Stale: values zeroed, no fault, no watchdog escalation.
   const mech_hardware_ros2_control::CanonicalCommand refresh{0.25};
-  ASSERT_TRUE(runtime.write(&refresh, 1U));
+  ASSERT_TRUE(write_authorized(runtime, refresh));
   clock_.set(12000001);
   mech_hardware_ros2_control::CanonicalState stale[1] = {};
   EXPECT_TRUE(runtime.read(stale, 1U));
@@ -502,12 +522,111 @@ TEST_F(Ak30RuntimeTest, RepeatedLifecycleHundredTimes) {
     ASSERT_TRUE(runtime.configure(1U));
     ASSERT_TRUE(runtime.start());
     const mech_hardware_ros2_control::CanonicalCommand command{0.25};
-    ASSERT_TRUE(runtime.write(&command, 1U));
+    ASSERT_TRUE(write_authorized(runtime, command));
     mech_hardware_ros2_control::CanonicalState states[1] = {};
     clock.set(2000000);
     ASSERT_TRUE(runtime.read(states, 1U));
     runtime.stop();
   }
+}
+
+// ADR-015 Decision 2: a dispatch without authorization is not a command. It
+// must not become pending, so the next read() transmits nothing. In a
+// single-joint deployment CompositeSystem skips the write() call entirely,
+// so this pins the RuntimePort contract rather than a reachable production
+// path - a multi-joint runtime would receive exactly this shape.
+TEST_F(Ak30RuntimeTest, UnauthorizedDispatchNeverTransmits) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  EXPECT_TRUE(write_unauthorized(*runtime_, command));
+
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  EXPECT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+  EXPECT_FALSE(runtime_->expired());
+}
+
+// ADR-015 Decision 3: cancel_pending() drops the stored command immediately,
+// so a released claim stops transmission on the very next cycle instead of
+// riding out the hard TTL. The audit reproduced the opposite behaviour - 11
+// frames over 22 ms after the claim was released.
+TEST_F(Ak30RuntimeTest, CancelPendingStopsSubmissionBeforeAnyTransmit) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  runtime_->cancel_pending(0U);
+
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  // Ten cycles inside and beyond the command's hard TTL: the hardware loop
+  // keeps running, nothing goes out.
+  for (int cycle = 1; cycle <= 10; ++cycle) {
+    clock_.set(static_cast<std::int64_t>(cycle) * 2000000);
+    EXPECT_TRUE(runtime_->read(states, 1U));
+    EXPECT_EQ(transport_->pending_transmit(), 0U) << "cycle " << cycle;
+  }
+  // Never submitted, so the session's Expired still means "no command yet",
+  // not the ADR-012 explicit failure.
+  EXPECT_FALSE(runtime_->expired());
+}
+
+// Cancelling after a command was already submitted must not fault, and a new
+// authorized write must be able to resume transmission - a re-claim is a
+// normal, repeatable transition.
+//
+// The re-claim here happens inside the previous command's Following window on
+// purpose. A genuinely new command that arrives while the session is in
+// Holding is currently swallowed by submit_stored()'s Holding early return,
+// because that check looks at the session's last ACCEPTED command rather than
+// at the freshness of the command in hand. That is a lease-semantics defect,
+// not an authorization one, so it is out of ADR-015's scope and belongs to the
+// runtime lease/backpressure work; this test deliberately does not assert the
+// broken behaviour as correct.
+TEST_F(Ak30RuntimeTest, CancelPendingAfterSubmitAllowsLaterReclaim) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  clock_.set(2000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport_->take_transmit(sent));
+
+  runtime_->cancel_pending(0U);
+  clock_.set(4000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+
+  // Re-claimed inside the Following window: a fresh authorized write
+  // transmits again.
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  clock_.set(5000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 1U);
+}
+
+// cancel_pending() is noexcept and index-checked: an out-of-range resource
+// index is a caller bug, not a reason to corrupt state or transmit.
+TEST_F(Ak30RuntimeTest, CancelPendingIgnoresOutOfRangeIndex) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  runtime_->cancel_pending(1U);  // only resource 0 exists
+
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  // The out-of-range cancel touched nothing, so resource 0's command stands.
+  EXPECT_EQ(transport_->pending_transmit(), 1U);
 }
 
 }  // namespace
