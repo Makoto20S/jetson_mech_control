@@ -33,6 +33,8 @@ AK3.0 力控（L07 §4.2）的三个子模式共用控制模式 ID `8` 与同一
 
 2. **`CompositeSystem` 每个关节导出恰好一个命令接口，名称 ∈ {`position`, `velocity`, `effort`}**，由 URDF 声明，顺序敏感的精确形状校验保持（state 接口维持恰为 `[position, velocity, effort]` 不变）。命令接口名决定写入 `CanonicalCommand` 的哪个成员（成员指针映射），未导出的成员按构造保持 0.0。这保持 CompositeSystem 厂商中立：它不知道「子模式」，只知道通用接口名集合。
 
+   > **⚠️ 本条已被 [ADR-017](ADR-017-command-freshness-generation-interface.md) 修订（2026-09-14）。** 现行契约是：每关节恰好一个**运动**命令接口（名称 ∈ {`position`, `velocity`, `effort`}，与 `sub_mode` fail-closed 匹配，本条其余部分不变），**外加一个始终导出、由控制器自行决定是否 claim 的 `command_generation` 接口**。「恰好一个命令接口」这一表述在读到本条时应理解为「恰好一个运动命令接口」。
+
 3. **AK3.0 部署中，命令接口名必须与 `sub_mode` 匹配**（Position→`position`、Velocity→`velocity`、Torque→`effort`），fail-closed：`sub_mode` 成为 `Ak30RuntimeParams` 的显式参数（`position|velocity|torque`，默认 `position`，非法值拒绝），bringup 层的结构校验（`test_deployment_files.cpp`）钉住「URDF 命令接口名 == `expected_command_interface_name(sub_mode)`」。**不采用每关节同时导出三个命令接口的超集形状**：AK3.0 力控帧的 effort 字段在所有子模式下都作为前馈 `t_ff` 随帧发送（`to_device_command` 无条件拷贝），position 模式下导出 effort 命令接口会给跨模式误写留一条静默通道，违反 ADR-004 配置期固定 profile 的主动选择。
 
 4. **`Ak30ForceControlRuntime` 按子模式映射命令并强制安全语义：**
@@ -72,7 +74,7 @@ AK3.0 力控（L07 §4.2）的三个子模式共用控制模式 ID `8` 与同一
 
 ### Negative / 负面与代价
 
-- `CompositeSystem` 从「position-only」放宽为「集合成员」：校验从单一名字比对变为集合成员检查，必须由测试钉住「恰好一个命令接口」不被未来改成「任意子集」。
+- `CompositeSystem` 从「position-only」放宽为「集合成员」：校验从单一名字比对变为集合成员检查，必须由测试钉住「恰好一个命令接口」不被未来改成「任意子集」。（[ADR-017](ADR-017-command-freshness-generation-interface.md) 已把该不变式修订为「恰好一个**运动**命令接口，外加一个 `command_generation` 接口」；「不得变成任意子集」的要求不变。）
 - Torque/Velocity 尚无 ros2 控制器（`DemoController` 是 position-only）：部署变体只能带 `joint_state_broadcaster`，命令接口的 claim/write 由测试与未来控制器切片覆盖。
 - 部署文件从 1 套变 3 套（position/torque/velocity URDF 变体），结构校验测试同步增长。
 - URDF 声明与 `sub_mode` 参数是两个来源，不一致时靠 bringup 结构校验兜底（离线 CI 检查，非运行期）。

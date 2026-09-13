@@ -1,7 +1,7 @@
 # ADR-017：命令新鲜度的可选代号接口与两档保护
 
 - **Decision ID:** ADR-017
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-14
 - **Owner:** 项目负责人（`ros2_control` integration owner）
 - **Scope:** 每关节额外导出一个 `command_generation` 命令接口，**是否 claim 它由控制器自行决定**，硬件据此在两档保护之间选择；据此修订 [ADR-014](ADR-014-ak30-submode-command-interfaces.md) Decision 第 2 条（每关节恰好一个命令接口）。不改变状态接口形状，不改变 [ADR-015](ADR-015-command-transmit-authorization.md) 的 claim 即授权语义，不改变 [ADR-016](ADR-016-feedback-quality-fail-closed.md) 的反馈闸门，不解除 [ADR-006](ADR-006-conditional-can0-deployment.md) 的任何设备启用闸门
@@ -13,6 +13,8 @@
 它同时是一周之内对 `RuntimePort` 相邻契约的**第三次**破坏性变更（ADR-015 改 `write()` 签名并新增 `cancel_pending()`；ADR-016 新增 `has_valid_sample()`）。这一点单独记录在「后果」中，因为它影响的不只是本仓库。
 
 **本 ADR 的第一版曾把代号接口写成强制的**，即不 claim 该接口的控制器一律无法命令电机。该版本于 2026-09-14 被项目负责人否决，理由是它废掉了本项目的一条立项需求：标准 `ros2_control` 控制器必须能自由切换、直接驱动本硬件。否决是正确的，且 [`02_architecture_and_interfaces.md`](../planning/02_architecture_and_interfaces.md) 早已写明正解是**两档**而非强制（见下文 Context）。强制版本作为替代方案 I 保留，以免重提。
+
+**2026-09-14 转 Accepted。** 项目负责人在两档设计的实质被逐条复述后批准，复述内容包括：代号接口始终导出而是否 claim 由控制器决定、保护等级由 claim 内容观测得出、弱档缺口有意保留（第三方控制器挂在 velocity 接口上静默时电机会保持最后速度继续转），以及两条 DISABLED 出口测试的判据必须由「硬件不能被任意控制器糊弄」弱化为「不能被一个 claim 了代号接口的控制器糊弄」。批准范围为命令接口形状与两档语义，**不解除任何设备启用闸门**。日期保留为提交日（与 ADR-012 的惯例一致：提交日不变，转换记在状态依据里）。
 
 ## Context / 上下文
 
