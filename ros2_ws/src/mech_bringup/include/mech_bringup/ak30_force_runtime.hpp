@@ -35,7 +35,16 @@ struct Ak30RuntimeConfig final {
   std::int64_t control_period_nanoseconds{2000000};
   std::int64_t command_ttl_nanoseconds{4000000};
   std::int64_t command_hard_ttl_nanoseconds{6000000};
-  std::int64_t feedback_ttl_nanoseconds{6000000};
+  // The device's own reporting period, read back from its configuration:
+  // motor1 has send_can_status_rate_hz = 50, so 20 ms. ADR-016 Decision 4
+  // requires the feedback window to be at least this long - a window shorter
+  // than the period it measures against can never be satisfied.
+  std::int64_t feedback_period_nanoseconds{20000000};
+  // 3x the reporting period: one lost frame must not stop the bench, and
+  // stopping the motor is the drive's own job anyway (motor1's loss-of-control
+  // protection is 1000 ms with zero brake current). This window is about
+  // knowing the device went quiet, not about braking.
+  std::int64_t feedback_ttl_nanoseconds{60000000};
 };
 
 // The first production consumer of Ak30ForceControlSession::command_stage()
@@ -76,19 +85,34 @@ class Ak30ForceControlRuntime final
   // released claim or a lifecycle exit stops submission immediately instead
   // of waiting for the hard TTL (ADR-015 Decision 3).
   void cancel_pending(std::size_t index) noexcept override;
+  // ADR-016: true only while the last read() saw Valid or Degraded feedback.
+  [[nodiscard]] bool has_valid_sample() const noexcept override {
+    return has_valid_sample_;
+  }
 
   [[nodiscard]] bool holding() const noexcept { return holding_; }
   [[nodiscard]] bool expired() const noexcept { return expired_; }
+  // ADR-016 Decision 5: the quality evidence must survive the ROS boundary.
+  // The exported state interfaces are three bare doubles with nowhere to put
+  // quality, sequence or arrival time, so they are kept here for tests and
+  // diagnostics rather than discarded.
+  [[nodiscard]] const mech::mech_control_core::StatusSnapshot& last_status()
+      const noexcept {
+    return last_status_;
+  }
 
  private:
   // Submits the stored command if one exists; returns false on a hard
   // failure. Implements the staged-watchdog submission policy.
   [[nodiscard]] bool submit_stored(
       mech::mech_control_core::MonotonicTime now) noexcept;
-  void publish_states(
+  // Publishes the snapshot only when it is usable, and reports whether the
+  // caller may keep running (ADR-016). Unusable-but-never-sampled is survivable
+  // (the startup transient); unusable-after-sampling is a fault.
+  [[nodiscard]] bool publish_states(
       mech_hardware_ros2_control::CanonicalState* states,
       std::size_t count,
-      mech::mech_control_core::MonotonicTime now) const noexcept;
+      mech::mech_control_core::MonotonicTime now) noexcept;
 
   mech::mech_control_core::Transport& transport_;
   Clock clock_;
@@ -114,6 +138,9 @@ class Ak30ForceControlRuntime final
   bool submitted_once_{false};
   bool holding_{false};
   bool expired_{false};
+  // ADR-016: quality of the most recent snapshot, and whether it was usable.
+  mech::mech_control_core::StatusSnapshot last_status_{};
+  bool has_valid_sample_{false};
 };
 
 }  // namespace mech::mech_bringup

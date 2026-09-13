@@ -46,7 +46,12 @@ constexpr std::size_t kReceiveBudget = 8U;
       config.command_hard_ttl_nanoseconds <=
           config.command_ttl_nanoseconds ||
       config.command_hard_ttl_nanoseconds > kMaxHardTtlNanoseconds ||
+      config.feedback_period_nanoseconds <= 0 ||
       config.feedback_ttl_nanoseconds <= 0 ||
+      // ADR-016 Decision 4: a window shorter than the device's own reporting
+      // period can never be satisfied. motor1 reports at a configured 50 Hz,
+      // so the 6 ms that used to be the default here was 3.3x too short.
+      config.feedback_ttl_nanoseconds < config.feedback_period_nanoseconds ||
       !std::isfinite(config.gains.kp) || config.gains.kp < 0.0 ||
       !std::isfinite(config.gains.kd) || config.gains.kd < 0.0 ||
       !mapping_is_sufficient(config.mapping, config.sub_mode)) {
@@ -138,6 +143,8 @@ bool Ak30ForceControlRuntime::configure(
   submitted_once_ = false;
   holding_ = false;
   expired_ = false;
+  last_status_ = mech::mech_control_core::StatusSnapshot{};
+  has_valid_sample_ = false;
   configured_ = true;
   return true;
 }
@@ -168,6 +175,8 @@ void Ak30ForceControlRuntime::stop() noexcept {
   submitted_once_ = false;
   holding_ = false;
   expired_ = false;
+  last_status_ = mech::mech_control_core::StatusSnapshot{};
+  has_valid_sample_ = false;
 }
 
 bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
@@ -311,21 +320,35 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
   return false;
 }
 
-void Ak30ForceControlRuntime::publish_states(
-    CanonicalState* states, std::size_t count,
-    MonotonicTime now) const noexcept {
+bool Ak30ForceControlRuntime::publish_states(
+    CanonicalState* states, std::size_t count, MonotonicTime now) noexcept {
   if (states == nullptr || count != resource_count_) {
-    return;
+    return false;
   }
   const auto state = session_.snapshot(now);
-  for (std::size_t index = 0; index < count; ++index) {
-    const bool usable =
-        state.status.quality == SampleQuality::Valid ||
-        state.status.quality == SampleQuality::Degraded;
-    states[index].position = usable ? state.position : 0.0;
-    states[index].velocity = usable ? state.velocity : 0.0;
-    states[index].effort = usable ? state.effort : 0.0;
+  last_status_ = state.status;
+  const bool usable = state.status.quality == SampleQuality::Valid ||
+                      state.status.quality == SampleQuality::Degraded;
+  has_valid_sample_ = usable;
+  if (!usable) {
+    // ADR-016 Decision 1: leave the caller's buffer alone. Writing 0.0 here
+    // would publish a number that is indistinguishable from a real
+    // measurement - on the position interface, from the joint actually being
+    // at the zero position.
+    //
+    // Decision 2/3: never having sampled is the normal startup transient at
+    // 50 Hz reporting against a 500 Hz loop, so it is survivable; the joint
+    // stays unclaimable via has_valid_sample() and therefore uncommandable.
+    // Having sampled and then aged out means the device stopped talking,
+    // which is a fault.
+    return !state.status.has_sample();
   }
+  for (std::size_t index = 0; index < count; ++index) {
+    states[index].position = state.position;
+    states[index].velocity = state.velocity;
+    states[index].effort = state.effort;
+  }
+  return true;
 }
 
 bool Ak30ForceControlRuntime::read(CanonicalState* states,
@@ -364,8 +387,7 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
     return false;
   }
 
-  publish_states(states, count, now);
-  return true;
+  return publish_states(states, count, now);
 }
 
 }  // namespace mech::mech_bringup

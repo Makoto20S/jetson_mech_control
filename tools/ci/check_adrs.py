@@ -23,7 +23,7 @@ ADR_FILES = {
     "ADR-013": ("ADR-013-ak30-protocol-baseline.md", "Accepted"),
     "ADR-014": ("ADR-014-ak30-submode-command-interfaces.md", "Proposed"),
     "ADR-015": ("ADR-015-command-transmit-authorization.md", "Accepted"),
-    "ADR-016": ("ADR-016-feedback-quality-fail-closed.md", "Proposed"),
+    "ADR-016": ("ADR-016-feedback-quality-fail-closed.md", "Accepted"),
 }
 
 REQUIRED_HEADINGS = (

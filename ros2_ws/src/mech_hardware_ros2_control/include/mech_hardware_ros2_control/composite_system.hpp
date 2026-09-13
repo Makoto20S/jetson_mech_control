@@ -58,6 +58,12 @@ class RuntimePort {
   // lapse on its own. Per-resource: releasing one joint must not cancel a
   // live command on another.
   virtual void cancel_pending(std::size_t index) noexcept = 0;
+  // Whether the most recent read() observed a usable feedback sample
+  // (ADR-016 Decision 3). False means the device's state is not known - either
+  // nothing has arrived yet, or what arrived aged out - and a joint whose
+  // state is unknown must not be claimable, because a controller cannot seed a
+  // hold from a position nobody has measured.
+  [[nodiscard]] virtual bool has_valid_sample() const noexcept = 0;
 };
 
 // Subclassable since the composition-point slice (PR #13): mech_bringup's

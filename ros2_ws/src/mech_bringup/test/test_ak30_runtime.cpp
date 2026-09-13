@@ -32,6 +32,7 @@ using mech::mech_control_core::FrameDirection;
 using mech::mech_control_core::MonotonicTime;
 using mech::mech_control_core::ProtocolProfile;
 using mech::mech_control_core::RawCanFrame;
+using mech::mech_control_core::SampleQuality;
 using mech::mech_control_core::TransportResult;
 using mech::mech_protocol_cubemars::Ak30Mapping;
 using mech::mech_protocol_cubemars::feedback_can_id;
@@ -95,6 +96,11 @@ class TestClock final {
   config.control_period_nanoseconds = 2000000;
   config.command_ttl_nanoseconds = 4000000;
   config.command_hard_ttl_nanoseconds = 6000000;
+  // A 1 ms reporting period keeps these tests able to age a sample out within
+  // a few control cycles while still satisfying ADR-016 Decision 4's
+  // "window >= period". motor1's real pair is 20 ms / 60 ms and is exercised
+  // by RejectsFeedbackTtlShorterThanReportingPeriod and the deployment files.
+  config.feedback_period_nanoseconds = 1000000;
   config.feedback_ttl_nanoseconds = 6000000;
   return config;
 }
@@ -175,6 +181,10 @@ TEST_F(Ak30RuntimeTest, FirstReadSendsNothingAndDoesNotInventZero) {
   clock_.set(2000000);
   EXPECT_TRUE(runtime_->read(states, 1U));
   EXPECT_EQ(transport_->pending_transmit(), 0U);
+  // No feedback has arrived, so there is nothing to publish and nothing is
+  // published (ADR-016); these stay at their constructed values rather than
+  // being overwritten with a zero that would look like a measurement.
+  EXPECT_FALSE(runtime_->has_valid_sample());
   EXPECT_EQ(states[0].position, 0.0);
   EXPECT_EQ(states[0].velocity, 0.0);
   EXPECT_EQ(states[0].effort, 0.0);
@@ -561,13 +571,20 @@ TEST_F(Ak30RuntimeTest, WriteValidatesConsumedFieldPerSubMode) {
   }
 }
 
-TEST_F(Ak30RuntimeTest, StaleFeedbackYieldsZeroStatesWithoutFault) {
-  // Feedback staleness must be isolated from the command watchdog: with the
-  // default TTLs (command 4/6 ms, feedback 6 ms) a feedback frame always
-  // ages out inside the command's hard window, so this test shortens
-  // feedback_ttl to 2 ms - a legal configuration, the runtime only forwards
-  // it to the session.
+// ADR-016 Decision 1/2: feedback that aged past its window is a device that
+// stopped talking - a fault, not a reason to publish zeros. The old version of
+// this test asserted the zeros as correct behaviour, which froze the defect in
+// place: on a position interface 0.0 is a real position, so "we do not know
+// where the joint is" became indistinguishable from "the joint is at zero",
+// and the bench's hold-current procedure would have seeded a hold at the zero
+// position.
+TEST_F(Ak30RuntimeTest, StaleFeedbackFailsClosedWithoutInventingZeros) {
+  // Feedback staleness must be isolated from the command watchdog, so this
+  // test shortens both the reporting period and the feedback TTL (1 ms / 2 ms)
+  // to age a sample out quickly. ADR-016 Decision 4 only requires the TTL to
+  // be no shorter than the period; motor1's real values are 20 ms / 60 ms.
   Ak30RuntimeConfig config = runtime_config();
+  config.feedback_period_nanoseconds = 1000000;
   config.feedback_ttl_nanoseconds = 2000000;
   Ak30ForceControlRuntime runtime(*transport_,
                                   [this]() { return clock_.now(); }, config);
@@ -587,23 +604,88 @@ TEST_F(Ak30RuntimeTest, StaleFeedbackYieldsZeroStatesWithoutFault) {
             TransportResult::Ok);
   clock_.set(10000000);
   ASSERT_TRUE(runtime.read(states, 1U));
-  EXPECT_NEAR(states[0].position, 1.5707963267948966 - 5.760604931781636,
-              1e-6);  // fresh feedback is published
+  const double fresh_position = 1.5707963267948966 - 5.760604931781636;
+  EXPECT_NEAR(states[0].position, fresh_position, 1e-6);
+  EXPECT_TRUE(runtime.has_valid_sample());
 
   // Feedback goes silent. The controller keeps refreshing, so the command
-  // watchdog stays Following, but the last feedback was processed at
-  // t=10 ms; at t=12.000001 ms its age exceeds feedback_ttl (2 ms) and the
-  // snapshot is Stale: values zeroed, no fault, no watchdog escalation.
+  // watchdog stays Following, but the last feedback was processed at t=10 ms;
+  // at t=12.000001 ms its age exceeds the feedback TTL and the snapshot is
+  // Stale.
   const mech_hardware_ros2_control::CanonicalCommand refresh{0.25};
   ASSERT_TRUE(write_authorized(runtime, refresh));
   clock_.set(12000001);
+  // Seeded with a recognisable value: a fail-closed read must leave the
+  // caller's buffer untouched rather than overwrite it with zeros.
   mech_hardware_ros2_control::CanonicalState stale[1] = {};
-  EXPECT_TRUE(runtime.read(stale, 1U));
-  EXPECT_FALSE(runtime.holding());
-  EXPECT_FALSE(runtime.expired());
-  EXPECT_EQ(stale[0].position, 0.0);
-  EXPECT_EQ(stale[0].velocity, 0.0);
-  EXPECT_EQ(stale[0].effort, 0.0);
+  stale[0].position = -7.5;
+  stale[0].velocity = -7.5;
+  stale[0].effort = -7.5;
+  EXPECT_FALSE(runtime.read(stale, 1U));
+  EXPECT_FALSE(runtime.has_valid_sample());
+  EXPECT_EQ(stale[0].position, -7.5);
+  EXPECT_EQ(stale[0].velocity, -7.5);
+  EXPECT_EQ(stale[0].effort, -7.5);
+  // The quality evidence stays legible instead of being flattened into zeros.
+  EXPECT_EQ(runtime.last_status().quality, SampleQuality::Stale);
+  EXPECT_TRUE(runtime.last_status().host_rx_time.has_value());
+}
+
+// ADR-016 Decision 3: before any feedback has arrived the quality is Unknown.
+// At 50 Hz reporting against a 500 Hz control loop that is roughly ten normal
+// cycles after activation, so it must not fault - but the joint must also not
+// be claimable, which is what stops a controller from ever acting on a
+// position nobody has measured.
+TEST_F(Ak30RuntimeTest, UnknownFeedbackDoesNotFaultButBlocksClaiming) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+  EXPECT_FALSE(runtime_->has_valid_sample());
+
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  states[0].position = -7.5;
+  for (const std::int64_t at_nanoseconds : {2000000, 4000000, 6000000}) {
+    clock_.set(at_nanoseconds);
+    EXPECT_TRUE(runtime_->read(states, 1U)) << "at " << at_nanoseconds;
+    EXPECT_FALSE(runtime_->has_valid_sample()) << "at " << at_nanoseconds;
+    EXPECT_EQ(states[0].position, -7.5) << "at " << at_nanoseconds;
+  }
+  EXPECT_EQ(runtime_->last_status().quality, SampleQuality::Unknown);
+
+  // The first real sample flips it, and only then is the joint claimable.
+  clock_.set(8000000);
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)),
+            TransportResult::Ok);
+  EXPECT_TRUE(runtime_->read(states, 1U));
+  EXPECT_TRUE(runtime_->has_valid_sample());
+  EXPECT_NEAR(states[0].position, 1.5707963267948966 - 5.760604931781636,
+              1e-6);
+}
+
+// ADR-016 Decision 4: a feedback window shorter than the device's own
+// reporting period can never be satisfied. motor1 reports at a configured
+// 50 Hz (20 ms), so the 6 ms default this code shipped with was 3.3x too
+// short - the snapshot would have been Stale for about 70% of control cycles,
+// which only went unnoticed because Stale used to publish zeros silently.
+TEST_F(Ak30RuntimeTest, RejectsFeedbackTtlShorterThanReportingPeriod) {
+  Ak30RuntimeConfig config = runtime_config();
+  config.feedback_period_nanoseconds = 20000000;  // 50 Hz, motor1's config
+  config.feedback_ttl_nanoseconds = 6000000;      // the old default
+  Ak30ForceControlRuntime runtime(*transport_,
+                                  [this]() { return clock_.now(); }, config);
+  EXPECT_FALSE(runtime.configure(1U));
+
+  // Equal is the boundary and is accepted; the decision's 3x margin is a
+  // deployment choice, not a hard requirement of the runtime.
+  config.feedback_ttl_nanoseconds = 20000000;
+  Ak30ForceControlRuntime boundary(*transport_,
+                                   [this]() { return clock_.now(); }, config);
+  EXPECT_TRUE(boundary.configure(1U));
+
+  // A non-positive reporting period is not a description of any device.
+  config.feedback_period_nanoseconds = 0;
+  Ak30ForceControlRuntime no_period(*transport_,
+                                    [this]() { return clock_.now(); }, config);
+  EXPECT_FALSE(no_period.configure(1U));
 }
 
 TEST_F(Ak30RuntimeTest, RepeatedLifecycleHundredTimes) {

@@ -27,6 +27,7 @@ const std::set<std::string>& known_keys() noexcept {
       "control_period_ns",
       "command_ttl_ns",
       "command_hard_ttl_ns",
+      "feedback_period_ns",
       "feedback_ttl_ns",
       "zero_offset_rad",
       "position_is_output_shaft",
@@ -192,6 +193,15 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
     }
     config.command_hard_ttl_nanoseconds = static_cast<std::int64_t>(value);
   }
+  if (const auto it = params.find("feedback_period_ns"); it != params.end()) {
+    std::uint64_t value = 0U;
+    if (!parse_uint64(it->second, value) ||
+        value > static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max())) {
+      return std::nullopt;
+    }
+    config.feedback_period_nanoseconds = static_cast<std::int64_t>(value);
+  }
   if (const auto it = params.find("feedback_ttl_ns"); it != params.end()) {
     std::uint64_t value = 0U;
     if (!parse_uint64(it->second, value) ||
@@ -222,7 +232,13 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
   if (config.control_period_nanoseconds <= 0 ||
       config.command_ttl_nanoseconds <= 0 ||
       config.command_hard_ttl_nanoseconds <= config.command_ttl_nanoseconds ||
-      config.feedback_ttl_nanoseconds <= 0) {
+      config.feedback_period_nanoseconds <= 0 ||
+      config.feedback_ttl_nanoseconds <= 0 ||
+      // ADR-016 Decision 4: the feedback window must be at least as long as
+      // the device's own reporting period. motor1 reports at a configured
+      // 50 Hz (send_can_status_rate_hz), so 20 ms; a shorter window can never
+      // be satisfied and would mark nearly every cycle stale.
+      config.feedback_ttl_nanoseconds < config.feedback_period_nanoseconds) {
     return std::nullopt;
   }
   // ADR-012: the whole staged watchdog fits <=3 control cycles (<=6 ms at

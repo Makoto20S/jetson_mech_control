@@ -216,21 +216,26 @@ TEST_F(Ak30SystemPluginTest, FullLifecycleRoundTripsFeedbackThroughCodec) {
   ASSERT_EQ(system_.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
 
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
+  // ADR-016 Decision 3: nothing has been measured yet, so the joint is not
+  // claimable and read() publishes nothing rather than a zero that would look
+  // like a position.
   const std::vector<std::string> claim{"motor1_joint/position"};
+  EXPECT_EQ(system_.prepare_command_mode_switch(claim, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_EQ(states[0].get_value(), 0.0);
+
+  // Inject one vendor feedback packet; the next read must decode it through
+  // the real UsbCdcCodec path into the exported state interfaces, and only
+  // then may the joint be claimed.
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
   ASSERT_EQ(system_.prepare_command_mode_switch(claim, {}),
             hardware_interface::return_type::OK);
   ASSERT_EQ(system_.perform_command_mode_switch(claim, {}),
             hardware_interface::return_type::OK);
-
-  const rclcpp::Time time(0);
-  const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
-  // read(): no feedback yet -> zeros (no sample, fail-safe publish).
-  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
-
-  // Inject one vendor feedback packet; the next read must decode it through
-  // the real UsbCdcCodec path into the exported state interfaces.
-  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
-  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
   // 90 deg = 1.5708 rad output-shaft position; with the deployment's
   // zero_offset (5.7606 rad = 330.07 deg) and direction +1, the canonical
   // position is zero_offset - raw, matching the integration test's value.

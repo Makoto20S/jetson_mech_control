@@ -92,6 +92,21 @@ class TestClock final {
       .value();
 }
 
+// ADR-016 Decision 3: a joint is only claimable once its state is known, so a
+// deployment cannot claim straight out of on_activate - one feedback frame has
+// to land first. That is the real startup shape too: motor1 reports at a
+// configured 50 Hz against a 500 Hz loop, so the first sample is about ten
+// cycles away and a controller must wait for it.
+[[nodiscard]] bool establish_feedback(CompositeSystem& system,
+                                      FakeTransport& transport) {
+  if (transport.inject_receive(feedback_frame(0)) != TransportResult::Ok) {
+    return false;
+  }
+  return system.read(rclcpp::Time(0),
+                     rclcpp::Duration{std::chrono::nanoseconds(2000000)}) ==
+         hardware_interface::return_type::OK;
+}
+
 // Builds a CompositeSystem with the AK3.0 runtime injected, mirroring how a
 // deployment would construct it (set_runtime before on_init).
 class Ak30SystemTest : public ::testing::Test {
@@ -138,6 +153,7 @@ TEST_F(Ak30SystemTest, ClaimWriteReadRoundTripsThroughTheForceRuntime) {
   ASSERT_EQ(commands.size(), 1U);
   ASSERT_EQ(system_.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_TRUE(establish_feedback(system_, *transport_));
 
   const std::vector<std::string> claim{"motor1_joint/position"};
   ASSERT_EQ(system_.prepare_command_mode_switch(claim, {}),
@@ -191,6 +207,7 @@ TEST_F(Ak30SystemTest, StaleCommandFaultsTheSystemWithinThreeCycles) {
   auto commands = system_.export_command_interfaces();
   ASSERT_EQ(system_.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_TRUE(establish_feedback(system_, *transport_));
   const std::vector<std::string> claim{"motor1_joint/position"};
   ASSERT_EQ(system_.prepare_command_mode_switch(claim, {}),
             hardware_interface::return_type::OK);
@@ -252,6 +269,7 @@ TEST_F(Ak30SystemTest, RepeatsFullLifecycleOneHundredTimes) {
     auto commands = system.export_command_interfaces();
     ASSERT_EQ(system.on_activate(lifecycle_state()),
               hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_TRUE(establish_feedback(system, transport));
     const std::vector<std::string> claim{"motor1_joint/position"};
     ASSERT_EQ(system.prepare_command_mode_switch(claim, {}),
               hardware_interface::return_type::OK);
@@ -284,6 +302,7 @@ TEST_F(Ak30SystemTest, NonFiniteCommandIsRejectedWithRuntimeAttached) {
   auto commands = system_.export_command_interfaces();
   ASSERT_EQ(system_.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_TRUE(establish_feedback(system_, *transport_));
   const std::vector<std::string> claim{"motor1_joint/position"};
   ASSERT_EQ(system_.prepare_command_mode_switch(claim, {}),
             hardware_interface::return_type::OK);
@@ -358,6 +377,7 @@ TEST_P(Ak30SubModeSystemTest, RoundTripsThroughTheSubModeCommandInterface) {
             hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(system.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_TRUE(establish_feedback(system, transport));
   const std::vector<std::string> claim{
       std::string("motor1_joint/") + command_interface};
   ASSERT_EQ(system.prepare_command_mode_switch(claim, {}),

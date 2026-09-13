@@ -47,7 +47,8 @@
       <param name="control_period_ns">2000000</param>
       <param name="command_ttl_ns">4000000</param>
       <param name="command_hard_ttl_ns">6000000</param>
-      <param name="feedback_ttl_ns">20000000</param>
+      <param name="feedback_period_ns">20000000</param>
+      <param name="feedback_ttl_ns">60000000</param>
       <param name="zero_offset_rad">5.760604931781636</param>
       <param name="position_is_output_shaft">true</param>
     </hardware>

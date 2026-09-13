@@ -77,6 +77,7 @@ class NanReadRuntime final : public RuntimePort {
   }
   bool write(const CommandDispatch*, std::size_t) noexcept override { return true; }
   void cancel_pending(std::size_t) noexcept override {}
+  bool has_valid_sample() const noexcept override { return running_; }
 
  private:
   bool running_{false};
@@ -134,6 +135,12 @@ class RecordingRuntime final : public RuntimePort {
     if (index < count_) ++cancels_[index];
   }
 
+  bool has_valid_sample() const noexcept override { return has_valid_sample_; }
+
+  // ADR-016: tests that are not about the claim gate keep a valid sample so
+  // claiming behaves as it did before; the gate has its own tests.
+  void set_has_valid_sample(bool value) noexcept { has_valid_sample_ = value; }
+
   [[nodiscard]] std::size_t write_calls() const noexcept { return write_calls_; }
   [[nodiscard]] std::size_t authorized_writes(std::size_t index) const noexcept {
     return index < authorized_writes_.size() ? authorized_writes_[index] : 0U;
@@ -152,6 +159,7 @@ class RecordingRuntime final : public RuntimePort {
   std::vector<std::size_t> authorized_writes_;
   std::vector<std::size_t> cancels_;
   std::vector<CanonicalCommand> last_command_;
+  bool has_valid_sample_{true};
 };
 
 // ADR-015 Decision 1/2: an unclaimed joint has no transmit authorization, so
@@ -211,6 +219,55 @@ struct ActiveSystem final {
     }
   }
 };
+
+// ADR-016 Decision 3: a joint whose feedback has never arrived must not be
+// claimable. This is the shared choke point that keeps a controller from ever
+// seeding a hold from a position nobody measured - put in one layer rather
+// than trusting every controller to check a quality field it cannot even see
+// through a bare double.
+TEST(CompositeSystem, JointWithoutAValidSampleCannotBeClaimed) {
+  ActiveSystem fixture(1U);
+  fixture.recorder->set_has_valid_sample(false);
+
+  EXPECT_EQ(fixture.system.prepare_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+
+  // The manager keeps cycling against an unknown position: still nothing goes
+  // out, because without a claim there is no transmit authorization (ADR-015).
+  fixture.cycle(10);
+  EXPECT_EQ(fixture.recorder->authorized_writes(0U), 0U);
+  EXPECT_FALSE(fixture.system.fault_latched());
+
+  // Feedback arrives; the joint becomes claimable and commands flow.
+  fixture.recorder->set_has_valid_sample(true);
+  ASSERT_EQ(fixture.system.prepare_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  fixture.commands[0].set_value(0.25);
+  fixture.cycle(1);
+  EXPECT_EQ(fixture.recorder->authorized_writes(0U), 1U);
+}
+
+// Releasing a claim must stay possible after the device goes silent. Refusing
+// a stop-only switch would strand the controller holding a joint it can no
+// longer observe - the opposite of fail-closed.
+TEST(CompositeSystem, ReleasingAClaimStillWorksWithoutAValidSample) {
+  ActiveSystem fixture(1U);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+
+  fixture.recorder->set_has_valid_sample(false);
+  EXPECT_EQ(fixture.system.prepare_command_mode_switch({}, {"joint_1/position"}),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(fixture.system.perform_command_mode_switch({}, {"joint_1/position"}),
+            hardware_interface::return_type::OK);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+  EXPECT_EQ(fixture.recorder->cancels(0U), 1U);
+}
 
 // ADR-015 Decision 1/3: releasing the claim revokes authorization immediately
 // and cancels the pending command. The controller_manager keeps cycling

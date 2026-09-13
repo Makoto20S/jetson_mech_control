@@ -1,7 +1,7 @@
 # ADR-016：反馈质量诚实上报与失效关闭策略
 
 - **Decision ID:** ADR-016
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-13
 - **Owner:** 项目负责人（`ros2_control` integration owner）
 - **Scope:** `RuntimePort::read()` 与 `CanonicalState` 之间的反馈质量语义，以及反馈有效期与设备回报速率的关系；不改变 [ADR-014](ADR-014-ak30-submode-command-interfaces.md) 的状态接口形状（仍是每关节 position/velocity/effort 三个 state interface），不改变 [ADR-015](ADR-015-command-transmit-authorization.md) 的发送授权语义，不解除 [ADR-006](ADR-006-conditional-can0-deployment.md) 的任何设备启用闸门

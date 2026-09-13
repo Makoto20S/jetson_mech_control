@@ -32,6 +32,7 @@
 #include "hardware_interface/types/lifecycle_state_names.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "mech_bringup/ak30_force_runtime.hpp"
+#include "mech_control_core/frame.hpp"
 #include "mech_control_core/time.hpp"
 #include "mech_hardware_ros2_control/composite_system.hpp"
 #include "mech_protocol_cubemars/ak30_force_wire.hpp"
@@ -42,7 +43,13 @@
 namespace mech::mech_bringup {
 namespace {
 
+using mech::mech_control_core::CanFrameFormat;
+using mech::mech_control_core::CanFrameType;
+using mech::mech_control_core::CanId;
+using mech::mech_control_core::FrameDirection;
 using mech::mech_control_core::MonotonicTime;
+using mech::mech_control_core::RawCanFrame;
+using mech::mech_control_core::TransportResult;
 using mech::mech_protocol_cubemars::Ak30Mapping;
 using mech::mech_protocol_cubemars::ForceControlSubMode;
 using mech::mech_simulation::FakeTransport;
@@ -55,6 +62,8 @@ constexpr char kControllerName[] = "writer";
 constexpr char kControllerType[] = "test/WriterController";
 // The manager's control period; also the runtime's configured period.
 constexpr std::int64_t kPeriodNanoseconds = 2000000;
+// motor1's configured reporting period: send_can_status_rate_hz = 50.
+constexpr std::int64_t kFeedbackPeriodNs = 20000000;
 
 [[nodiscard]] Ak30RuntimeConfig runtime_config() {
   Ak30RuntimeConfig config{};
@@ -67,7 +76,12 @@ constexpr std::int64_t kPeriodNanoseconds = 2000000;
   config.control_period_nanoseconds = kPeriodNanoseconds;
   config.command_ttl_nanoseconds = 4000000;
   config.command_hard_ttl_nanoseconds = 6000000;
-  config.feedback_ttl_nanoseconds = 6000000;
+  // motor1's real pair, read back from its configuration: 50 Hz reporting
+  // (20 ms) and a 3x window (60 ms). Using the real ratio here matters - it is
+  // what makes this test exercise ten control cycles per feedback frame, the
+  // same 500 Hz-against-50 Hz relationship the bench has.
+  config.feedback_period_nanoseconds = 20000000;
+  config.feedback_ttl_nanoseconds = 60000000;
   return config;
 }
 
@@ -91,6 +105,28 @@ constexpr std::int64_t kPeriodNanoseconds = 2000000;
                             interface(hardware_interface::HW_IF_EFFORT)};
   info.joints.push_back(joint);
   return info;
+}
+
+// Feedback payload: 90.0 deg, 10000 ERPM, 2.0 A, 40 C, no fault.
+[[nodiscard]] RawCanFrame feedback_frame(std::int64_t arrival_ns) {
+  std::array<std::uint8_t, 64U> payload{};
+  payload[0] = 0x03;
+  payload[1] = 0x84;
+  payload[2] = 0x03;
+  payload[3] = 0xE8;
+  payload[4] = 0x00;
+  payload[5] = 0xC8;
+  payload[6] = 0x28;
+  payload[7] = 0x00;
+  return RawCanFrame::create(
+             kLogicalBus,
+             CanId::create(
+                 mech::mech_protocol_cubemars::feedback_can_id(kDriveId),
+                 CanFrameFormat::Extended)
+                 .value(),
+             CanFrameType::Classic, FrameDirection::Rx, 8U, payload,
+             MonotonicTime::from_nanoseconds(arrival_ns).value())
+      .value();
 }
 
 // Claims exactly one position command interface and writes a target on each of
@@ -200,6 +236,16 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
     return MonotonicTime::from_nanoseconds(now_nanoseconds_).value();
   }
 
+  // ADR-016 Decision 3: the joint is unclaimable until its state is known, so
+  // a controller cannot be activated before one feedback frame has landed.
+  // That is the real startup shape - motor1 reports at 50 Hz against this
+  // 500 Hz loop - and it is why this has to happen before the switch.
+  void establish_feedback() {
+    ASSERT_EQ(transport_->inject_receive(feedback_frame(now_nanoseconds_)),
+              TransportResult::Ok);
+    cycle(1);
+  }
+
   void activate_controller() { switch_controller({kControllerName}, {}); }
 
   void deactivate_controller() { switch_controller({}, {kControllerName}); }
@@ -231,10 +277,19 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
     ASSERT_EQ(result.get(), controller_interface::return_type::OK);
   }
 
-  // One full manager cycle in the documented order: read -> update -> write.
+  // One full manager cycle in the documented order: read -> update -> write,
+  // with the device reporting on its own schedule underneath. motor1 reports
+  // every 20 ms while the loop runs every 2 ms, so a frame lands on one cycle
+  // in ten - without that, the sample ages past its window and ADR-016 quite
+  // correctly faults the component a few cycles in.
   void cycle(int count) {
     for (int index = 0; index < count; ++index) {
       now_nanoseconds_ += kPeriodNanoseconds;
+      if (now_nanoseconds_ - last_feedback_nanoseconds_ >= kFeedbackPeriodNs) {
+        last_feedback_nanoseconds_ = now_nanoseconds_;
+        EXPECT_EQ(transport_->inject_receive(feedback_frame(now_nanoseconds_)),
+                  TransportResult::Ok);
+      }
       const rclcpp::Time time(now_nanoseconds_, RCL_STEADY_TIME);
       const rclcpp::Duration period(0, kPeriodNanoseconds);
       manager_->read(time, period);
@@ -254,6 +309,7 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
   std::shared_ptr<controller_manager::ControllerManager> manager_;
   std::shared_ptr<WriterController> controller_;
   std::int64_t now_nanoseconds_{0};
+  std::int64_t last_feedback_nanoseconds_{0};
 };
 
 // E1: the manager cycles the hardware at its control rate while no controller
@@ -282,6 +338,7 @@ TEST_F(ControllerManagerIntegrationTest, InactiveControllerProducesNoCommandFram
 // in a planning document.
 TEST_F(ControllerManagerIntegrationTest,
        DISABLED_SilentControllerDoesNotRefreshItsCommand) {
+  establish_feedback();
   controller_->allow_writes(1U);
   activate_controller();
   cycle(1);
@@ -304,6 +361,7 @@ TEST_F(ControllerManagerIntegrationTest,
 // command cancelled, so the frames stop immediately rather than after the hard
 // TTL lapses - the 2026-09-12 audit measured 11 frames over 22 ms here.
 TEST_F(ControllerManagerIntegrationTest, DeactivatingControllerStopsCommandFrames) {
+  establish_feedback();
   controller_->allow_writes(3U);
   activate_controller();
   cycle(4);
@@ -326,6 +384,7 @@ TEST_F(ControllerManagerIntegrationTest, DeactivatingControllerStopsCommandFrame
 // required too.
 TEST_F(ControllerManagerIntegrationTest,
        DISABLED_ReactivationDoesNotReplayTheOldTarget) {
+  establish_feedback();
   controller_->allow_writes(1U);
   activate_controller();
   cycle(2);

@@ -25,7 +25,8 @@ TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   params["control_period_ns"] = "2000000";
   params["command_ttl_ns"] = "4000000";
   params["command_hard_ttl_ns"] = "6000000";
-  params["feedback_ttl_ns"] = "2000000";
+  params["feedback_period_ns"] = "20000000";
+  params["feedback_ttl_ns"] = "60000000";
   params["zero_offset_rad"] = "5.760604931781636";
   params["position_is_output_shaft"] = "true";
 
@@ -39,7 +40,8 @@ TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   EXPECT_EQ(parsed->config.control_period_nanoseconds, 2000000);
   EXPECT_EQ(parsed->config.command_ttl_nanoseconds, 4000000);
   EXPECT_EQ(parsed->config.command_hard_ttl_nanoseconds, 6000000);
-  EXPECT_EQ(parsed->config.feedback_ttl_nanoseconds, 2000000);
+  EXPECT_EQ(parsed->config.feedback_period_nanoseconds, 20000000);
+  EXPECT_EQ(parsed->config.feedback_ttl_nanoseconds, 60000000);
   EXPECT_DOUBLE_EQ(parsed->config.mapping.zero_offset_rad.value,
                    5.760604931781636);
   EXPECT_TRUE(parsed->config.mapping.position_is_output_shaft);

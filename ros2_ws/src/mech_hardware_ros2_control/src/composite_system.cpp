@@ -89,6 +89,13 @@ class LoopbackRuntime final : public RuntimePort {
     (void)index;
   }
 
+  bool has_valid_sample() const noexcept override {
+    // The loopback synthesizes its state from the commands it was given, so
+    // once running it always has one. It models no device and therefore no
+    // device silence.
+    return running_;
+  }
+
  private:
   bool running_{false};
   std::vector<CanonicalState> states_;
@@ -285,6 +292,14 @@ bool CompositeSystem::known_command_interface(const std::string& name) const noe
 bool CompositeSystem::validate_switch(
     const std::vector<std::string>& start_interfaces,
     const std::vector<std::string>& stop_interfaces) const noexcept {
+  // ADR-016 Decision 3: a joint whose state is not known must not be
+  // claimable. Releasing a claim stays allowed - a switch that only stops
+  // interfaces is always safe, and refusing it would strand a controller on a
+  // device that has gone silent.
+  if (!start_interfaces.empty() &&
+      (runtime_ == nullptr || !runtime_->has_valid_sample())) {
+    return false;
+  }
   for (std::size_t index = 0U; index < start_interfaces.size(); ++index) {
     if (!known_command_interface(start_interfaces[index]) ||
         std::find(stop_interfaces.begin(), stop_interfaces.end(),
