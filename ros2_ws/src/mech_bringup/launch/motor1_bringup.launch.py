@@ -77,6 +77,14 @@ def generate_launch_description():
         #     arguments=['motor1_position_controller', '--inactive'],
         # ),
         #
+        # Then, from the bench, with the owner present:
+        #     tools/bench/activate_position_controller.sh \
+        #         motor1_position_controller
+        # That script retries the claim until ADR-016 lets it through and fails
+        # closed on timeout. Do not reach for `ros2 control switch_controllers
+        # --activate` instead: its --strict flag defaults to false, and
+        # SwitchController.srv says the meaning of "ok" depends on strictness.
+        #
         # Once active, the target entry is the controller-relative topic
         # ~/target_position (std_msgs/Float64), which resolves to
         # /motor1_position_controller/target_position.

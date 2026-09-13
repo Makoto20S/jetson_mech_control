@@ -22,6 +22,10 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Validate repository context
         run: python3 tools/ci/context_check.py
+      - name: Bench operator script tests
+        # Driven by a stub `ros2` on PATH, so no ROS, controller_manager or
+        # device is involved and this belongs in the portable job.
+        run: bash tools/bench/test_activate_position_controller.sh
 
   build:
     name: Ubuntu 22.04 / ROS 2 Humble build and unit tests
