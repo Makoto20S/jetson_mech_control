@@ -189,10 +189,14 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
   // controller_manager called write()" is not "a controller commanded
   // something", because ros2_control command interfaces are raw double
   // pointers and the hardware layer cannot observe set_value() calls.
-  bool authorized_any = false;
+  bool fresh_any = false;
   for (std::size_t index = 0; index < count; ++index) {
     if (!commands[index].authorized) continue;
-    authorized_any = true;
+    // ADR-017: freshness gates whether a NEW command is accepted, but not
+    // whether the value is checked. A non-finite command is a defect on the
+    // cycle it appears, stale or not, and skipping the check here would make
+    // the amount of validation depend on how talkative the controller is.
+    if (commands[index].fresh) fresh_any = true;
     // Validate the field(s) the sub-mode consumes (ADR-014): a Torque-mode
     // device reads effort, a Velocity-mode device reads velocity, and a
     // Position-mode device reads position. The other members stay at their
@@ -201,7 +205,13 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
       return false;
     }
   }
-  if (!authorized_any) {
+  // ADR-017 Decision 3.3: the claim is held and the manager cycled, but no
+  // controller refreshed anything. Returning here leaves any pending command
+  // alone on purpose - it is still bounded by its own deadline, and a
+  // controller falling quiet is not a reason to abandon a command it already
+  // gave. That is what separates this from losing authorization, which does
+  // drop the pending command through cancel_pending().
+  if (!fresh_any) {
     return true;
   }
   // The validity window is minted here, once, from the moment the command was
@@ -212,12 +222,15 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
     return false;
   }
   for (std::size_t index = 0; index < count; ++index) {
-    if (commands[index].authorized) pending_[index] = commands[index].command;
+    if (commands[index].authorized && commands[index].fresh) {
+      pending_[index] = commands[index].command;
+    }
   }
   pending_deadline_ = *deadline;
   have_pending_ = true;
-  // The controller refreshed its command: the next read submits it, and
-  // every write (even an unchanged one) counts as a refresh.
+  // The controller refreshed its command: the next read submits it. Before
+  // ADR-017 every authorized write counted as a refresh, which is exactly the
+  // defect - the hardware could not tell a controller apart from the loop.
   fresh_write_ = true;
   return true;
 }

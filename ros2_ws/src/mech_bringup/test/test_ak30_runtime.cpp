@@ -55,7 +55,20 @@ constexpr std::uint32_t kLogicalBus = 1U;
 [[nodiscard]] bool write_authorized(
     Ak30ForceControlRuntime& runtime,
     const mech_hardware_ros2_control::CanonicalCommand& command) noexcept {
-  const mech_hardware_ros2_control::CommandDispatch dispatch{command, true};
+  // fresh = true: this models a controller that actually refreshed its target
+  // this cycle (ADR-017). The stale-but-authorized shape - the manager cycling
+  // while the controller says nothing - has its own helper below.
+  const mech_hardware_ros2_control::CommandDispatch dispatch{command, true, true};
+  return runtime.write(&dispatch, 1U);
+}
+
+// Writes one dispatch that is authorized but NOT fresh: the claim is held and
+// the manager cycled, but the controller did not refresh its target
+// (ADR-017 Decision 3.3). The runtime must treat it as "no new command".
+[[nodiscard]] bool write_authorized_stale(
+    Ak30ForceControlRuntime& runtime,
+    const mech_hardware_ros2_control::CanonicalCommand& command) noexcept {
+  const mech_hardware_ros2_control::CommandDispatch dispatch{command, true, false};
   return runtime.write(&dispatch, 1U);
 }
 
@@ -64,7 +77,7 @@ constexpr std::uint32_t kLogicalBus = 1U;
 [[nodiscard]] bool write_unauthorized(
     Ak30ForceControlRuntime& runtime,
     const mech_hardware_ros2_control::CanonicalCommand& command) noexcept {
-  const mech_hardware_ros2_control::CommandDispatch dispatch{command, false};
+  const mech_hardware_ros2_control::CommandDispatch dispatch{command, false, false};
   return runtime.write(&dispatch, 1U);
 }
 
@@ -188,6 +201,44 @@ TEST_F(Ak30RuntimeTest, FirstReadSendsNothingAndDoesNotInventZero) {
   EXPECT_EQ(states[0].position, 0.0);
   EXPECT_EQ(states[0].velocity, 0.0);
   EXPECT_EQ(states[0].effort, 0.0);
+}
+
+// ADR-017 Decision 3.3: authorization says the joint is claimed; freshness
+// says the controller spoke. A cycle that carries the first but not the second
+// is the controller_manager turning, and it must not become a motor frame.
+// Asserted on the transport's frame count, not on an internal flag.
+TEST_F(Ak30RuntimeTest, AuthorizedButStaleDispatchSendsNoFrame) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  for (int cycle = 0; cycle < 20; ++cycle) {
+    EXPECT_TRUE(write_authorized_stale(*runtime_, command));
+    clock_.set(2000000 * (cycle + 1));
+    mech_hardware_ros2_control::CanonicalState states[1] = {};
+    EXPECT_TRUE(runtime_->read(states, 1U));
+  }
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+// The other half of the same contract: once the controller does speak, the
+// command goes out. A freshness gate that sent nothing ever would pass the
+// test above and break every deployment.
+TEST_F(Ak30RuntimeTest, AFreshDispatchAfterStaleOnesIsStillSent) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized_stale(*runtime_, command));
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 0U);
+
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  clock_.set(4000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 1U);
 }
 
 TEST_F(Ak30RuntimeTest, FollowingSubmitsWrittenCommand) {
