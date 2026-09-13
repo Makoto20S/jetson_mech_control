@@ -79,7 +79,12 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
   hardware_interface::ComponentInfo joint;
   joint.name = "motor1_joint";
   joint.type = "joint";
-  joint.command_interfaces = {interface(hardware_interface::HW_IF_POSITION)};
+  // ADR-017 shape: one motion command interface plus the always-exported
+  // command_generation interface.
+  joint.command_interfaces = {
+      interface(hardware_interface::HW_IF_POSITION),
+      interface(
+          mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
   joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                             interface(hardware_interface::HW_IF_VELOCITY),
                             interface(hardware_interface::HW_IF_EFFORT)};
@@ -112,6 +117,14 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
   for (const auto& name : command_interface_names) {
     info.joints[0].command_interfaces.push_back(interface(name));
   }
+  // ADR-017: the generation interface is appended for every shape, so the
+  // rows below stay about the MOTION interface. Without this, a mismatch row
+  // would be rejected for the wrong reason - a missing generation interface -
+  // and would still look like it proved the sub-mode check. The shape rules
+  // for the generation interface itself are pinned in
+  // test_composite_system.cpp, where they belong.
+  info.joints[0].command_interfaces.push_back(
+      interface(mech::mech_hardware_ros2_control::kCommandGenerationInterface));
   return info;
 }
 
@@ -242,7 +255,9 @@ TEST_F(Ak30SystemPluginTest, FullLifecycleRoundTripsFeedbackThroughCodec) {
   auto states = system_.export_state_interfaces();
   auto commands = system_.export_command_interfaces();
   ASSERT_EQ(states.size(), 3U);
-  ASSERT_EQ(commands.size(), 1U);
+  // ADR-017: one motion command interface plus the always-exported
+  // command_generation interface.
+  ASSERT_EQ(commands.size(), 2U);
   ASSERT_EQ(system_.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
 
@@ -408,8 +423,8 @@ TEST_F(Ak30SystemPluginTest, RejectedShapeNeverRequestsASerialPort) {
   const std::array<Rejected, 4U> kRejected{
       Rejected{"sub-mode mismatch", "torque",
                {hardware_interface::HW_IF_POSITION}},
-      Rejected{"no command interface", "position", {}},
-      Rejected{"two command interfaces",
+      Rejected{"no motion command interface", "position", {}},
+      Rejected{"two motion command interfaces",
                "position",
                {hardware_interface::HW_IF_POSITION,
                 hardware_interface::HW_IF_EFFORT}},

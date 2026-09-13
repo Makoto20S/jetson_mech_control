@@ -78,8 +78,24 @@ hardware_interface::CallbackReturn Ak30System::on_init(
   const char* const expected_command_interface =
       expected_command_interface_name(parsed->config.sub_mode);
   for (const auto& joint : info.joints) {
-    if (joint.command_interfaces.size() != 1U ||
-        joint.command_interfaces[0].name != expected_command_interface) {
+    // ADR-017 revised the shape to one motion interface plus one
+    // command_generation interface, so this checks the MOTION interface by
+    // name instead of counting all of them. Re-counting here would duplicate
+    // CompositeSystem::validate_info() and have to be edited in lockstep with
+    // it; what only this class knows is which motion interface the sub_mode
+    // requires.
+    std::size_t motion_interfaces = 0U;
+    for (const auto& command : joint.command_interfaces) {
+      if (command.name ==
+          mech::mech_hardware_ros2_control::kCommandGenerationInterface) {
+        continue;
+      }
+      ++motion_interfaces;
+      if (command.name != expected_command_interface) {
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    }
+    if (motion_interfaces != 1U) {
       return hardware_interface::CallbackReturn::ERROR;
     }
   }

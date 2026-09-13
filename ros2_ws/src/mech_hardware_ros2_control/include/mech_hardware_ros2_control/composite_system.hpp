@@ -10,6 +10,13 @@
 
 namespace mech::mech_hardware_ros2_control {
 
+// ADR-017: the per-joint command interface that carries command freshness.
+// The hardware always exports it; whether a controller claims it decides which
+// protection tier that joint gets. It is deliberately NOT one of the canonical
+// motion kinds - it commands no motion. It expresses the one thing a bare
+// double* cannot: that the controller spoke again.
+inline constexpr char kCommandGenerationInterface[] = "command_generation";
+
 struct CanonicalCommand final {
   double position{0.0};
   double velocity{0.0};
@@ -35,6 +42,19 @@ struct CommandDispatch final {
   // True only while the joint's command interface is claimed through
   // perform_command_mode_switch(); revoked by stop/deactivate/cleanup/error.
   bool authorized{false};
+  // ADR-017: whether this cycle carries a command the controller actually
+  // refreshed, as opposed to the controller_manager simply having cycled.
+  //
+  // Separate from `authorized` because the two answer different questions and
+  // have different remedies: losing authorization means drop the pending
+  // command (cancel_pending), while merely not being fresh means send nothing
+  // new and leave any pending retry alone. In the weak tier this is always
+  // true whenever `authorized` is - which is exactly the pre-ADR-017
+  // behaviour, stated rather than implied.
+  //
+  // Defaults to false so a dispatch built by something that does not know
+  // about freshness is treated as "no new command" rather than as a refresh.
+  bool fresh{false};
 };
 
 // RuntimePort is the narrow, non-blocking boundary between ros2_control and
@@ -50,6 +70,11 @@ class RuntimePort {
   // Hands down one dispatch per resource. An implementation must treat
   // authorized == false as "this joint has no command at all" - not as a
   // zero command, and not as a reason to keep an earlier command alive.
+  // It must treat fresh == false the same way for the purpose of accepting a
+  // NEW command (ADR-017), but must NOT cancel an already-pending one: a
+  // command under backpressure is still bounded by its own deadline, and a
+  // controller falling quiet is not a reason to abandon a command it already
+  // gave.
   [[nodiscard]] virtual bool write(const CommandDispatch* commands,
                                    std::size_t count) noexcept = 0;
   // Drops any pending-but-unsent command for one resource and clears its
@@ -142,12 +167,30 @@ class CompositeSystem : public hardware_interface::SystemInterface {
   std::vector<std::string> joint_command_interface_names_;
   std::vector<CanonicalCommand> commands_;
   std::vector<CanonicalState> states_;
+  // ADR-017: the storage behind each joint's exported command_generation
+  // interface. One cell per joint - sharing a cell would make one controller's
+  // refresh look like a refresh of every joint.
+  std::vector<double> generations_;
   // Per-joint transmit authorization (ADR-015), and the single source of
   // truth for what perform_command_mode_switch() has granted. Deliberately
   // not std::vector<bool>: an out-of-range index into that specialization
   // lands on padding bits inside the same word, so it neither crashes nor
   // trips AddressSanitizer.
   std::vector<unsigned char> authorized_;
+  // ADR-017 Decision 2: whether each joint's controller also claimed the
+  // generation interface, i.e. which protection tier that joint is in. Set
+  // from the start_interfaces list the manager passes to
+  // perform_command_mode_switch(), so the tier is OBSERVED rather than
+  // declared - nothing a deployment or a controller says can move a joint into
+  // the strong tier without actually holding the interface.
+  std::vector<unsigned char> generation_claimed_;
+  // ADR-017 Decision 3: the generation value the hardware has already acted
+  // on. A command counts as new only while the exported interface differs
+  // from this. Re-seeded from the buffer whenever a claim is taken or dropped
+  // (Decision 3.4), which is what stops a re-claimed joint from replaying the
+  // previous controller's target: the value is already the baseline, so it is
+  // not a change until someone writes a different one.
+  std::vector<double> generation_baseline_;
   // Pre-allocated per-cycle dispatch buffer, derived from commands_ and
   // authorized_. Held as a member so write() allocates nothing.
   std::vector<CommandDispatch> dispatch_;

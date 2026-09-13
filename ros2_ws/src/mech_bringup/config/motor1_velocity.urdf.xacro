@@ -57,6 +57,12 @@
     </hardware>
     <joint name="motor1_joint">
       <command_interface name="velocity"/>
+      <!-- ADR-017: always declared because the hardware always
+           exports it. Claiming it is the controller's choice: a
+           controller that does, gets freshness protection; a stock
+           ros2_control controller that does not, still drives this
+           joint. -->
+      <command_interface name="command_generation"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
       <state_interface name="effort"/>

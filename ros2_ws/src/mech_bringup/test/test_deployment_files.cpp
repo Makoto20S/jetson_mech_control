@@ -26,6 +26,8 @@
 
 #include "mech_bringup/ak30_runtime_params.hpp"
 
+#include "mech_hardware_ros2_control/composite_system.hpp"
+
 #include "mech_protocol_cubemars/ak30_mapping.hpp"
 
 namespace mech::mech_bringup {
@@ -142,11 +144,17 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
     EXPECT_NE(urdf.find("<command_interface name=\"" + expected_interface +
                         "\"/>"),
               std::string::npos);
-    // Exactly one command interface: the three canonical names occur only
-    // once combined (the expected one), and the other two never appear as
-    // command interfaces. <state_interface> lines reuse the same names, so
-    // count command_interface tags specifically.
+    // ADR-017: exactly one MOTION command interface (the expected one; the
+    // other two canonical names never appear as command interfaces) plus
+    // exactly one command_generation interface. <state_interface> lines reuse
+    // the same names, so count command_interface tags specifically.
+    //
+    // The generation interface is required in the URDF because the hardware
+    // exports it unconditionally - a deployment that omitted it would disagree
+    // with what CompositeSystem exports. That is separate from whether a
+    // controller claims it, which stays the controller's choice.
     std::size_t command_tags = 0;
+    std::size_t generation_tags = 0;
     std::size_t position = 0;
     while (true) {
       const auto hit = urdf.find("<command_interface name=\"", position);
@@ -154,10 +162,19 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
         break;
       }
       ++command_tags;
-      position = urdf.find('>', hit);
-      ASSERT_NE(position, std::string::npos);
+      const auto close = urdf.find('>', hit);
+      ASSERT_NE(close, std::string::npos);
+      if (urdf.compare(hit, close - hit,
+                       std::string("<command_interface name=\"") +
+                           mech::mech_hardware_ros2_control::
+                               kCommandGenerationInterface +
+                           "\"/") == 0) {
+        ++generation_tags;
+      }
+      position = close;
     }
-    EXPECT_EQ(command_tags, 1U);
+    EXPECT_EQ(command_tags, 2U);
+    EXPECT_EQ(generation_tags, 1U);
     for (const auto& states :
          {std::string("position"), std::string("velocity"),
           std::string("effort")}) {

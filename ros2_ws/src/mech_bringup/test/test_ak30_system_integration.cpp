@@ -129,7 +129,12 @@ class Ak30SystemTest : public ::testing::Test {
     hardware_interface::ComponentInfo joint;
     joint.name = "motor1_joint";
     joint.type = "joint";
-    joint.command_interfaces = {interface(hardware_interface::HW_IF_POSITION)};
+    // ADR-017 shape: one motion command interface plus the always-exported
+    // command_generation interface.
+    joint.command_interfaces = {
+        interface(hardware_interface::HW_IF_POSITION),
+        interface(
+            mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
     joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                               interface(hardware_interface::HW_IF_VELOCITY),
                               interface(hardware_interface::HW_IF_EFFORT)};
@@ -150,7 +155,9 @@ TEST_F(Ak30SystemTest, ClaimWriteReadRoundTripsThroughTheForceRuntime) {
   auto states = system_.export_state_interfaces();
   auto commands = system_.export_command_interfaces();
   ASSERT_EQ(states.size(), 3U);
-  ASSERT_EQ(commands.size(), 1U);
+  // ADR-017: one motion command interface plus the always-exported
+  // command_generation interface.
+  ASSERT_EQ(commands.size(), 2U);
   ASSERT_EQ(system_.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_TRUE(establish_feedback(system_, *transport_));
@@ -361,7 +368,9 @@ TEST_P(Ak30SubModeSystemTest, RoundTripsThroughTheSubModeCommandInterface) {
   hardware_interface::ComponentInfo joint;
   joint.name = "motor1_joint";
   joint.type = "joint";
-  joint.command_interfaces = {interface(command_interface)};
+  joint.command_interfaces = {
+      interface(command_interface),
+      interface(mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
   joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                             interface(hardware_interface::HW_IF_VELOCITY),
                             interface(hardware_interface::HW_IF_EFFORT)};
@@ -370,7 +379,9 @@ TEST_P(Ak30SubModeSystemTest, RoundTripsThroughTheSubModeCommandInterface) {
   auto states = system.export_state_interfaces();
   auto commands = system.export_command_interfaces();
   ASSERT_EQ(states.size(), 3U);
-  ASSERT_EQ(commands.size(), 1U);
+  // ADR-017: one motion command interface plus the always-exported
+  // command_generation interface.
+  ASSERT_EQ(commands.size(), 2U);
   EXPECT_EQ(commands[0].get_name(),
             std::string("motor1_joint/") + command_interface);
   ASSERT_EQ(system.on_configure(lifecycle_state()),

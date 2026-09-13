@@ -99,7 +99,12 @@ constexpr std::int64_t kFeedbackPeriodNs = 20000000;
   hardware_interface::ComponentInfo joint;
   joint.name = kJointName;
   joint.type = "joint";
-  joint.command_interfaces = {interface(hardware_interface::HW_IF_POSITION)};
+  // ADR-017 shape: one motion command interface plus the always-exported
+  // command_generation interface.
+  joint.command_interfaces = {
+      interface(hardware_interface::HW_IF_POSITION),
+      interface(
+          mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
   joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                             interface(hardware_interface::HW_IF_VELOCITY),
                             interface(hardware_interface::HW_IF_EFFORT)};

@@ -32,7 +32,14 @@ bool FoundationHarness::configure(std::size_t joint_count) noexcept {
     hardware_interface::ComponentInfo joint;
     joint.name = "joint_" + std::to_string(index + 1U);
     joint.type = "joint";
-    joint.command_interfaces = {interface(hardware_interface::HW_IF_POSITION)};
+    // ADR-017 shape: one motion command interface plus the always-exported
+    // command_generation interface. The harness claims only the motion
+    // interface, so it exercises the WEAK tier - which is the same shape a
+    // stock ros2_control controller presents, and therefore worth keeping.
+    joint.command_interfaces = {
+        interface(hardware_interface::HW_IF_POSITION),
+        interface(
+            mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
     joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                               interface(hardware_interface::HW_IF_VELOCITY),
                               interface(hardware_interface::HW_IF_EFFORT)};
