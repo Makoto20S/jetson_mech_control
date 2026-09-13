@@ -24,6 +24,12 @@ joint_state_broadcaster:
 # target is clamped to [minimum, maximum] and slews at max_slew_per_second,
 # with the ADR-012 staged watchdog TTLs - the same contract the Foundation
 # harness exercises.
+#
+# Targets arrive on the controller-relative topic ~/target_position
+# (std_msgs/Float64), i.e. /motor1_position_controller/target_position. Each
+# message refreshes the TTL even when it carries the same number; a bare
+# control cycle never does. The watchdog runs on a steady clock rather than
+# ROS time, so a frozen use_sim_time cannot keep a stale target alive.
 motor1_position_controller:
   ros__parameters:
     joint: motor1_joint

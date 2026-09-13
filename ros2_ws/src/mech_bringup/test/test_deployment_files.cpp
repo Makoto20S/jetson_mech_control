@@ -191,17 +191,29 @@ TEST_F(DeploymentFilesTest, ControllersYamlUsesTheRegisteredPluginName) {
 TEST_F(DeploymentFilesTest, LaunchFileReferencesExistingFilesAndStaysSafe) {
   EXPECT_NE(launch_.find("motor1.urdf.xacro"), std::string::npos);
   EXPECT_NE(launch_.find("motor1_controllers.yaml"), std::string::npos);
-  // The position-controller spawner must stay commented out: uncommenting
-  // it arms position commands, which the file's warning and ADR-006 gate
-  // both call out. The state broadcaster alone is safe to spawn.
-  // The only occurrence of the spawner argument must be inside a comment.
-  const std::string spawner_arg = "arguments=['motor1_position_controller']";
-  auto position = launch_.find(spawner_arg);
+  // The position-controller spawner must stay commented out: uncommenting it
+  // arms position commands, which the file's warning and ADR-006 both gate.
+  // The state broadcaster alone is safe to spawn.
+  //
+  // Asserted over EVERY mention of the controller rather than one exact
+  // spawner literal. The literal form broke the moment the spawner line grew
+  // a '--inactive' argument, and a guard that a harmless edit can silently
+  // stop matching is not a guard.
+  const std::string controller = "motor1_position_controller";
+  auto position = launch_.find(controller);
   ASSERT_NE(position, std::string::npos);
-  EXPECT_EQ(launch_.find(spawner_arg, position + 1), std::string::npos);
-  const auto line_start = launch_.rfind('\n', position);
-  const auto line = launch_.substr(line_start + 1, position - line_start - 1);
-  EXPECT_NE(line.find('#'), std::string::npos);
+  std::size_t mentions = 0U;
+  while (position != std::string::npos) {
+    ++mentions;
+    const auto newline = launch_.rfind('\n', position);
+    const std::size_t line_start =
+        newline == std::string::npos ? 0U : newline + 1U;
+    const auto line = launch_.substr(line_start, position - line_start);
+    EXPECT_NE(line.find('#'), std::string::npos)
+        << "uncommented mention of " << controller << " at offset " << position;
+    position = launch_.find(controller, position + 1U);
+  }
+  EXPECT_GT(mentions, 0U);
   EXPECT_NE(launch_.find("arguments=['joint_state_broadcaster']"),
             std::string::npos);
 }

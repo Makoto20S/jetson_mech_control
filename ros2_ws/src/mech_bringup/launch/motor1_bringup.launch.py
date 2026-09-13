@@ -60,9 +60,24 @@ def generate_launch_description():
         ),
         # Keep the position controller spawner commented out for offline
         # bring-up: uncommenting it arms position commands on the motor.
+        #
+        # When it IS armed (T7), it must not be spawned the plain way. ADR-016
+        # refuses the command claim until valid feedback has flowed, and the
+        # spawner calls switch_controller exactly once with STRICT strictness
+        # (controller_manager/spawner.py): a refused claim is a valid service
+        # response, so the helper's max_attempts retry does not apply and the
+        # spawner logs "Failed to activate controller" and exits 1. Spawning at
+        # launch therefore races the first feedback frame, which at motor1's
+        # configured 50 Hz is up to 20 ms after the hardware activates.
+        #
+        # Load it inactive and activate explicitly once feedback is confirmed:
         # Node(
         #     package='controller_manager',
         #     executable='spawner',
-        #     arguments=['motor1_position_controller'],
+        #     arguments=['motor1_position_controller', '--inactive'],
         # ),
+        #
+        # Once active, the target entry is the controller-relative topic
+        # ~/target_position (std_msgs/Float64), which resolves to
+        # /motor1_position_controller/target_position.
     ])
