@@ -91,6 +91,14 @@ class Ak30ForceControlRuntime final
   }
 
   [[nodiscard]] bool holding() const noexcept { return holding_; }
+  // Device command frames this runtime has actually put on the wire. Counts
+  // ACCEPTED submissions only: an unauthorized or unrefreshed cycle is not a
+  // command, and a WouldBlock retry re-sends the same one. This is what makes
+  // "the motor was never commanded" a repeatable assertion rather than an
+  // external trace session (see T6, where it had to be strace).
+  [[nodiscard]] std::uint64_t motor_command_frames() const noexcept {
+    return motor_command_frames_;
+  }
   [[nodiscard]] bool expired() const noexcept { return expired_; }
   // ADR-016 Decision 5: the quality evidence must survive the ROS boundary.
   // The exported state interfaces are three bare doubles with nowhere to put
@@ -140,6 +148,7 @@ class Ak30ForceControlRuntime final
   bool expired_{false};
   // ADR-016: quality of the most recent snapshot, and whether it was usable.
   mech::mech_control_core::StatusSnapshot last_status_{};
+  std::uint64_t motor_command_frames_{0U};
   bool has_valid_sample_{false};
 };
 

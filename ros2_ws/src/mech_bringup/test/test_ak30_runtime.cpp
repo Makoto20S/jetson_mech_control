@@ -888,5 +888,61 @@ TEST_F(Ak30RuntimeTest, CancelPendingIgnoresOutOfRangeIndex) {
   EXPECT_EQ(transport_->pending_transmit(), 1U);
 }
 
+// The count that turns "no motor command was transmitted" into a repeatable
+// assertion instead of an external strace session. T6 had to prove TX = 0 on
+// the Jetson by tracing write() syscalls, because nothing in the code counted.
+// That works, but it has to be rebuilt from scratch every bench run - and T7
+// sends real commands while a motor is live, which is the wrong moment to be
+// assembling a measurement tool.
+//
+// It counts ACCEPTED device commands: a cycle that was not authorized, and a
+// cycle that was authorized but carried no refresh, are both "no command".
+TEST_F(Ak30RuntimeTest, MotorCommandFramesCountsOnlyAcceptedTransmissions) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  EXPECT_EQ(runtime_->motor_command_frames(), 0U);
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_unauthorized(*runtime_, command));
+  clock_.set(2000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(runtime_->motor_command_frames(), 0U) << "unclaimed (ADR-015)";
+
+  ASSERT_TRUE(write_authorized_stale(*runtime_, command));
+  clock_.set(4000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(runtime_->motor_command_frames(), 0U) << "unrefreshed (ADR-017)";
+
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  clock_.set(6000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  EXPECT_EQ(runtime_->motor_command_frames(), 1U);
+}
+
+// Backpressure must not inflate the count. The retry re-sends the SAME command,
+// so one command that eventually goes out is one frame however many cycles the
+// transport made it wait - otherwise the number would measure transport luck
+// rather than how often the device was commanded.
+TEST_F(Ak30RuntimeTest, MotorCommandFramesDoesNotCountAWouldBlockRetry) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  transport_->force_next_send_results({TransportResult::WouldBlock});
+  clock_.set(2000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  EXPECT_EQ(runtime_->motor_command_frames(), 0U)
+      << "a command that never left the host is not a transmitted frame";
+
+  clock_.set(3000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  EXPECT_EQ(runtime_->motor_command_frames(), 1U);
+}
+
 }  // namespace
 }  // namespace mech::mech_bringup

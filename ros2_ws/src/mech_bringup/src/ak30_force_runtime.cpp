@@ -341,6 +341,10 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
   if (result == AdapterResult::Ok) {
     fresh_write_ = false;
     submitted_once_ = true;
+    // Counted here and nowhere else: this is the one point where a device
+    // command is known to have left the host. The WouldBlock branch below
+    // deliberately does not count - it retries the same command.
+    ++motor_command_frames_;
     return true;
   }
   if (result == AdapterResult::WouldBlock) {
