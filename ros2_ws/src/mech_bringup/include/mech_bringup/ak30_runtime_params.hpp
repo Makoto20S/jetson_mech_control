@@ -23,6 +23,10 @@ namespace mech::mech_bringup {
 struct Ak30RuntimeParams final {
   Ak30RuntimeConfig config{};
   std::string device_path;
+  // ADR-016 Decision 5, opt-in half: emit one structured line per NEW feedback
+  // frame carrying sequence, host arrival time, age, quality and fault code.
+  // Off by default so a deployment that says nothing logs nothing.
+  bool feedback_telemetry_log{false};
 
   // Returns std::nullopt on any invalid or unknown parameter.
   [[nodiscard]] static std::optional<Ak30RuntimeParams> parse(

@@ -183,5 +183,40 @@ TEST(Ak30RuntimeParams, DevicePathIsMandatory) {
   EXPECT_EQ(ok->device_path, "/dev/ttyACM0");
 }
 
+// ADR-016 Decision 5 sanctions "访问器或结构化日志" as how the quality evidence
+// leaves the ROS boundary, and explicitly refuses to widen the state interface
+// shape to carry it. Whether to emit the log is a deployment choice: T7-T9 need
+// it per frame, a long unattended run does not. Default off, so a deployment
+// that says nothing gets no extra logging.
+TEST(Ak30RuntimeParams, FeedbackTelemetryLogDefaultsOffAndIsOptIn) {
+  Params params;
+  params["device_path"] = "/dev/ttyACM0";
+  const auto off = Ak30RuntimeParams::parse(params);
+  ASSERT_TRUE(off.has_value());
+  EXPECT_FALSE(off->feedback_telemetry_log)
+      << "a deployment that never mentions the parameter must not log";
+
+  params["feedback_telemetry_log"] = "true";
+  const auto on = Ak30RuntimeParams::parse(params);
+  ASSERT_TRUE(on.has_value());
+  EXPECT_TRUE(on->feedback_telemetry_log);
+
+  params["feedback_telemetry_log"] = "false";
+  const auto explicit_off = Ak30RuntimeParams::parse(params);
+  ASSERT_TRUE(explicit_off.has_value());
+  EXPECT_FALSE(explicit_off->feedback_telemetry_log);
+}
+
+// A malformed value for a known key must fail the whole parse rather than fall
+// back to the default. A deployment that meant to enable telemetry and mistyped
+// it would otherwise run a bench session producing no evidence and no warning -
+// which is only discovered after the motor has already moved.
+TEST(Ak30RuntimeParams, FeedbackTelemetryLogRejectsAMalformedValue) {
+  Params params;
+  params["device_path"] = "/dev/ttyACM0";
+  params["feedback_telemetry_log"] = "yes";
+  EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+}
+
 }  // namespace
 }  // namespace mech::mech_bringup

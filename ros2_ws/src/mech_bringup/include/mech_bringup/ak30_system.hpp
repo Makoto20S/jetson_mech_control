@@ -5,7 +5,9 @@
 #include <memory>
 #include <string>
 
+#include "mech_bringup/ak30_force_runtime.hpp"
 #include "mech_bringup/ak30_runtime_params.hpp"
+#include "mech_control_core/status.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
 #include "mech_hardware_ros2_control/composite_system.hpp"
 
@@ -65,6 +67,23 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
       std::function<std::shared_ptr<mech::mech_control_core::CdcSerialPort>(
           const std::string&)>;
 
+  // ADR-016 Decision 5: exactly the four fields that must survive the ROS
+  // boundary - quality, sequence, host_rx_time, raw_fault_code. Age is not a
+  // field because it is derivable from consecutive host arrival times, and the
+  // ADR names four things, not five.
+  struct FeedbackTelemetry final {
+    std::uint64_t sequence{0U};
+    std::int64_t host_rx_nanoseconds{0};
+    mech::mech_control_core::SampleQuality quality{};
+    mech::mech_control_core::DeviceState device_state{};
+    std::uint32_t raw_fault_code{0U};
+  };
+
+  // Where a telemetry record goes. The default writes one structured line to
+  // the ROS logger; tests substitute a recorder so "emitted once per new frame"
+  // is an assertion about records rather than about log text.
+  using TelemetrySink = std::function<void(const FeedbackTelemetry&)>;
+
   Ak30System() noexcept;
 
   hardware_interface::CallbackReturn on_init(
@@ -73,17 +92,44 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
       const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::CallbackReturn on_cleanup(
       const rclcpp_lifecycle::State& previous_state) override;
+  hardware_interface::CallbackReturn on_deactivate(
+      const rclcpp_lifecycle::State& previous_state) override;
+  hardware_interface::CallbackReturn on_error(
+      const rclcpp_lifecycle::State& previous_state) override;
+  hardware_interface::return_type read(const rclcpp::Time& time,
+                                       const rclcpp::Duration& period) override;
+
+  // Vendor pass-through init frames this plugin has sent. Separate from the
+  // runtime's motor command count on purpose: the 0x12 frame configures the USB
+  // box and is not a motor command, and T6 requires the two to be counted apart
+  // rather than summed into one "TX" number.
+  [[nodiscard]] std::uint64_t pass_through_frames() const noexcept {
+    return pass_through_frames_;
+  }
 
   // Tests only; call before on_init (mirrors set_runtime's precondition).
   void set_serial_port_factory_for_testing(SerialPortFactory factory) noexcept;
 
+  // Tests only; call before on_init.
+  void set_telemetry_sink_for_testing(TelemetrySink sink) noexcept;
+
  private:
+  void log_frame_summary(const char* reason) const noexcept;
+
   SerialPortFactory serial_factory_;
   std::string device_path_;
   // Declaration order matters: transport_ must be destroyed before serial_
   // (it borrows the port), and both before the base's runtime_.
   std::shared_ptr<mech::mech_control_core::CdcSerialPort> serial_;
   std::unique_ptr<mech::mech_control_core::UsbCdcTransport> transport_;
+  // Non-owning; the base owns the runtime. Used only to read counters and the
+  // status snapshot for diagnostics, never to drive the device.
+  Ak30ForceControlRuntime* runtime_view_{nullptr};
+  TelemetrySink telemetry_sink_;
+  bool telemetry_enabled_{false};
+  std::uint64_t last_emitted_sequence_{0U};
+  bool has_emitted_{false};
+  std::uint64_t pass_through_frames_{0U};
 };
 
 }  // namespace mech::mech_bringup

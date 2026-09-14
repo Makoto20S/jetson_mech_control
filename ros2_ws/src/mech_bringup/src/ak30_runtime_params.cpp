@@ -31,6 +31,7 @@ const std::set<std::string>& known_keys() noexcept {
       "feedback_ttl_ns",
       "zero_offset_rad",
       "position_is_output_shaft",
+      "feedback_telemetry_log",
   };
   return keys;
 }
@@ -225,6 +226,18 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
       return std::nullopt;
     }
     config.mapping.position_is_output_shaft = value;
+  }
+  // ADR-016 Decision 5: the quality evidence leaves the ROS boundary through an
+  // accessor or a structured log, never by widening the state interface shape.
+  // Emitting it is a deployment choice - a bench session needs it per frame, a
+  // long unattended run does not - so it is opt-in and off by default.
+  if (const auto it = params.find("feedback_telemetry_log");
+      it != params.end()) {
+    bool value = false;
+    if (!parse_bool(it->second, value)) {
+      return std::nullopt;
+    }
+    parsed.feedback_telemetry_log = value;
   }
 
   // Cross-field validation the session would also catch, but failing here

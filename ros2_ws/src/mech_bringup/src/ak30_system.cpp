@@ -11,6 +11,7 @@
 
 #include "mech_bringup/ak30_force_runtime.hpp"
 #include "mech_bringup/pass_through_init.hpp"
+#include "rclcpp/rclcpp.hpp"
 #include "mech_bringup/posix_cdc_serial_port.hpp"
 #include "pluginlib/class_list_macros.hpp"
 
@@ -43,6 +44,10 @@ Ak30System::Ak30System() noexcept = default;
 void Ak30System::set_serial_port_factory_for_testing(
     SerialPortFactory factory) noexcept {
   serial_factory_ = std::move(factory);
+}
+
+void Ak30System::set_telemetry_sink_for_testing(TelemetrySink sink) noexcept {
+  telemetry_sink_ = std::move(sink);
 }
 
 hardware_interface::CallbackReturn Ak30System::on_init(
@@ -124,10 +129,14 @@ hardware_interface::CallbackReturn Ak30System::on_init(
   // set_runtime() is refused once the base is initialized
   // (composite_system.cpp), so the runtime must be injected here, before the
   // delegation below - the same ordering the integration tests pin.
-  if (!set_runtime(std::make_unique<Ak30ForceControlRuntime>(
-          *transport_, steady_now, parsed->config))) {
+  auto runtime = std::make_unique<Ak30ForceControlRuntime>(
+      *transport_, steady_now, parsed->config);
+  runtime_view_ = runtime.get();
+  if (!set_runtime(std::move(runtime))) {
+    runtime_view_ = nullptr;
     return hardware_interface::CallbackReturn::ERROR;
   }
+  telemetry_enabled_ = parsed->feedback_telemetry_log;
   return CompositeSystem::on_init(info);
 }
 
@@ -141,6 +150,9 @@ hardware_interface::CallbackReturn Ak30System::on_configure(
     serial_->close();
     return hardware_interface::CallbackReturn::ERROR;
   }
+  // Counted here because this is the only place the plugin emits it, and T6
+  // requires it to stay distinguishable from motor command frames.
+  ++pass_through_frames_;
   return CompositeSystem::on_configure(previous_state);
 }
 
@@ -154,6 +166,93 @@ hardware_interface::CallbackReturn Ak30System::on_cleanup(
   // close: deactivate -> activate re-entry must keep the channel alive.
   serial_->close();
   return result;
+}
+
+namespace {
+
+[[nodiscard]] const char* quality_name(
+    mech::mech_control_core::SampleQuality quality) noexcept {
+  switch (quality) {
+    case mech::mech_control_core::SampleQuality::Valid:    return "Valid";
+    case mech::mech_control_core::SampleQuality::Degraded: return "Degraded";
+    case mech::mech_control_core::SampleQuality::Stale:    return "Stale";
+    case mech::mech_control_core::SampleQuality::Unknown:  return "Unknown";
+    case mech::mech_control_core::SampleQuality::Invalid:  return "Invalid";
+  }
+  return "Unhandled";
+}
+
+}  // namespace
+
+// ADR-016 Decision 5's logging half. Emits at most one record per NEW feedback
+// frame - keyed on the device's own sequence, not on the control cycle - so a
+// 500 Hz loop against a 50 Hz device produces 50 records per second rather than
+// 500 copies of the same sample. A repeated sequence means the manager cycled,
+// not that the device spoke, and recording it would misrepresent the very
+// arrival timing this evidence exists to establish.
+hardware_interface::return_type Ak30System::read(
+    const rclcpp::Time& time, const rclcpp::Duration& period) {
+  const auto result = CompositeSystem::read(time, period);
+  if (!telemetry_enabled_ || runtime_view_ == nullptr) {
+    return result;
+  }
+  const auto& status = runtime_view_->last_status();
+  // No sample yet: nothing arrived, so there is nothing to record. This is the
+  // normal startup transient at 50 Hz against a 500 Hz loop (ADR-016).
+  if (!status.host_rx_time.has_value()) {
+    return result;
+  }
+  if (has_emitted_ && status.sequence == last_emitted_sequence_) {
+    return result;
+  }
+  last_emitted_sequence_ = status.sequence;
+  has_emitted_ = true;
+
+  const FeedbackTelemetry record{status.sequence,
+                                 status.host_rx_time->nanoseconds(),
+                                 status.quality, status.device_state,
+                                 status.raw_fault_code};
+  if (telemetry_sink_) {
+    telemetry_sink_(record);
+    return result;
+  }
+  // Fixed field order, one line per frame, so a bench log can be parsed after
+  // the fact without guessing.
+  RCLCPP_INFO(rclcpp::get_logger("ak30_system"),
+              "feedback seq=%lu host_rx_ns=%ld quality=%s fault=%u",
+              static_cast<unsigned long>(record.sequence),
+              static_cast<long>(record.host_rx_nanoseconds),
+              quality_name(record.quality),
+              static_cast<unsigned>(record.raw_fault_code));
+  return result;
+}
+
+// One summary line on the way out, on both the normal and the failing path.
+// T6 had to reconstruct these numbers from an external trace; a run that ends -
+// cleanly or in error - should say how many motor commands it sent without
+// anyone having to prepare a measurement first.
+hardware_interface::CallbackReturn Ak30System::on_deactivate(
+    const rclcpp_lifecycle::State& previous_state) {
+  const auto result = CompositeSystem::on_deactivate(previous_state);
+  log_frame_summary("deactivate");
+  return result;
+}
+
+hardware_interface::CallbackReturn Ak30System::on_error(
+    const rclcpp_lifecycle::State& previous_state) {
+  const auto result = CompositeSystem::on_error(previous_state);
+  log_frame_summary("error");
+  return result;
+}
+
+void Ak30System::log_frame_summary(const char* reason) const noexcept {
+  const auto motor_frames =
+      runtime_view_ == nullptr ? 0U : runtime_view_->motor_command_frames();
+  RCLCPP_INFO(rclcpp::get_logger("ak30_system"),
+              "frame summary on %s: motor_command_frames=%lu "
+              "pass_through_frames=%lu",
+              reason, static_cast<unsigned long>(motor_frames),
+              static_cast<unsigned long>(pass_through_frames_));
 }
 
 }  // namespace mech::mech_bringup

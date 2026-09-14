@@ -505,5 +505,99 @@ TEST_F(Ak30SystemPluginTest, UnknownSubModeIsRejectedRatherThanDefaulted) {
   EXPECT_EQ(serial_requests_, 0);
 }
 
+// ADR-016 Decision 5's logging half, stated as behaviour rather than as log
+// text. The device reports at 50 Hz while the loop runs at 500 Hz, so the
+// record must be keyed on the device's own sequence: one per NEW frame. If it
+// were emitted per control cycle, the log would show ten arrivals for every
+// real one and the arrival timing it exists to establish would be fiction.
+TEST_F(Ak30SystemPluginTest, TelemetryIsEmittedOncePerNewFeedbackFrame) {
+  use_fake_serial();
+  std::vector<Ak30System::FeedbackTelemetry> records;
+  system_.set_telemetry_sink_for_testing(
+      [&records](const Ak30System::FeedbackTelemetry& record) {
+        records.push_back(record);
+      });
+  auto params = valid_params();
+  params["feedback_telemetry_log"] = "true";
+  ASSERT_EQ(system_.on_init(position_hardware_info(params)),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
+
+  // Nothing has arrived: there is no sample to describe, so no record.
+  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_TRUE(records.empty());
+
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_TRUE(records[0].host_rx_nanoseconds != 0);
+
+  // Four further cycles with no new frame. The sample is still the same one,
+  // so the count must not move.
+  for (int cycle = 0; cycle < 4; ++cycle) {
+    EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  }
+  EXPECT_EQ(records.size(), 1U)
+      << "a bare control cycle was recorded as a device arrival";
+}
+
+// Off by default: a deployment that never mentions the parameter must produce
+// no telemetry at all, so enabling it is always a deliberate act.
+TEST_F(Ak30SystemPluginTest, TelemetryIsSilentUnlessTheDeploymentAsksForIt) {
+  use_fake_serial();
+  std::vector<Ak30System::FeedbackTelemetry> records;
+  system_.set_telemetry_sink_for_testing(
+      [&records](const Ak30System::FeedbackTelemetry& record) {
+        records.push_back(record);
+      });
+  ASSERT_EQ(system_.on_init(position_hardware_info(valid_params())),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_TRUE(records.empty());
+}
+
+// The 0x12 vendor frame configures the USB box; it is not a motor command.
+// T6 required the two to be counted apart rather than summed, and this is the
+// in-repo half of that - one init frame per configure, and no motor command
+// frames at all while nothing has claimed the joint (ADR-015).
+TEST_F(Ak30SystemPluginTest, PassThroughFramesAreCountedApartFromMotorCommands) {
+  use_fake_serial();
+  EXPECT_EQ(system_.pass_through_frames(), 0U);
+  ASSERT_EQ(system_.on_init(position_hardware_info(valid_params())),
+            hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system_.pass_through_frames(), 0U) << "on_init does no device I/O";
+
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system_.pass_through_frames(), 1U);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+  for (int cycle = 0; cycle < 20; ++cycle) {
+    EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+    EXPECT_EQ(system_.write(time, period), hardware_interface::return_type::OK);
+  }
+  // Twenty cycles with no controller claiming the joint: the box was armed
+  // once and the motor was never commanded.
+  EXPECT_EQ(system_.pass_through_frames(), 1U);
+}
+
 }  // namespace
 }  // namespace mech::mech_bringup
