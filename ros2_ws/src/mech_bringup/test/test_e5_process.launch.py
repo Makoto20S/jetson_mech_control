@@ -7,6 +7,7 @@ import unittest
 
 import launch
 import launch.actions
+import launch.event_handlers
 import launch_testing.asserts
 import launch_ros.actions
 import launch_testing.actions
@@ -53,14 +54,27 @@ def generate_test_description():
         arguments=["joint_state_broadcaster", "--controller-manager", MANAGER],
         output="screen",
     )
-    spawner = launch.actions.TimerAction(
+    broadcaster_start = launch.actions.TimerAction(
         period=1.0,
-        actions=[broadcaster_spawner, controller_spawner],
+        actions=[broadcaster_spawner],
+    )
+    controller_start = launch.actions.RegisterEventHandler(
+        launch.event_handlers.OnProcessExit(
+            target_action=broadcaster_spawner,
+            on_exit=[controller_spawner],
+        )
+    )
+    tests_start = launch.actions.RegisterEventHandler(
+        launch.event_handlers.OnProcessExit(
+            target_action=controller_spawner,
+            on_exit=[launch_testing.actions.ReadyToTest()],
+        )
     )
     return launch.LaunchDescription([
         manager,
-        spawner,
-        launch_testing.actions.ReadyToTest(),
+        broadcaster_start,
+        controller_start,
+        tests_start,
     ]), {"manager_process": manager,
          "controller_spawner": controller_spawner,
          "broadcaster_spawner": broadcaster_spawner}
