@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "controller_interface/controller_interface.hpp"
@@ -71,6 +72,8 @@ class DemoController final : public controller_interface::ControllerInterface {
   struct TargetCommand final {
     double value{0.0};
     std::uint64_t generation{0U};
+    std::int64_t arrival_nanoseconds{0};
+    std::uint64_t activation_epoch{0U};
   };
 
   DemoController();
@@ -100,7 +103,8 @@ class DemoController final : public controller_interface::ControllerInterface {
   [[nodiscard]] std::uint64_t target_generation() const noexcept;
 
  private:
-  void accept(double target) noexcept;
+  [[nodiscard]] bool accept(double target, std::int64_t arrival_nanoseconds,
+                            std::uint64_t activation_epoch) noexcept;
 
   std::string joint_name_;
   BoundedTarget limits_{};
@@ -108,7 +112,12 @@ class DemoController final : public controller_interface::ControllerInterface {
   MonotonicClock clock_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr subscription_;
   realtime_tools::RealtimeBuffer<TargetCommand> inbox_;
+  // Serializes the subscription and public non-RT producer. Lifecycle and the
+  // RT update path never acquire this mutex; activation epochs reject a
+  // producer delayed across a lifecycle transition.
+  std::mutex producer_mutex_;
   std::atomic<std::uint64_t> generation_{0U};
+  std::atomic<std::uint64_t> activation_epoch_{0U};
   std::uint64_t applied_generation_{0U};
   double command_{0.0};
   // ADR-017: the value this controller publishes on its claimed

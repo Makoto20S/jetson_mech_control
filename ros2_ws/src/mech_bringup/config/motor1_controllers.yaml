@@ -22,8 +22,8 @@ joint_state_broadcaster:
 # The demo controller is the bounded, slew-limited reference position
 # controller from mech_controllers (mech_controllers/DemoController). Its
 # target is clamped to [minimum, maximum] and slews at max_slew_per_second,
-# with the ADR-012 staged watchdog TTLs - the same contract the Foundation
-# harness exercises.
+# with ADR-018's provisional upstream target lifetime. The independent
+# controller-to-hardware lease remains 4/6 ms in the motor xacro.
 #
 # Targets arrive on the controller-relative topic ~/target_position
 # (std_msgs/Float64), i.e. /motor1_position_controller/target_position. Each
@@ -36,5 +36,5 @@ motor1_position_controller:
     minimum: -1.0
     maximum: 1.0
     max_slew_per_second: 2.0
-    ttl_nanoseconds: 4000000
-    hard_ttl_nanoseconds: 6000000
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000

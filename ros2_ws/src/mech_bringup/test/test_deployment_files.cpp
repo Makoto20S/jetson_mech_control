@@ -131,6 +131,27 @@ TEST_F(DeploymentFilesTest, UrdfParamsAreAllKnownToTheParser) {
   }
 }
 
+TEST_F(DeploymentFilesTest, TargetAndHardwareLifetimesRemainDistinct) {
+  EXPECT_NE(controllers_.find("target_ttl_nanoseconds: 100000000"),
+            std::string::npos);
+  EXPECT_NE(controllers_.find("target_hard_ttl_nanoseconds: 106000000"),
+            std::string::npos);
+  EXPECT_EQ(controllers_.find("\n    ttl_nanoseconds:"), std::string::npos);
+  EXPECT_EQ(controllers_.find("\n    hard_ttl_nanoseconds:"),
+            std::string::npos);
+
+  for (const auto& [name, urdf] : urdfs_) {
+    SCOPED_TRACE(name);
+    EXPECT_NE(urdf.find("<param name=\"command_ttl_ns\">4000000</param>"),
+              std::string::npos);
+    EXPECT_NE(
+        urdf.find("<param name=\"command_hard_ttl_ns\">6000000</param>"),
+        std::string::npos);
+    EXPECT_EQ(urdf.find("100000000"), std::string::npos);
+    EXPECT_EQ(urdf.find("106000000"), std::string::npos);
+  }
+}
+
 // The single command interface in each variant's URDF must be exactly the
 // interface its sub_mode requires (ADR-014): Position -> position,
 // Velocity -> velocity, Torque -> effort. States stay [position, velocity,

@@ -124,20 +124,34 @@ std::uint64_t DemoController::target_generation() const noexcept {
 // Runs on the executor thread for a topic message, or on the caller's thread
 // for set_target(). The generation is published last, with release ordering,
 // so update() can never see a new generation paired with an older value.
-void DemoController::accept(double target) noexcept {
+bool DemoController::accept(double target, std::int64_t arrival_nanoseconds,
+                            std::uint64_t activation_epoch) noexcept {
+  std::lock_guard<std::mutex> lock(producer_mutex_);
+  if (!active_.load(std::memory_order_acquire) ||
+      activation_epoch != activation_epoch_.load(std::memory_order_acquire)) {
+    return false;
+  }
   const auto generation = generation_.load(std::memory_order_relaxed) + 1U;
-  inbox_.writeFromNonRT(TargetCommand{target, generation});
+  inbox_.writeFromNonRT(
+      TargetCommand{target, generation, arrival_nanoseconds, activation_epoch});
   generation_.store(generation, std::memory_order_release);
+  return true;
 }
 
 controller_interface::CallbackReturn DemoController::on_init() {
   try {
+    const auto& overrides =
+        get_node()->get_node_parameters_interface()->get_parameter_overrides();
+    if (overrides.count("ttl_nanoseconds") != 0U ||
+        overrides.count("hard_ttl_nanoseconds") != 0U) {
+      return controller_interface::CallbackReturn::ERROR;
+    }
     auto_declare<std::string>("joint", "joint_1");
     auto_declare<double>("minimum", -1.0);
     auto_declare<double>("maximum", 1.0);
     auto_declare<double>("max_slew_per_second", 1.0);
-    auto_declare<int64_t>("ttl_nanoseconds", 4000000);
-    auto_declare<int64_t>("hard_ttl_nanoseconds", 6000000);
+    auto_declare<int64_t>("target_ttl_nanoseconds", 100000000);
+    auto_declare<int64_t>("target_hard_ttl_nanoseconds", 106000000);
   } catch (...) {
     return controller_interface::CallbackReturn::ERROR;
   }
@@ -152,9 +166,10 @@ controller_interface::CallbackReturn DemoController::on_configure(
     limits_.maximum = get_node()->get_parameter("maximum").as_double();
     limits_.max_slew_per_second =
         get_node()->get_parameter("max_slew_per_second").as_double();
-    limits_.ttl_nanoseconds = get_node()->get_parameter("ttl_nanoseconds").as_int();
+    limits_.ttl_nanoseconds =
+        get_node()->get_parameter("target_ttl_nanoseconds").as_int();
     limits_.hard_ttl_nanoseconds =
-        get_node()->get_parameter("hard_ttl_nanoseconds").as_int();
+        get_node()->get_parameter("target_hard_ttl_nanoseconds").as_int();
   } catch (...) {
     return controller_interface::CallbackReturn::ERROR;
   }
@@ -168,6 +183,8 @@ controller_interface::CallbackReturn DemoController::on_configure(
       "~/target_position", rclcpp::SystemDefaultsQoS(),
       [this](const std_msgs::msg::Float64::SharedPtr message) {
         if (message == nullptr) return;
+        const auto activation_epoch =
+            activation_epoch_.load(std::memory_order_acquire);
         // A target only means something while this controller holds the claim.
         // Dropping here rather than buffering is what stops a re-activation
         // from replaying something a publisher sent while the joint belonged
@@ -177,7 +194,8 @@ controller_interface::CallbackReturn DemoController::on_configure(
         // publisher, not a request for the limit, and clamping it would turn
         // that bug into a full-scale motion command.
         if (!std::isfinite(message->data)) return;
-        accept(message->data);
+        const auto arrival_nanoseconds = clock_();
+        (void)accept(message->data, arrival_nanoseconds, activation_epoch);
       });
 
   command_ = 0.0;
@@ -213,6 +231,7 @@ controller_interface::CallbackReturn DemoController::on_activate(
   // Ignore anything already in the inbox: a target that predates this
   // activation is not a target for this activation.
   applied_generation_ = generation_.load(std::memory_order_acquire);
+  activation_epoch_.fetch_add(1U, std::memory_order_acq_rel);
   active_.store(true, std::memory_order_release);
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -220,6 +239,7 @@ controller_interface::CallbackReturn DemoController::on_activate(
 controller_interface::CallbackReturn DemoController::on_deactivate(
     const rclcpp_lifecycle::State&) {
   active_.store(false, std::memory_order_release);
+  activation_epoch_.fetch_add(1U, std::memory_order_acq_rel);
   limiter_.clear();
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -261,14 +281,16 @@ controller_interface::return_type DemoController::update(
   if (generation_.load(std::memory_order_acquire) != applied_generation_) {
     const TargetCommand pending = *inbox_.readFromRT();
     if (pending.generation != applied_generation_) {
-      if (!limiter_.submit(pending.value, now)) {
+      applied_generation_ = pending.generation;
+      if (pending.activation_epoch ==
+              activation_epoch_.load(std::memory_order_acquire) &&
+          !limiter_.submit(pending.value, pending.arrival_nanoseconds)) {
         // submit() refuses a non-finite target (already filtered above) or a
         // clock so near int64 overflow that the deadline cannot be expressed.
         // Either way the inputs are broken, so say so rather than carry on
         // with a target whose deadline is unknown.
         return controller_interface::return_type::ERROR;
       }
-      applied_generation_ = pending.generation;
     }
   }
 
@@ -306,11 +328,13 @@ controller_interface::return_type DemoController::update(
 // executor. It routes through the same buffer and counter as the
 // subscription, so the two entries cannot drift apart.
 bool DemoController::set_target(double target) noexcept {
+  const auto activation_epoch =
+      activation_epoch_.load(std::memory_order_acquire);
   if (!active_.load(std::memory_order_acquire) || !std::isfinite(target)) {
     return false;
   }
-  accept(target);
-  return true;
+  const auto arrival_nanoseconds = clock_();
+  return accept(target, arrival_nanoseconds, activation_epoch);
 }
 
 }  // namespace mech::mech_controllers

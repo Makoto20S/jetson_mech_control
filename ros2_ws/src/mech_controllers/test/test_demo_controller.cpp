@@ -1,9 +1,12 @@
 #include "mech_controllers/demo_controller.hpp"
 
 #include <chrono>
+#include <condition_variable>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -45,8 +48,8 @@ class DemoControllerTest : public ::testing::Test {
     node->set_parameter({"minimum", -1.0});
     node->set_parameter({"maximum", 1.0});
     node->set_parameter({"max_slew_per_second", 2.0});
-    node->set_parameter({"ttl_nanoseconds", 4000000});
-    node->set_parameter({"hard_ttl_nanoseconds", 6000000});
+    node->set_parameter({"target_ttl_nanoseconds", 4000000});
+    node->set_parameter({"target_hard_ttl_nanoseconds", 6000000});
   }
 
   // Hands the controller the interfaces it claims: the joint's position command
@@ -253,6 +256,32 @@ TEST(DemoControllerConfigure, RejectsHardTtlNotGreaterThanTtl) {
   EXPECT_FALSE(limiter.configure(limits));
 }
 
+TEST_F(DemoControllerTest, DeclaresProductionTargetLifetimeDefaults) {
+  DemoController controller;
+  ASSERT_EQ(controller.init("production_defaults"),
+            controller_interface::return_type::OK);
+  const auto node = controller.get_node();
+  EXPECT_EQ(node->get_parameter("target_ttl_nanoseconds").as_int(),
+            100000000);
+  EXPECT_EQ(node->get_parameter("target_hard_ttl_nanoseconds").as_int(),
+            106000000);
+  EXPECT_FALSE(node->has_parameter("ttl_nanoseconds"));
+  EXPECT_FALSE(node->has_parameter("hard_ttl_nanoseconds"));
+}
+
+TEST_F(DemoControllerTest, RejectsExplicitLegacyTargetLifetimeNames) {
+  for (const auto& legacy_name : {"ttl_nanoseconds", "hard_ttl_nanoseconds"}) {
+    DemoController controller;
+    rclcpp::NodeOptions options;
+    options.allow_undeclared_parameters(true)
+        .automatically_declare_parameters_from_overrides(true)
+        .parameter_overrides({rclcpp::Parameter(legacy_name, 4000000)});
+    EXPECT_EQ(controller.init(std::string("legacy_") + legacy_name, "", options),
+              controller_interface::return_type::ERROR)
+        << legacy_name;
+  }
+}
+
 // The watchdog must be measured against a clock nobody can pause. update() is
 // handed an rclcpp::Time that may be ROS time, and a deployment with a frozen
 // use_sim_time hands it the same stamp on every cycle - so deriving the
@@ -280,6 +309,143 @@ TEST_F(DemoControllerTest, FrozenRosTimeStillLetsAStaleTargetExpire) {
     last = cycle();
   }
   EXPECT_EQ(last, controller_interface::return_type::ERROR);
+}
+
+// A target's lifetime begins when it crosses the subscription/caller boundary,
+// not whenever the manager next happens to run update(). Otherwise executor or
+// control-loop backlog gives an already stale target a brand-new lease.
+TEST_F(DemoControllerTest, TargetDelayedPastHardTtlExpiresOnFirstUpdate) {
+  activate_with_test_clock();
+
+  ASSERT_TRUE(controller_.set_target(0.5));
+  advance(6000000);
+
+  EXPECT_EQ(cycle(), controller_interface::return_type::ERROR);
+  EXPECT_DOUBLE_EQ(command_value_, 0.0);
+  EXPECT_DOUBLE_EQ(generation_value_, 0.0);
+}
+
+TEST_F(DemoControllerTest, ExactProductionTargetLifetimeBoundaries) {
+  auto node = controller_.get_node();
+  node->set_parameter({"target_ttl_nanoseconds", 100000000});
+  node->set_parameter({"target_hard_ttl_nanoseconds", 106000000});
+  activate_with_test_clock();
+
+  ASSERT_TRUE(controller_.set_target(0.5));
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  const double first_generation = generation_value_;
+
+  advance(99999999);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_NE(generation_value_, first_generation);
+  const double before_holding = generation_value_;
+  const double before_holding_command = command_value_;
+
+  advance(1);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(generation_value_, before_holding);
+  EXPECT_DOUBLE_EQ(command_value_, before_holding_command);
+
+  advance(5999999);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(generation_value_, before_holding);
+  advance(1);
+  EXPECT_EQ(cycle(), controller_interface::return_type::ERROR);
+  EXPECT_DOUBLE_EQ(command_value_, before_holding_command);
+}
+
+TEST_F(DemoControllerTest, TwentyHertzSameValueTargetsRemainLive) {
+  auto node = controller_.get_node();
+  node->set_parameter({"target_ttl_nanoseconds", 100000000});
+  node->set_parameter({"target_hard_ttl_nanoseconds", 106000000});
+  activate_with_test_clock();
+
+  for (int sample = 0; sample < 5; ++sample) {
+    ASSERT_TRUE(controller_.set_target(0.5));
+    ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+    advance(50000000);
+  }
+  EXPECT_EQ(controller_.target_generation(), 5U);
+  EXPECT_GE(generation_value_, 5.0);
+  const double before_final_cycle = generation_value_;
+  EXPECT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_GT(generation_value_, before_final_cycle);
+}
+
+TEST_F(DemoControllerTest, ConcurrentProducersPublishDistinctGenerations) {
+  std::mutex barrier_mutex;
+  std::condition_variable barrier_cv;
+  int arrivals = 0;
+  bool release = false;
+  controller_.set_clock_for_testing([&]() {
+    std::unique_lock<std::mutex> lock(barrier_mutex);
+    ++arrivals;
+    barrier_cv.notify_all();
+    barrier_cv.wait(lock, [&]() { return release; });
+    return now_;
+  });
+  ASSERT_EQ(controller_.on_configure(lifecycle_state()),
+            controller_interface::CallbackReturn::SUCCESS);
+  assign_interfaces();
+  ASSERT_EQ(controller_.on_activate(lifecycle_state()),
+            controller_interface::CallbackReturn::SUCCESS);
+
+  auto first = std::async(std::launch::async,
+                          [this]() { return controller_.set_target(0.4); });
+  auto second = std::async(std::launch::async,
+                           [this]() { return controller_.set_target(0.5); });
+  {
+    std::unique_lock<std::mutex> lock(barrier_mutex);
+    ASSERT_TRUE(barrier_cv.wait_for(lock, std::chrono::seconds(2),
+                                    [&]() { return arrivals == 2; }));
+    release = true;
+  }
+  barrier_cv.notify_all();
+  EXPECT_TRUE(first.get());
+  EXPECT_TRUE(second.get());
+  EXPECT_EQ(controller_.target_generation(), 2U);
+  EXPECT_EQ(cycle(), controller_interface::return_type::OK);
+}
+
+// A callback can pass the active check, be descheduled across a complete
+// deactivate/reactivate, and only then publish into the RT inbox. The target
+// belongs to the old claim and must not be replayed by the new one.
+TEST_F(DemoControllerTest, CallbackCrossingReactivationCannotReplayOldTarget) {
+  std::promise<void> clock_entered;
+  std::shared_future<void> resume_clock =
+      std::async(std::launch::deferred, []() {}).share();
+  std::promise<void> resume_promise;
+  resume_clock = resume_promise.get_future().share();
+  std::atomic<bool> block_clock{false};
+  controller_.set_clock_for_testing([&]() {
+    if (block_clock.exchange(false)) {
+      clock_entered.set_value();
+      resume_clock.wait();
+    }
+    return now_;
+  });
+  ASSERT_EQ(controller_.on_configure(lifecycle_state()),
+            controller_interface::CallbackReturn::SUCCESS);
+  assign_interfaces();
+  ASSERT_EQ(controller_.on_activate(lifecycle_state()),
+            controller_interface::CallbackReturn::SUCCESS);
+
+  block_clock.store(true);
+  auto submit = std::async(std::launch::async,
+                           [this]() { return controller_.set_target(0.5); });
+  const auto entered =
+      clock_entered.get_future().wait_for(std::chrono::seconds(2));
+  const auto deactivated = controller_.on_deactivate(lifecycle_state());
+  const auto reactivated = controller_.on_activate(lifecycle_state());
+  resume_promise.set_value();
+  ASSERT_EQ(entered, std::future_status::ready);
+  ASSERT_EQ(deactivated, controller_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(reactivated, controller_interface::CallbackReturn::SUCCESS);
+  EXPECT_FALSE(submit.get());
+
+  EXPECT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(command_value_, state_value_);
+  EXPECT_DOUBLE_EQ(generation_value_, 0.0);
 }
 
 // The controller's target must be reachable over ROS, not only through a C++
@@ -451,11 +617,10 @@ TEST_F(DemoControllerTest, GenerationChangesOnlyWhileFollowingALiveTarget) {
   // A target arrives: every cycle spent slewing toward it is a real command, so
   // every one of them must read as new.
   probe.publish_and_wait(0.5, 1U);
-  advance(kPeriodNanoseconds);
   ASSERT_EQ(cycle(), controller_interface::return_type::OK);
   const double first = generation_value_;
   EXPECT_NE(first, before_any_target);
-  advance(kPeriodNanoseconds);
+  advance(1000000);
   ASSERT_EQ(cycle(), controller_interface::return_type::OK);
   EXPECT_NE(generation_value_, first) << "a following cycle was not a refresh";
 
@@ -464,13 +629,13 @@ TEST_F(DemoControllerTest, GenerationChangesOnlyWhileFollowingALiveTarget) {
   // would keep the hardware's watchdog satisfied while having nothing to say,
   // which is exactly the defect ADR-017 exists to close.
   //
-  // The target was submitted two cycles ago, so this lands 4 ms after it: past
+  // The target arrived before the first update, so this lands 4 ms after it: at
   // the 4 ms soft TTL and inside the 6 ms hard one. That is Holding. Going a
   // cycle further would reach Expired, where update() refuses outright and
   // never gets as far as the question this test asks.
   const double before_silence = generation_value_;
   const double frozen_command = command_value_;
-  advance(2000000);
+  advance(3000000);
   ASSERT_EQ(cycle(), controller_interface::return_type::OK);
   EXPECT_DOUBLE_EQ(generation_value_, before_silence)
       << "a silent controller still claimed a refresh";
