@@ -8,10 +8,11 @@
 
 ## Status rationale / 状态依据
 
-The project owner accepted the 100/106 ms provisional upstream policy and the
-unchanged 4/6 ms hardware lease on 2026-09-15 before implementation. Acceptance
-authorizes this interface and deployment policy only; it does not establish a
-measured real-time bound or authorize device operation.
+On 2026-09-15, the project owner authorized separating upstream target lifetime
+from the unchanged 4/6 ms hardware lease and delegated implementation choices.
+Within that scope, the primary implementation selected the provisional 100/106 ms
+target policy recorded here. This decision establishes neither a measured
+real-time bound nor authorization for device operation.
 
 ## Context / 上下文
 
