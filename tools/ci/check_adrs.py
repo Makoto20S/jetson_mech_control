@@ -21,6 +21,7 @@ ADR_FILES = {
     "ADR-009": ("ADR-009-effort-semantic-gate.md", "Accepted"),
     "ADR-012": ("ADR-012-command-watchdog-and-capability-honesty.md", "Accepted"),
     "ADR-013": ("ADR-013-ak30-protocol-baseline.md", "Accepted"),
+    "ADR-014": ("ADR-014-ak30-submode-command-interfaces.md", "Proposed"),
 }
 
 REQUIRED_HEADINGS = (

@@ -286,6 +286,114 @@ TEST_F(Ak30RuntimeTest, WouldBlockRetriesAndDoesNotFault) {
   EXPECT_EQ(transport_->pending_transmit(), 1U);
 }
 
+// ADR-014: a Torque-mode runtime maps only the effort member into the
+// device command, so the transmitted frame's payload is exactly the
+// AKE60-8 golden for torque 2.0 N*m with every other field zero -
+// recomputed from the L07 ranges with the ((1<<bits)-1) quantization,
+// matching the protocol layer's own golden (test_ak30_force_wire.cpp).
+// Garbage in the ignored position member must not leak into the frame.
+TEST_F(Ak30RuntimeTest, TorqueSubModeEmitsEffortOnlyGoldenFrame) {
+  Ak30RuntimeConfig config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  Ak30ForceControlRuntime runtime(*transport_,
+                                  [this]() { return clock_.now(); }, config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 2.0;
+  command.position = 9.0;  // ignored by the Torque sub-mode, must not leak
+  EXPECT_TRUE(runtime.write(&command, 1U));
+
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  EXPECT_TRUE(runtime.read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport_->take_transmit(sent));
+  ASSERT_GE(sent.payload_size, 8U);
+  // 00 00 00 7F FF 7F F9 10: kp=0 kd=0 pos=0 vel=0 torque=2.0
+  const std::array<std::uint8_t, 8U> expected{
+      0x00, 0x00, 0x00, 0x7F, 0xFF, 0x7F, 0xF9, 0x10};
+  for (std::size_t index = 0; index < 8U; ++index) {
+    EXPECT_EQ(sent.payload[index], expected[index]) << "byte " << index;
+  }
+}
+
+// ADR-014: a Velocity-mode runtime maps only the velocity member and
+// FORCES effort to zero - the wire's effort field rides along as
+// feedforward t_ff in every sub-mode, and the bench-proven Kd bound only
+// holds without feedforward. Even a non-zero effort written into the
+// command must not reach the frame. kd=1, v=0.3 rad/s recomputes to
+// 00 03 33 7F FF 80 E7 FF (kp=0 kd=1 pos=0 vel=0.3 torque=0).
+TEST_F(Ak30RuntimeTest, VelocitySubModeEmitsVelocityAndForcesZeroEffort) {
+  Ak30RuntimeConfig config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Velocity;
+  config.gains.kp = 0.0;
+  config.gains.kd = 1.0;
+  Ak30ForceControlRuntime runtime(*transport_,
+                                  [this]() { return clock_.now(); }, config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.velocity = 0.3;
+  command.effort = 1.0;  // must be forced to zero, never feedforwarded
+  EXPECT_TRUE(runtime.write(&command, 1U));
+
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  EXPECT_TRUE(runtime.read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport_->take_transmit(sent));
+  ASSERT_GE(sent.payload_size, 8U);
+  const std::array<std::uint8_t, 8U> expected{
+      0x00, 0x03, 0x33, 0x7F, 0xFF, 0x80, 0xE7, 0xFF};
+  for (std::size_t index = 0; index < 8U; ++index) {
+    EXPECT_EQ(sent.payload[index], expected[index]) << "byte " << index;
+  }
+}
+
+// The staged watchdog is sub-mode-independent (ADR-014 Decision 5): the
+// same freeze-then-fault timeline the Position test pins must hold for a
+// Torque-mode device too - including never resolving the stale command
+// to 0.0, which on the effort interface would be a silently-invented
+// zero-torque command.
+TEST_F(Ak30RuntimeTest, TorqueSubModeWatchdogFreezesThenFaults) {
+  Ak30RuntimeConfig config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  Ak30ForceControlRuntime runtime(*transport_,
+                                  [this]() { return clock_.now(); }, config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 0.1;
+  EXPECT_TRUE(runtime.write(&command, 1U));
+
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+  EXPECT_TRUE(runtime.read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  RawCanFrame first{};
+  ASSERT_TRUE(transport_->take_transmit(first));
+
+  clock_.set(4000000);
+  EXPECT_TRUE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+
+  clock_.set(6000001);
+  EXPECT_TRUE(runtime.read(states, 1U));
+  EXPECT_TRUE(runtime.holding());
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+
+  clock_.set(8000001);
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_TRUE(runtime.expired());
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
 TEST_F(Ak30RuntimeTest, WriteRejectsNonFiniteCommand) {
   ASSERT_TRUE(runtime_->configure(1U));
   ASSERT_TRUE(runtime_->start());
@@ -295,6 +403,53 @@ TEST_F(Ak30RuntimeTest, WriteRejectsNonFiniteCommand) {
   const mech_hardware_ros2_control::CanonicalCommand inf{
       std::numeric_limits<double>::infinity()};
   EXPECT_FALSE(runtime_->write(&inf, 1U));
+}
+
+// ADR-014: write() validates the member the sub-mode consumes. In Torque
+// mode the effort member is the command and a non-finite velocity (which
+// the Torque device ignores) must not fault the write - but a non-finite
+// effort must. Position/Velocity modes mirror the same rule for their own
+// consumed member.
+TEST_F(Ak30RuntimeTest, WriteValidatesConsumedFieldPerSubMode) {
+  {
+    Ak30RuntimeConfig config = runtime_config();
+    config.sub_mode = ForceControlSubMode::Torque;
+    Ak30ForceControlRuntime runtime(*transport_,
+                                    [this]() { return clock_.now(); }, config);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+
+    // Non-finite effort (the consumed member) rejects.
+    mech_hardware_ros2_control::CanonicalCommand bad{};
+    bad.effort = std::nan("");
+    EXPECT_FALSE(runtime.write(&bad, 1U));
+    bad.effort = std::numeric_limits<double>::infinity();
+    EXPECT_FALSE(runtime.write(&bad, 1U));
+
+    // A finite effort accepts even with garbage in the ignored members: a
+    // Torque device never sees position/velocity (to_device_command drops
+    // them), so the write must not fault on them.
+    mech_hardware_ros2_control::CanonicalCommand odd{};
+    odd.effort = 0.2;
+    odd.position = std::numeric_limits<double>::infinity();
+    EXPECT_TRUE(runtime.write(&odd, 1U));
+  }
+  {
+    Ak30RuntimeConfig config = runtime_config();
+    config.sub_mode = ForceControlSubMode::Velocity;
+    Ak30ForceControlRuntime runtime(*transport_,
+                                    [this]() { return clock_.now(); }, config);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+
+    mech_hardware_ros2_control::CanonicalCommand bad{};
+    bad.velocity = std::numeric_limits<double>::infinity();
+    EXPECT_FALSE(runtime.write(&bad, 1U));
+    mech_hardware_ros2_control::CanonicalCommand ok{};
+    ok.velocity = 0.3;
+    ok.position = std::nan("");
+    EXPECT_TRUE(runtime.write(&ok, 1U));
+  }
 }
 
 TEST_F(Ak30RuntimeTest, StaleFeedbackYieldsZeroStatesWithoutFault) {

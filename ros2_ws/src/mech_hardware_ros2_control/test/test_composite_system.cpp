@@ -36,6 +36,16 @@ hardware_interface::HardwareInfo info(std::size_t joints = 2U) {
   return result;
 }
 
+// info() variant whose first joint commands a different canonical kind
+// (effort or velocity) instead of position - the ADR-014 single-command-
+// interface shape for Torque/Velocity devices.
+hardware_interface::HardwareInfo info_with_command_interface(
+    const std::string& command_interface) {
+  auto result = info(1U);
+  result.joints[0].command_interfaces[0].name = command_interface;
+  return result;
+}
+
 // info() variant where the first joint's name itself contains a '/', to
 // exercise interface-name resolution that must split on the *last* slash.
 hardware_interface::HardwareInfo info_with_slash_joint_name() {
@@ -101,9 +111,147 @@ TEST(CompositeSystem, ExportsCanonicalInterfacesAndLoopsBackNonBlocking) {
   EXPECT_DOUBLE_EQ(states[0].get_value(), 0.01);
 }
 
+// ADR-014: a joint's single command interface may be effort or velocity
+// instead of position. The exported name carries the URDF's choice, and
+// claiming goes through the same strict-switch machinery under that name.
+TEST(CompositeSystem, ExportsEffortAndVelocityCommandInterfaces) {
+  for (const char* command_interface :
+       {hardware_interface::HW_IF_EFFORT, hardware_interface::HW_IF_VELOCITY}) {
+    SCOPED_TRACE(command_interface);
+    CompositeSystem system;
+    ASSERT_EQ(system.on_init(info_with_command_interface(command_interface)),
+              hardware_interface::CallbackReturn::SUCCESS);
+    auto states = system.export_state_interfaces();
+    auto commands = system.export_command_interfaces();
+    ASSERT_EQ(states.size(), 3U);
+    ASSERT_EQ(commands.size(), 1U);
+    EXPECT_EQ(commands[0].get_name(), std::string("joint_1/") + command_interface);
+    ASSERT_EQ(system.on_configure(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system.on_activate(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    const std::string claim = std::string("joint_1/") + command_interface;
+    ASSERT_EQ(system.prepare_command_mode_switch({claim}, {}),
+              hardware_interface::return_type::OK);
+    ASSERT_EQ(system.perform_command_mode_switch({claim}, {}),
+              hardware_interface::return_type::OK);
+    // A command written through the exported interface must be finite and
+    // accepted; the loopback mirrors are covered by their dedicated test.
+    commands[0].set_value(1.5);
+    EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_EQ(system.read(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_EQ(system.perform_command_mode_switch({}, {claim}),
+              hardware_interface::return_type::OK);
+  }
+}
+
+// ADR-014 negative space: exactly ONE command interface per joint, and its
+// name must be one of the three canonical kinds. Two interfaces (any pair)
+// and unknown names both fail on_init - this pins the single-command rule
+// against a future widening into a permissive subset.
+TEST(CompositeSystem, RejectsMultipleOrUnknownCommandInterfaces) {
+  // Unknown command-interface name.
+  auto unknown = info_with_command_interface("acceleration");
+  CompositeSystem rejected_unknown;
+  EXPECT_EQ(rejected_unknown.on_init(unknown),
+            hardware_interface::CallbackReturn::ERROR);
+
+  // Two command interfaces on one joint (position + effort, the shape a
+  // three-interface superset would have accepted).
+  auto doubled = info(1U);
+  hardware_interface::InterfaceInfo extra;
+  extra.name = hardware_interface::HW_IF_EFFORT;
+  extra.size = 1;
+  doubled.joints[0].command_interfaces.push_back(extra);
+  CompositeSystem rejected_doubled;
+  EXPECT_EQ(rejected_doubled.on_init(doubled),
+            hardware_interface::CallbackReturn::ERROR);
+
+  // Zero command interfaces is equally invalid.
+  auto none = info(1U);
+  none.joints[0].command_interfaces.clear();
+  CompositeSystem rejected_none;
+  EXPECT_EQ(rejected_none.on_init(none),
+            hardware_interface::CallbackReturn::ERROR);
+}
+
+// The loopback runtime mirrors a velocity/effort command into the matching
+// state field deterministically (ADR-014): velocity commands hold the state
+// velocity, effort commands hold the state effort, and neither invents
+// values for the other fields.
+TEST(CompositeSystem, LoopbackMirrorsVelocityAndEffortCommands) {
+  {
+    CompositeSystem system;
+    ASSERT_EQ(system.on_init(info_with_command_interface(
+                  hardware_interface::HW_IF_VELOCITY)),
+              hardware_interface::CallbackReturn::SUCCESS);
+    auto states = system.export_state_interfaces();
+    auto commands = system.export_command_interfaces();
+    ASSERT_EQ(system.on_configure(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system.on_activate(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(
+        system.perform_command_mode_switch({"joint_1/velocity"}, {}),
+        hardware_interface::return_type::OK);
+    commands[0].set_value(0.4);
+    ASSERT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_EQ(system.read(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_DOUBLE_EQ(states[1].get_value(), 0.4);
+    EXPECT_DOUBLE_EQ(states[2].get_value(), 0.0);
+  }
+  {
+    CompositeSystem system;
+    ASSERT_EQ(system.on_init(info_with_command_interface(
+                  hardware_interface::HW_IF_EFFORT)),
+              hardware_interface::CallbackReturn::SUCCESS);
+    auto states = system.export_state_interfaces();
+    auto commands = system.export_command_interfaces();
+    ASSERT_EQ(system.on_configure(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system.on_activate(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(
+        system.perform_command_mode_switch({"joint_1/effort"}, {}),
+        hardware_interface::return_type::OK);
+    commands[0].set_value(0.2);
+    ASSERT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_EQ(system.read(rclcpp::Time(0), rclcpp::Duration(0, 1000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_DOUBLE_EQ(states[2].get_value(), 0.2);
+    EXPECT_DOUBLE_EQ(states[1].get_value(), 0.0);
+  }
+}
+
+// ADR-014: non-finite velocity/effort command values fault exactly like
+// non-finite positions, on claimed and unclaimed joints alike.
+TEST(CompositeSystem, RejectsNonFiniteVelocityAndEffortCommands) {
+  for (const char* command_interface :
+       {hardware_interface::HW_IF_VELOCITY, hardware_interface::HW_IF_EFFORT}) {
+    SCOPED_TRACE(command_interface);
+    CompositeSystem system;
+    ASSERT_EQ(system.on_init(info_with_command_interface(command_interface)),
+              hardware_interface::CallbackReturn::SUCCESS);
+    auto commands = system.export_command_interfaces();
+    ASSERT_EQ(system.on_configure(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system.on_activate(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    commands[0].set_value(std::numeric_limits<double>::quiet_NaN());
+    EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1)),
+              hardware_interface::return_type::ERROR);
+    EXPECT_TRUE(system.fault_latched());
+  }
+}
+
 TEST(CompositeSystem, RejectsInvalidInterfacesAndStrictSwitchConflicts) {
   auto invalid = info(1U);
-  invalid.joints[0].command_interfaces[0].name = hardware_interface::HW_IF_EFFORT;
+  invalid.joints[0].command_interfaces[0].name = "acceleration";
   CompositeSystem rejected;
   EXPECT_EQ(rejected.on_init(invalid), hardware_interface::CallbackReturn::ERROR);
 

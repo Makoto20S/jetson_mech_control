@@ -255,6 +255,7 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 | [ADR-009](../adr/ADR-009-effort-semantic-gate.md) | Accepted | 标准 `effort` 的物理语义闸门，框架 demo 与力矩精度分开验收 |
 | [ADR-012](../adr/ADR-012-command-watchdog-and-capability-honesty.md) | Accepted | 命令看门狗分级语义（跟随/冻结/失败）、transport 能力三态上报与远程帧表达；Foundation RC 评审后的追认记录，2026-08-31 复核转 Accepted，仅约束接口语义、不解除设备启用闸门 |
 | [ADR-013](../adr/ADR-013-ak30-protocol-baseline.md) | Accepted | 协议资料基线由 L02（AK2.0 驱动器手册）切换为 L07（AK3.0 产品手册）；客观依据是本项目驱动板 `AK54-4810-1C-A2` 只出现在 L07。`ProtocolProfile` 随之重定义，力控提为第一 profile |
+| [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md) | Proposed | CompositeSystem 命令接口形状扩展：每关节恰好一个命令接口 ∈ {position, velocity, effort}；AK3.0 子模式命令映射（Velocity 强制 effort=0），`sub_mode` 部署参数与接口名匹配校验；状态接口形状与看门狗语义不变 |
 
 七份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
 

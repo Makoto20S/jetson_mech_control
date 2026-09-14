@@ -7,6 +7,8 @@
 #include <set>
 #include <string>
 
+#include "hardware_interface/types/hardware_interface_type_values.hpp"
+
 namespace mech::mech_bringup {
 namespace {
 
@@ -19,6 +21,7 @@ const std::set<std::string>& known_keys() noexcept {
       "logical_bus",
       "drive_id",
       "device_id",
+      "sub_mode",
       "kp",
       "kd",
       "control_period_ns",
@@ -76,6 +79,20 @@ const std::set<std::string>& known_keys() noexcept {
 
 }  // namespace
 
+const char* expected_command_interface_name(
+    mech::mech_protocol_cubemars::ForceControlSubMode sub_mode) noexcept {
+  using mech::mech_protocol_cubemars::ForceControlSubMode;
+  switch (sub_mode) {
+    case ForceControlSubMode::Position:
+      return hardware_interface::HW_IF_POSITION;
+    case ForceControlSubMode::Velocity:
+      return hardware_interface::HW_IF_VELOCITY;
+    case ForceControlSubMode::Torque:
+      return hardware_interface::HW_IF_EFFORT;
+  }
+  return hardware_interface::HW_IF_POSITION;
+}
+
 std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
     const std::map<std::string, std::string>& params) noexcept {
   for (const auto& entry : params) {
@@ -117,6 +134,21 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
       return std::nullopt;
     }
     config.device_id = static_cast<std::uint32_t>(value);
+  }
+  if (const auto it = params.find("sub_mode"); it != params.end()) {
+    // Explicit configuration, never inferred from payload or interface
+    // claims (ADR-004): the deployment states which sub-mode the device
+    // runs, and the URDF command interface must match it.
+    using mech::mech_protocol_cubemars::ForceControlSubMode;
+    if (it->second == "position") {
+      config.sub_mode = ForceControlSubMode::Position;
+    } else if (it->second == "velocity") {
+      config.sub_mode = ForceControlSubMode::Velocity;
+    } else if (it->second == "torque") {
+      config.sub_mode = ForceControlSubMode::Torque;
+    } else {
+      return std::nullopt;
+    }
   }
   if (const auto it = params.find("kp"); it != params.end()) {
     double value = 0.0;

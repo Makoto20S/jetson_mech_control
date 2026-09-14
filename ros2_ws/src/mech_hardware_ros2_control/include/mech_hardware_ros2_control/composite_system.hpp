@@ -12,6 +12,8 @@ namespace mech::mech_hardware_ros2_control {
 
 struct CanonicalCommand final {
   double position{0.0};
+  double velocity{0.0};
+  double effort{0.0};
 };
 
 struct CanonicalState final {
@@ -83,9 +85,15 @@ class CompositeSystem final : public hardware_interface::SystemInterface {
   // right; returns std::nullopt if no known joint matches the resolved prefix.
   [[nodiscard]] std::optional<std::size_t> resolve_joint_index(
       const std::string& name) const noexcept;
+  // The command-interface name each joint's URDF declared, one of
+  // position/velocity/effort (ADR-014). Decides which CanonicalCommand member
+  // the exported CommandInterface writes into.
+  [[nodiscard]] const std::string& joint_command_interface_name(
+      std::size_t index) const noexcept;
 
   std::unique_ptr<RuntimePort> runtime_;
   std::vector<std::string> joint_names_;
+  std::vector<std::string> joint_command_interface_names_;
   std::vector<CanonicalCommand> commands_;
   std::vector<CanonicalState> states_;
   std::vector<bool> claimed_;
