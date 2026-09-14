@@ -7,15 +7,16 @@
 #include <vector>
 
 #include "hardware_interface/system_interface.hpp"
+#include "mech_control_core/command_contract.hpp"
 
 namespace mech::mech_hardware_ros2_control {
 
-// ADR-017: the per-joint command interface that carries command freshness.
-// The hardware always exports it; whether a controller claims it decides which
-// protection tier that joint gets. It is deliberately NOT one of the canonical
-// motion kinds - it commands no motion. It expresses the one thing a bare
-// double* cannot: that the controller spoke again.
-inline constexpr char kCommandGenerationInterface[] = "command_generation";
+// The canonical name lives in mech_control_core because controllers need it
+// too and must not depend on a hardware plugin to spell it. Bound by reference
+// rather than copied, so there is exactly one definition of the string: the two
+// names cannot drift, and existing call sites keep working unchanged.
+inline constexpr auto& kCommandGenerationInterface =
+    mech::mech_control_core::kCommandGenerationInterface;
 
 struct CanonicalCommand final {
   double position{0.0};
