@@ -64,6 +64,9 @@ constexpr char kControllerType[] = "test/WriterController";
 constexpr std::int64_t kPeriodNanoseconds = 2000000;
 // motor1's configured reporting period: send_can_status_rate_hz = 50.
 constexpr std::int64_t kFeedbackPeriodNs = 20000000;
+// A write budget large enough that only allow_writes(0) can end it. See
+// WriterController::allow_writes() for why a small fixed budget is unsafe.
+constexpr std::size_t kWritesUntilSilenced = 100000U;
 
 [[nodiscard]] Ak30RuntimeConfig runtime_config() {
   Ak30RuntimeConfig config{};
@@ -192,6 +195,27 @@ class WriterController final : public controller_interface::ControllerInterface 
     return controller_interface::return_type::OK;
   }
 
+  // How many update() calls this controller still writes a target on, counted
+  // from activation.
+  //
+  // CAREFUL: a small fixed budget makes a test host-speed dependent, and the
+  // failure is silent on a fast machine. drive_switch() keeps calling cycle()
+  // until the manager applies the switch, each cycle advances the fixture's
+  // clock by one control period, and how many it needs depends on real thread
+  // scheduling. So a switch burns an unpredictable slice of this budget AND an
+  // unpredictable amount of simulated time. Once the budget runs out the
+  // controller is silent, and for a strong-tier controller silence is a fault
+  // within one hard TTL.
+  //
+  // That is not hypothetical: DeactivatingControllerStopsCommandFrames passed on
+  // x86_64 and failed on the Jetson's aarch64 with a fixed budget of 3, because
+  // the slower host burned the budget inside activate_controller() and the
+  // watchdog faulted the component before the test reached its deactivation.
+  //
+  // Use kWritesUntilSilenced and then allow_writes(0) at the exact moment the
+  // test wants silence. Only use a small budget when the test is ABOUT the
+  // controller falling silent, and then only where extra burned cycles cannot
+  // change the outcome.
   void allow_writes(std::size_t count) noexcept { writes_allowed_ = count; }
   [[nodiscard]] std::size_t writes() const noexcept { return writes_; }
 
@@ -434,15 +458,25 @@ TEST_F(ControllerManagerIntegrationTest,
 // perform_command_mode_switch(stop). Authorization is revoked and the pending
 // command cancelled, so the frames stop immediately rather than after the hard
 // TTL lapses - the 2026-09-12 audit measured 11 frames over 22 ms here.
+//
+// The controller writes on every update right up to the deactivation, and that
+// is load-bearing twice over. It makes the assertion stronger: the controller
+// is actively commanding at the moment the claim is revoked, so "the frames
+// stopped" can only be the revoke, never the controller having gone quiet by
+// itself. And it makes the test host-independent - see allow_writes() for why a
+// fixed write budget is not safe here.
 TEST_F(ControllerManagerIntegrationTest, DeactivatingControllerStopsCommandFrames) {
   establish_feedback();
-  controller_->allow_writes(3U);
+  controller_->allow_writes(kWritesUntilSilenced);
   activate_controller();
   cycle(4);
   deactivate_controller();
   const auto while_active = transmitted();
   ASSERT_GE(while_active, 1U);
 
+  // Deactivated, so the manager no longer calls update() and the controller
+  // cannot write even though its budget is not exhausted. Any further frame
+  // would be the hardware acting on a revoked claim.
   cycle(20);
   EXPECT_EQ(transmitted(), while_active);
 }
@@ -465,7 +499,7 @@ TEST_F(ControllerManagerIntegrationTest, DeactivatingControllerStopsCommandFrame
 // it.
 TEST_F(ControllerManagerIntegrationTest, ReactivationDoesNotReplayTheOldTarget) {
   establish_feedback();
-  controller_->allow_writes(1000U);
+  controller_->allow_writes(kWritesUntilSilenced);
   activate_controller();
   cycle(2);
   deactivate_controller();
