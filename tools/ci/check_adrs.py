@@ -25,6 +25,7 @@ ADR_FILES = {
     "ADR-015": ("ADR-015-command-transmit-authorization.md", "Accepted"),
     "ADR-016": ("ADR-016-feedback-quality-fail-closed.md", "Accepted"),
     "ADR-017": ("ADR-017-command-freshness-generation-interface.md", "Accepted"),
+    "ADR-018": ("ADR-018-upstream-target-lifetime.md", "Accepted"),
 }
 
 REQUIRED_HEADINGS = (

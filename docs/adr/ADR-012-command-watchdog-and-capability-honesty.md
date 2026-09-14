@@ -30,6 +30,7 @@ RC 评审复现了三类问题：
    - `ttl <= t < hard_ttl`：**冻结在最后一个有效命令**并报告降级，不产生任何新运动；
    - `t >= hard_ttl`：`update()` 返回 `ERROR`，进入显式失败。
 2. **看门狗总预算受既有指标约束。** 软 TTL 与 hold 阶段之和必须落在 [MVP 交付计划](../planning/03_mvp_delivery_plan.md) 规定的 `<=3` 个控制周期（500 Hz 下 `<=6 ms`）内。默认值取 `ttl=4 ms`、`hard_ttl=6 ms`。
+   该预算约束 controller-to-hardware 命令租约；20–50 Hz 上游策略目标的独立有效期由 [ADR-018](ADR-018-upstream-target-lifetime.md) 规定，不要求上游每 6 ms 发布一次。
 3. **位置类命令在任何阶段都不得被静默替换为 `0.0`。** 输入非法时返回保持值而非零；保持值由调用方第一个有限输入播种，因此 `on_activate()` 之后立即进入保持，含义是「保持由状态接口播种的当前命令」，而不是跳到零位。
 4. **能力上报采用三态。** 每个可测量的量配一个 `*_verified` 标志：
    - `verified == true`：本进程从真实通道读回（netlink、ioctl、getsockopt 等）；
