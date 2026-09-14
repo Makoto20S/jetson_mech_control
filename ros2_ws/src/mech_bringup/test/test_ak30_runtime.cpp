@@ -831,6 +831,46 @@ TEST_F(Ak30RuntimeTest, CancelPendingAfterSubmitAllowsLaterReclaim) {
   EXPECT_EQ(transport_->pending_transmit(), 1U);
 }
 
+// Revoking authorization ends the command lease, so what follows is an
+// UNCLAIMED joint - the same state the runtime is in right after start(), and
+// one that nobody is commanding. That is not a fault.
+//
+// The distinction this pins down is the one ADR-015 and ADR-012 draw between
+// two different silences. A controller that holds its claim and stops
+// refreshing IS a fault: the device is still leased and its commanded state is
+// going stale (WatchdogFreezesThenFaultsWithinThreeCycles). A controller that
+// was deactivated is not: the claim is gone, transmission has already stopped,
+// and the drive falls back on its own loss-of-control backstop. Letting the
+// session's stage keep ageing the pre-revoke command would fault the hardware
+// component a few cycles after any normal controller swap - which is exactly
+// what deactivating one controller to activate another does, i.e. T8 and T9.
+TEST_F(Ak30RuntimeTest, CancelPendingEndsTheLeaseSoAnUnclaimedJointDoesNotFault) {
+  ASSERT_TRUE(runtime_->configure(1U));
+  ASSERT_TRUE(runtime_->start());
+  mech_hardware_ros2_control::CanonicalState states[1] = {};
+
+  const mech_hardware_ros2_control::CanonicalCommand command{0.25};
+  ASSERT_TRUE(write_authorized(*runtime_, command));
+  clock_.set(2000000);
+  ASSERT_TRUE(runtime_->read(states, 1U));
+  ASSERT_EQ(transport_->pending_transmit(), 1U);
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport_->take_transmit(sent));
+
+  runtime_->cancel_pending(0U);
+
+  // Well past the 6 ms hard TTL measured from that submitted command. No
+  // feedback is injected here on purpose: with no sample ever taken, ADR-016's
+  // feedback path cannot fault either, so a failure can only come from the
+  // command stage - which is what this test is about.
+  for (std::int64_t at = 4000000; at <= 20000000; at += 2000000) {
+    clock_.set(at);
+    ASSERT_TRUE(runtime_->read(states, 1U)) << "read() failed at " << at << " ns";
+    EXPECT_FALSE(runtime_->expired()) << "expired at " << at << " ns";
+  }
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
 // cancel_pending() is noexcept and index-checked: an out-of-range resource
 // index is a caller bug, not a reason to corrupt state or transmit.
 TEST_F(Ak30RuntimeTest, CancelPendingIgnoresOutOfRangeIndex) {

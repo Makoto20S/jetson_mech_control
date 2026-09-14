@@ -247,6 +247,26 @@ void Ak30ForceControlRuntime::cancel_pending(std::size_t index) noexcept {
   pending_deadline_ = MonotonicTime{};
   have_pending_ = false;
   fresh_write_ = false;
+  // ADR-015 Decision 3: revocation must end the lease as an immediate state
+  // transition, and must not be left to the hard TTL to achieve. Without this
+  // the session's stage keeps ageing the pre-revoke command, so one hard TTL
+  // after any clean deactivation read() fails and the ResourceManager takes the
+  // component into an error state - measured at exactly 8 ms for a command
+  // submitted at 2 ms with a 6 ms hard TTL. That turns every ordinary
+  // controller swap (T8/T9 activate one controller in place of another) into a
+  // hardware fault.
+  //
+  // Resetting this returns the runtime to its post-start() state: no command
+  // has been accepted, so the session's Expired stage means "nothing yet"
+  // rather than "we let a live command go stale", which is the distinction
+  // submit_stored() draws. holding_ is deliberately NOT reset - it is derived
+  // from the session and describes the DEVICE, which really is still sitting on
+  // the last target it was given until its own loss-of-control backstop fires.
+  //
+  // This opens no hole: nothing transmits until a new authorized AND fresh
+  // write arrives (ADR-017), and the watchdog re-arms the moment one is
+  // submitted.
+  submitted_once_ = false;
 }
 
 bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
