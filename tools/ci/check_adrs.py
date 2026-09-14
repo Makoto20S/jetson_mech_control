@@ -21,7 +21,11 @@ ADR_FILES = {
     "ADR-009": ("ADR-009-effort-semantic-gate.md", "Accepted"),
     "ADR-012": ("ADR-012-command-watchdog-and-capability-honesty.md", "Accepted"),
     "ADR-013": ("ADR-013-ak30-protocol-baseline.md", "Accepted"),
-    "ADR-014": ("ADR-014-ak30-submode-command-interfaces.md", "Proposed"),
+    "ADR-014": ("ADR-014-ak30-submode-command-interfaces.md", "Accepted"),
+    "ADR-015": ("ADR-015-command-transmit-authorization.md", "Accepted"),
+    "ADR-016": ("ADR-016-feedback-quality-fail-closed.md", "Accepted"),
+    "ADR-017": ("ADR-017-command-freshness-generation-interface.md", "Accepted"),
+    "ADR-018": ("ADR-018-upstream-target-lifetime.md", "Accepted"),
 }
 
 REQUIRED_HEADINGS = (

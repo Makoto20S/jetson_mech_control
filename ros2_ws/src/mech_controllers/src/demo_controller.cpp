@@ -1,10 +1,13 @@
 #include "mech_controllers/demo_controller.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "mech_control_core/command_contract.hpp"
 #include "pluginlib/class_list_macros.hpp"
 
 namespace mech::mech_controllers {
@@ -81,14 +84,20 @@ bool TargetLimiter::expired(std::int64_t now_nanoseconds) const noexcept {
 }
 
 WatchdogStage TargetLimiter::stage(std::int64_t now_nanoseconds) const noexcept {
-  // No target has ever been submitted: there is nothing legitimate to follow,
-  // so never invent motion toward the default target_ of 0.0. Treat this the
-  // same as a target that went stale at time zero (Holding, then Expired once
-  // the hard TTL measured from zero elapses).
+  // No target has ever been submitted, so there is nothing legitimate to
+  // follow and nothing stale either: this watchdog measures how old a target
+  // is, and a target that never existed has no age. Hold - the caller keeps
+  // whatever value it seeded (for DemoController, the position just measured
+  // at activation), and never slews toward the default target_ of 0.0, which
+  // on a position interface is a commanded move to the calibrated zero.
+  //
+  // Deliberately NOT "expire after the hard TTL measured from zero": under a
+  // real clock now_nanoseconds is time since boot, so that comparison made
+  // every activation start out already Expired. Expiry stays reserved for a
+  // target that was submitted and then went stale, which is the case ADR-012
+  // is about.
   if (!has_target_ || now_nanoseconds < 0) {
-    const auto now = std::max<std::int64_t>(now_nanoseconds, 0);
-    return now < limits_.hard_ttl_nanoseconds ? WatchdogStage::Holding
-                                              : WatchdogStage::Expired;
+    return WatchdogStage::Holding;
   }
   if (now_nanoseconds < deadline_) return WatchdogStage::Following;
   const auto hard_deadline =
@@ -97,14 +106,52 @@ WatchdogStage TargetLimiter::stage(std::int64_t now_nanoseconds) const noexcept 
   return WatchdogStage::Expired;
 }
 
+DemoController::DemoController()
+    : clock_([]() noexcept {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+      }) {}
+
+void DemoController::set_clock_for_testing(MonotonicClock clock) noexcept {
+  if (clock) clock_ = std::move(clock);
+}
+
+std::uint64_t DemoController::target_generation() const noexcept {
+  return generation_.load(std::memory_order_acquire);
+}
+
+// Runs on the executor thread for a topic message, or on the caller's thread
+// for set_target(). The generation is published last, with release ordering,
+// so update() can never see a new generation paired with an older value.
+bool DemoController::accept(double target, std::int64_t arrival_nanoseconds,
+                            std::uint64_t activation_epoch) noexcept {
+  std::lock_guard<std::mutex> lock(producer_mutex_);
+  if (!active_.load(std::memory_order_acquire) ||
+      activation_epoch != activation_epoch_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  const auto generation = generation_.load(std::memory_order_relaxed) + 1U;
+  inbox_.writeFromNonRT(
+      TargetCommand{target, generation, arrival_nanoseconds, activation_epoch});
+  generation_.store(generation, std::memory_order_release);
+  return true;
+}
+
 controller_interface::CallbackReturn DemoController::on_init() {
   try {
+    const auto& overrides =
+        get_node()->get_node_parameters_interface()->get_parameter_overrides();
+    if (overrides.count("ttl_nanoseconds") != 0U ||
+        overrides.count("hard_ttl_nanoseconds") != 0U) {
+      return controller_interface::CallbackReturn::ERROR;
+    }
     auto_declare<std::string>("joint", "joint_1");
     auto_declare<double>("minimum", -1.0);
     auto_declare<double>("maximum", 1.0);
     auto_declare<double>("max_slew_per_second", 1.0);
-    auto_declare<int64_t>("ttl_nanoseconds", 4000000);
-    auto_declare<int64_t>("hard_ttl_nanoseconds", 6000000);
+    auto_declare<int64_t>("target_ttl_nanoseconds", 100000000);
+    auto_declare<int64_t>("target_hard_ttl_nanoseconds", 106000000);
   } catch (...) {
     return controller_interface::CallbackReturn::ERROR;
   }
@@ -119,46 +166,96 @@ controller_interface::CallbackReturn DemoController::on_configure(
     limits_.maximum = get_node()->get_parameter("maximum").as_double();
     limits_.max_slew_per_second =
         get_node()->get_parameter("max_slew_per_second").as_double();
-    limits_.ttl_nanoseconds = get_node()->get_parameter("ttl_nanoseconds").as_int();
+    limits_.ttl_nanoseconds =
+        get_node()->get_parameter("target_ttl_nanoseconds").as_int();
     limits_.hard_ttl_nanoseconds =
-        get_node()->get_parameter("hard_ttl_nanoseconds").as_int();
+        get_node()->get_parameter("target_hard_ttl_nanoseconds").as_int();
   } catch (...) {
     return controller_interface::CallbackReturn::ERROR;
   }
   if (joint_name_.empty() || !limiter_.configure(limits_)) {
     return controller_interface::CallbackReturn::ERROR;
   }
+
+  // Controller-relative, so the full topic name follows the controller's
+  // namespace and two deployments of this controller cannot collide.
+  subscription_ = get_node()->create_subscription<std_msgs::msg::Float64>(
+      "~/target_position", rclcpp::SystemDefaultsQoS(),
+      [this](const std_msgs::msg::Float64::SharedPtr message) {
+        if (message == nullptr) return;
+        const auto activation_epoch =
+            activation_epoch_.load(std::memory_order_acquire);
+        // A target only means something while this controller holds the claim.
+        // Dropping here rather than buffering is what stops a re-activation
+        // from replaying something a publisher sent while the joint belonged
+        // to nobody.
+        if (!active_.load(std::memory_order_acquire)) return;
+        // Reject rather than clamp: a NaN or infinite target is a broken
+        // publisher, not a request for the limit, and clamping it would turn
+        // that bug into a full-scale motion command.
+        if (!std::isfinite(message->data)) return;
+        const auto arrival_nanoseconds = clock_();
+        (void)accept(message->data, arrival_nanoseconds, activation_epoch);
+      });
+
   command_ = 0.0;
-  active_ = false;
+  active_.store(false, std::memory_order_release);
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn DemoController::on_activate(
     const rclcpp_lifecycle::State&) {
-  if (command_interfaces_.size() != 1U || state_interfaces_.size() != 1U ||
+  if (command_interfaces_.size() != 2U || state_interfaces_.size() != 1U ||
       command_interfaces_[0].get_name() !=
           joint_name_ + "/" + hardware_interface::HW_IF_POSITION ||
+      command_interfaces_[1].get_name() !=
+          joint_name_ + "/" +
+              mech::mech_control_core::kCommandGenerationInterface ||
       state_interfaces_[0].get_name() !=
           joint_name_ + "/" + hardware_interface::HW_IF_POSITION) {
     return controller_interface::CallbackReturn::ERROR;
   }
-  command_ = state_interfaces_[0].get_value();
+  // Seed the hold value from the position just measured. ADR-016 already
+  // refuses the claim while no valid sample exists, so reaching here should
+  // mean feedback flowed; this check is the local guard against trusting that
+  // reasoning rather than the number in front of us. Failing closed is right
+  // because the only other seed available is a fabricated one, and on a
+  // position interface a fabricated 0.0 is a commanded move to the calibrated
+  // zero.
+  const auto seed = state_interfaces_[0].get_value();
+  if (!std::isfinite(seed)) {
+    return controller_interface::CallbackReturn::ERROR;
+  }
+  command_ = seed;
   limiter_.clear();
-  active_ = true;
+  // Ignore anything already in the inbox: a target that predates this
+  // activation is not a target for this activation.
+  applied_generation_ = generation_.load(std::memory_order_acquire);
+  activation_epoch_.fetch_add(1U, std::memory_order_acq_rel);
+  active_.store(true, std::memory_order_release);
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn DemoController::on_deactivate(
     const rclcpp_lifecycle::State&) {
-  active_ = false;
+  active_.store(false, std::memory_order_release);
+  activation_epoch_.fetch_add(1U, std::memory_order_acq_rel);
   limiter_.clear();
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::InterfaceConfiguration
 DemoController::command_interface_configuration() const {
+  // ADR-017 Decision 9: this project's own controllers are always in the strong
+  // tier. The weak tier exists to accept third-party controllers, not as a back
+  // door for ours. Claiming the generation interface is what lets the hardware
+  // tell this controller falling silent apart from the manager merely cycling;
+  // without it a DemoController that stopped writing would leave the motor on
+  // its last target with nothing able to notice.
   return {controller_interface::interface_configuration_type::INDIVIDUAL,
-          {joint_name_ + "/" + hardware_interface::HW_IF_POSITION}};
+          {joint_name_ + "/" + hardware_interface::HW_IF_POSITION,
+           joint_name_ + "/" +
+               mech::mech_control_core::kCommandGenerationInterface}};
 }
 
 controller_interface::InterfaceConfiguration
@@ -167,23 +264,77 @@ DemoController::state_interface_configuration() const {
           {joint_name_ + "/" + hardware_interface::HW_IF_POSITION}};
 }
 
+// The rclcpp::Time argument is deliberately unused: see MonotonicClock in the
+// header. `period` is the control period rather than a deadline, so it still
+// comes from the manager.
 controller_interface::return_type DemoController::update(
-    const rclcpp::Time& time, const rclcpp::Duration& period) {
-  if (!active_ || command_interfaces_.size() != 1U ||
-      time.nanoseconds() < 0 || period.nanoseconds() < 0) {
+    const rclcpp::Time&, const rclcpp::Duration& period) {
+  if (!active_.load(std::memory_order_acquire) ||
+      command_interfaces_.size() != 2U || period.nanoseconds() < 0) {
     return controller_interface::return_type::ERROR;
   }
-  if (limiter_.stage(time.nanoseconds()) == WatchdogStage::Expired) {
+  const auto now = clock_();
+
+  // A new generation means a message really arrived, and that is the only
+  // thing allowed to refresh the TTL. The acquire load pairs with accept()'s
+  // release store.
+  if (generation_.load(std::memory_order_acquire) != applied_generation_) {
+    const TargetCommand pending = *inbox_.readFromRT();
+    if (pending.generation != applied_generation_) {
+      applied_generation_ = pending.generation;
+      if (pending.activation_epoch ==
+              activation_epoch_.load(std::memory_order_acquire) &&
+          !limiter_.submit(pending.value, pending.arrival_nanoseconds)) {
+        // submit() refuses a non-finite target (already filtered above) or a
+        // clock so near int64 overflow that the deadline cannot be expressed.
+        // Either way the inputs are broken, so say so rather than carry on
+        // with a target whose deadline is unknown.
+        return controller_interface::return_type::ERROR;
+      }
+    }
+  }
+
+  const auto current_stage = limiter_.stage(now);
+  if (current_stage == WatchdogStage::Expired) {
     return controller_interface::return_type::ERROR;
   }
-  command_ = limiter_.update(command_, period.seconds(), time.nanoseconds());
+  command_ = limiter_.update(command_, period.seconds(), now);
   command_interfaces_[0].set_value(command_);
+  // ADR-017 Decision 3: the generation changes only when this controller
+  // actually has something new to say, which is exactly while it is following a
+  // target it still considers live. Deliberately NOT every cycle:
+  //
+  // - Holding (the target went stale, or none has ever arrived) means the value
+  //   written above is a frozen one. Bumping here would tell the hardware its
+  //   command was refreshed when nothing refreshed it - the very thing this
+  //   interface exists to prevent - and would keep the hardware's own staged
+  //   watchdog permanently satisfied by a controller that has gone quiet. Not
+  //   bumping lets both watchdogs freeze and then fault in step.
+  // - Expired returned above without writing at all.
+  //
+  // The counter only ever increases and is NOT reset on activation. ADR-017
+  // Decision 3.2 compares by inequality, and CompositeSystem re-seeds its
+  // baseline from the buffer when a claim changes hands, so continuing from the
+  // previous value is what guarantees the first write after a re-claim reads as
+  // new rather than colliding with the baseline.
+  if (current_stage == WatchdogStage::Following) {
+    command_interfaces_[1].set_value(
+        static_cast<double>(++command_generation_));
+  }
   return controller_interface::return_type::OK;
 }
 
-bool DemoController::set_target(double target,
-                                std::int64_t now_nanoseconds) noexcept {
-  return active_ && limiter_.submit(target, now_nanoseconds);
+// The non-ROS entry, kept so unit tests can drive the watchdog without an
+// executor. It routes through the same buffer and counter as the
+// subscription, so the two entries cannot drift apart.
+bool DemoController::set_target(double target) noexcept {
+  const auto activation_epoch =
+      activation_epoch_.load(std::memory_order_acquire);
+  if (!active_.load(std::memory_order_acquire) || !std::isfinite(target)) {
+    return false;
+  }
+  const auto arrival_nanoseconds = clock_();
+  return accept(target, arrival_nanoseconds, activation_epoch);
 }
 
 }  // namespace mech::mech_controllers

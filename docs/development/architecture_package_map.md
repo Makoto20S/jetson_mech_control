@@ -63,9 +63,10 @@
 
 ## 5. 已知的真实缺口（诚实记录，2026-09-07）/ Known real gaps
 
-1. **launch → 真机的生产组合点还不存在。** `Ak30RuntimeParams::parse()` 目前没有生产调用方；`0x12` 透传初始化只有探针发；pluginlib 构造的 `CompositeSystem` 必然带内置 LoopbackRuntime。**直接 `ros2 launch` 会广播假状态（loopback 爬坡），看起来像在工作、实际与电机无关。** 补齐它 = `mech_bringup` 里一个组合 plugin（params→serial+transport+runtime→`set_runtime`→透传 init），每个部件都已被探针在真机上单独验证，缺的只是组装。这一项是 2026-09-06 切片刻意划在范围外的（示例只做结构校验），不是架构漂移。
-2. **本文创建时开发处于 owner 暂停状态**（架构方向质询未裁决）：组合点切片设计过、未开工。
+1. ~~**launch → 真机的生产组合点还不存在。**~~ **已补（2026-09-08 组合点切片，PR #13：`mech_bringup/Ak30System` 组合插件 + 三个部署 xacro 改指向它）。** 历史记录（2026-09-07 调查）：`Ak30RuntimeParams::parse()` 当时没有生产调用方；`0x12` 透传初始化只有探针发；pluginlib 构造的 `CompositeSystem` 必然带内置 LoopbackRuntime，直接 `ros2 launch` 会广播假状态。2026-09-06 切片把这一项刻意划在范围外（示例只做结构校验），不是架构漂移。
+2. **本文创建时开发处于 owner 暂停状态**（架构方向质询未裁决）：组合点切片设计过、未开工。（2026-09-08 已解除：疑虑解决、切片实施完毕。）
 3. **Torque/Velocity 尚无 ros2 控制器**（DemoController 仅 position）；接口形状已就绪，命令方待后续切片。
+4. **真机首跑尚未发生**（组合点切片只做离线验证）：broadcaster-only 首跑是下一任务，需 owner 逐次授权 + 到场（ADR-006 Decision 7 边界）。
 
 ## 6. 给以后 AI 的判据 / How to tell the layers apart quickly
 

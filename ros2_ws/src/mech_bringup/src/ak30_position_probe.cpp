@@ -224,8 +224,9 @@ int run(const RunOptions& options) noexcept {
     RawCanFrame frame{};
     const auto received = transport.try_receive(frame);
     if (received == TransportResult::Ok) {
-      if (session.process(frame, current) == AdapterResult::Ok) {
-        const auto state = session.snapshot(current);
+      const auto observed_at = now();
+      if (session.process(frame, observed_at) == AdapterResult::Ok) {
+        const auto state = session.snapshot(observed_at);
         if (state.status.quality == SampleQuality::Valid) {
           ++samples;
           hold_position_rad = state.position;
@@ -310,8 +311,9 @@ int run(const RunOptions& options) noexcept {
     }
     RawCanFrame frame{};
     if (transport.try_receive(frame) == TransportResult::Ok) {
-      if (session.process(frame, current) == AdapterResult::Ok) {
-        const auto state = session.snapshot(current);
+      const auto observed_at = now();
+      if (session.process(frame, observed_at) == AdapterResult::Ok) {
+        const auto state = session.snapshot(observed_at);
         if (state.status.quality == SampleQuality::Valid) {
           hold_position_rad = state.position;
         }

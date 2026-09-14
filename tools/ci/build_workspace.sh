@@ -52,7 +52,8 @@ env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" build \
   --symlink-install \
   --cmake-args \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DPython3_EXECUTABLE=/usr/bin/python3
+    -DPython3_EXECUTABLE=/usr/bin/python3 \
+    -DBUILD_SHARED_LIBS=ON
 
 env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" test \
   --base-paths "${REPO_ROOT}/ros2_ws/src" \

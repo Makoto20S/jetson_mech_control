@@ -14,6 +14,8 @@ find_package(mech_control_core REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(realtime_tools REQUIRED)
+find_package(std_msgs REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
@@ -28,7 +30,7 @@ ament_target_dependencies(
   ${PROJECT_NAME}
   mech_control_core)
 ament_target_dependencies(${PROJECT_NAME}
-  controller_interface pluginlib rclcpp rclcpp_lifecycle)
+  controller_interface pluginlib rclcpp rclcpp_lifecycle realtime_tools std_msgs)
 
 pluginlib_export_plugin_description_file(
   controller_interface mech_controllers_plugins.xml)
@@ -42,7 +44,8 @@ install(TARGETS ${PROJECT_NAME}
 install(DIRECTORY include/ DESTINATION include)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
-  controller_interface mech_control_core pluginlib rclcpp rclcpp_lifecycle)
+  controller_interface mech_control_core pluginlib rclcpp rclcpp_lifecycle
+  realtime_tools std_msgs)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -53,6 +56,19 @@ if(BUILD_TESTING)
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+  # The plugin-level tests stand up a real rclcpp node to exercise the
+  # ~/target_position subscription, which under -fsanitize=address trips a
+  # mismatch inside ROS 2 itself: rcutils_string_map_init() allocates 72 bytes
+  # through operator new while rcutils_string_map_fini() releases it through
+  # operator delete(void*, size_t) with size 1. The stack is entirely in
+  # librcutils/librcl/librclcpp - no project code appears in it. This mirrors
+  # the identical exemption mech_bringup's controller_manager test needs.
+  # Only that single check is switched off, and by appending rather than
+  # replacing, so the value run_sanitizers.sh sets survives and every other
+  # AddressSanitizer check plus all of UndefinedBehaviorSanitizer stay active.
+  set_tests_properties(${PROJECT_NAME}_test PROPERTIES
+    ENVIRONMENT_MODIFICATION
+      "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
   ament_lint_cmake()
   ament_xmllint()
 endif()

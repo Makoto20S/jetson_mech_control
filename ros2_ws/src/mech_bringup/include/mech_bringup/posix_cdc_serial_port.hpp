@@ -35,7 +35,9 @@ class PosixCdcSerialPort final : public mech_control_core::CdcSerialPort {
   // sends exactly these bytes (its config member is never copied into the
   // payload, so cfg=0x00 is what actually ships, and 0x00 vs 0x07 measured
   // identical on the bench). Must be called after open() and before the first
-  // try_send/try_receive; the transport itself does not send it.
+  // try_send/try_receive; the transport itself does not send it. The bytes
+  // are the shared bench-verified literal (pass_through_init.hpp) - the CRCs
+  // are never recomputed.
   [[nodiscard]] bool send_pass_through_init() noexcept;
 
  private:

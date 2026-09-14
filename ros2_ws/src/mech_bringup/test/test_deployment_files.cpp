@@ -8,6 +8,9 @@
 //   carry any);
 // - the URDF's interface set must be exactly what CompositeSystem validates
 //   (position command + position/velocity/effort states);
+// - the URDF's hardware plugin must be the Ak30System composition point
+//   (mech_bringup/Ak30System), not the bare CompositeSystem (which would
+//   silently run the loopback runtime against real-hardware parameters);
 // - the YAML controller type must be the registered plugin name;
 // - the URDF's watchdog parameters must satisfy the ADR-012 budget.
 
@@ -22,6 +25,8 @@
 #include <vector>
 
 #include "mech_bringup/ak30_runtime_params.hpp"
+
+#include "mech_hardware_ros2_control/composite_system.hpp"
 
 #include "mech_protocol_cubemars/ak30_mapping.hpp"
 
@@ -126,6 +131,27 @@ TEST_F(DeploymentFilesTest, UrdfParamsAreAllKnownToTheParser) {
   }
 }
 
+TEST_F(DeploymentFilesTest, TargetAndHardwareLifetimesRemainDistinct) {
+  EXPECT_NE(controllers_.find("target_ttl_nanoseconds: 100000000"),
+            std::string::npos);
+  EXPECT_NE(controllers_.find("target_hard_ttl_nanoseconds: 106000000"),
+            std::string::npos);
+  EXPECT_EQ(controllers_.find("\n    ttl_nanoseconds:"), std::string::npos);
+  EXPECT_EQ(controllers_.find("\n    hard_ttl_nanoseconds:"),
+            std::string::npos);
+
+  for (const auto& [name, urdf] : urdfs_) {
+    SCOPED_TRACE(name);
+    EXPECT_NE(urdf.find("<param name=\"command_ttl_ns\">4000000</param>"),
+              std::string::npos);
+    EXPECT_NE(
+        urdf.find("<param name=\"command_hard_ttl_ns\">6000000</param>"),
+        std::string::npos);
+    EXPECT_EQ(urdf.find("100000000"), std::string::npos);
+    EXPECT_EQ(urdf.find("106000000"), std::string::npos);
+  }
+}
+
 // The single command interface in each variant's URDF must be exactly the
 // interface its sub_mode requires (ADR-014): Position -> position,
 // Velocity -> velocity, Torque -> effort. States stay [position, velocity,
@@ -139,11 +165,17 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
     EXPECT_NE(urdf.find("<command_interface name=\"" + expected_interface +
                         "\"/>"),
               std::string::npos);
-    // Exactly one command interface: the three canonical names occur only
-    // once combined (the expected one), and the other two never appear as
-    // command interfaces. <state_interface> lines reuse the same names, so
-    // count command_interface tags specifically.
+    // ADR-017: exactly one MOTION command interface (the expected one; the
+    // other two canonical names never appear as command interfaces) plus
+    // exactly one command_generation interface. <state_interface> lines reuse
+    // the same names, so count command_interface tags specifically.
+    //
+    // The generation interface is required in the URDF because the hardware
+    // exports it unconditionally - a deployment that omitted it would disagree
+    // with what CompositeSystem exports. That is separate from whether a
+    // controller claims it, which stays the controller's choice.
     std::size_t command_tags = 0;
+    std::size_t generation_tags = 0;
     std::size_t position = 0;
     while (true) {
       const auto hit = urdf.find("<command_interface name=\"", position);
@@ -151,16 +183,39 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
         break;
       }
       ++command_tags;
-      position = urdf.find('>', hit);
-      ASSERT_NE(position, std::string::npos);
+      const auto close = urdf.find('>', hit);
+      ASSERT_NE(close, std::string::npos);
+      if (urdf.compare(hit, close - hit,
+                       std::string("<command_interface name=\"") +
+                           mech::mech_hardware_ros2_control::
+                               kCommandGenerationInterface +
+                           "\"/") == 0) {
+        ++generation_tags;
+      }
+      position = close;
     }
-    EXPECT_EQ(command_tags, 1U);
+    EXPECT_EQ(command_tags, 2U);
+    EXPECT_EQ(generation_tags, 1U);
     for (const auto& states :
          {std::string("position"), std::string("velocity"),
           std::string("effort")}) {
       EXPECT_NE(urdf.find("<state_interface name=\"" + states + "\"/>"),
                 std::string::npos);
     }
+  }
+}
+
+// The hardware plugin in every variant must be the Ak30System composition
+// point: pluginlib-constructing the bare CompositeSystem would run its
+// built-in loopback runtime, which is not a real-device bring-up shape.
+TEST_F(DeploymentFilesTest, UrdfUsesAk30SystemCompositionPlugin) {
+  for (const auto& [name, urdf] : urdfs_) {
+    SCOPED_TRACE(name);
+    EXPECT_NE(urdf.find("<plugin>mech_bringup/Ak30System</plugin>"),
+              std::string::npos);
+    EXPECT_EQ(urdf.find("<plugin>mech_hardware_ros2_control/CompositeSystem"
+                        "</plugin>"),
+              std::string::npos);
   }
 }
 
@@ -174,19 +229,78 @@ TEST_F(DeploymentFilesTest, ControllersYamlUsesTheRegisteredPluginName) {
 TEST_F(DeploymentFilesTest, LaunchFileReferencesExistingFilesAndStaysSafe) {
   EXPECT_NE(launch_.find("motor1.urdf.xacro"), std::string::npos);
   EXPECT_NE(launch_.find("motor1_controllers.yaml"), std::string::npos);
-  // The position-controller spawner must stay commented out: uncommenting
-  // it arms position commands, which the file's warning and ADR-006 gate
-  // both call out. The state broadcaster alone is safe to spawn.
-  // The only occurrence of the spawner argument must be inside a comment.
-  const std::string spawner_arg = "arguments=['motor1_position_controller']";
-  auto position = launch_.find(spawner_arg);
+  // The position-controller spawner must stay commented out: uncommenting it
+  // arms position commands, which the file's warning and ADR-006 both gate.
+  // The state broadcaster alone is safe to spawn.
+  //
+  // Asserted over EVERY mention of the controller rather than one exact
+  // spawner literal. The literal form broke the moment the spawner line grew
+  // a '--inactive' argument, and a guard that a harmless edit can silently
+  // stop matching is not a guard.
+  const std::string controller = "motor1_position_controller";
+  auto position = launch_.find(controller);
   ASSERT_NE(position, std::string::npos);
-  EXPECT_EQ(launch_.find(spawner_arg, position + 1), std::string::npos);
-  const auto line_start = launch_.rfind('\n', position);
-  const auto line = launch_.substr(line_start + 1, position - line_start - 1);
-  EXPECT_NE(line.find('#'), std::string::npos);
+  std::size_t mentions = 0U;
+  while (position != std::string::npos) {
+    ++mentions;
+    const auto newline = launch_.rfind('\n', position);
+    const std::size_t line_start =
+        newline == std::string::npos ? 0U : newline + 1U;
+    const auto line = launch_.substr(line_start, position - line_start);
+    EXPECT_NE(line.find('#'), std::string::npos)
+        << "uncommented mention of " << controller << " at offset " << position;
+    position = launch_.find(controller, position + 1U);
+  }
+  EXPECT_GT(mentions, 0U);
   EXPECT_NE(launch_.find("arguments=['joint_state_broadcaster']"),
             std::string::npos);
+}
+
+// Deliberately a separate test from the one above, which is due to fail at T7:
+// that guard says the position-controller spawner must stay commented out, so
+// arming it legitimately turns it red and whoever is at the bench will edit it
+// away. This guard has to outlive that edit, because arming is exactly when it
+// starts to matter.
+//
+// ADR-016 refuses the command claim until valid feedback has flowed, and the
+// spawner asks switch_controller exactly once with STRICT strictness
+// (controller_manager/spawner.py): a refused claim is a valid service response,
+// so its max_attempts retry does not apply and it logs "Failed to activate
+// controller" and exits 1. A plainly spawned position controller therefore
+// races the first feedback frame - up to 20 ms at motor1's configured 50 Hz -
+// and losing leaves the controller off with a failed launch process.
+//
+// Scanned per arguments= list rather than per line so reformatting the call
+// across several lines cannot quietly drop the guard.
+TEST_F(DeploymentFilesTest, PositionControllerSpawnerIsNeverArmedActive) {
+  const std::string controller = "motor1_position_controller";
+  const std::string marker = "arguments=[";
+  std::size_t spawners = 0U;
+  auto open = launch_.find(marker);
+  while (open != std::string::npos) {
+    const auto close = launch_.find(']', open);
+    ASSERT_NE(close, std::string::npos)
+        << "unterminated " << marker << " at offset " << open;
+    const auto arguments = launch_.substr(open, close - open);
+    // A nested list would end the scan at the inner ']' and could hide the
+    // controller name, turning this guard into a vacuous pass. Fail loudly
+    // and rewrite the scan instead.
+    ASSERT_EQ(arguments.find('[', marker.size()), std::string::npos)
+        << "nested list inside " << marker << " at offset " << open
+        << "; this guard's bracket scan stops early - update it";
+    if (arguments.find(controller) != std::string::npos) {
+      ++spawners;
+      EXPECT_NE(arguments.find("--inactive"), std::string::npos)
+          << "the " << controller << " spawner must load it inactive and be "
+          << "activated only after feedback is confirmed; found: " << arguments;
+    }
+    open = launch_.find(marker, close);
+  }
+  // Without this the loop passes vacuously on a file that stopped spawning the
+  // controller in any form.
+  EXPECT_GT(spawners, 0U)
+      << "no spawner arguments mention " << controller
+      << "; this guard is no longer guarding anything";
 }
 
 }  // namespace

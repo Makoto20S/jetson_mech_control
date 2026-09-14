@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<library path="mech_bringup_e5_test_system">
+  <class name="mech_bringup/E5TestSystem"
+         type="mech::mech_bringup::test::E5TestSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>Process-test-only AK3.0 system backed by FakeTransport.</description>
+  </class>
+</library>

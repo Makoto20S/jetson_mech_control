@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<robot name="e5_process_test">
+  <link name="world"/>
+  <link name="motor1_joint"/>
+  <joint name="motor1_joint" type="revolute">
+    <parent link="world"/>
+    <child link="motor1_joint"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-12.56" upper="12.56" effort="15.0" velocity="40.0"/>
+  </joint>
+  <ros2_control name="e5_test_hardware" type="system">
+    <hardware><plugin>mech_bringup/E5TestSystem</plugin></hardware>
+    <joint name="motor1_joint">
+      <command_interface name="position"/>
+      <command_interface name="command_generation"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </ros2_control>
+</robot>

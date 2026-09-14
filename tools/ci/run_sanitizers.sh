@@ -26,7 +26,8 @@ env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" build \
     -DPython3_EXECUTABLE=/usr/bin/python3 \
     -DCMAKE_CXX_FLAGS=-fsanitize=address,undefined\ -fno-omit-frame-pointer \
     -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined \
-    -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined
+    -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined \
+    -DBUILD_SHARED_LIBS=ON
 
 ASAN_OPTIONS="detect_leaks=${DETECT_LEAKS}:halt_on_error=1" \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

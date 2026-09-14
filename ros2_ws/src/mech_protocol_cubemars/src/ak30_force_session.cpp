@@ -161,9 +161,20 @@ AdapterResult Ak30ForceControlSession::process(
     return result;
   }
 
+  // Freshness is measured from transport receipt, not from the control-cycle
+  // timestamp supplied by the caller. A queued frame may be older than the
+  // cycle that drains it; a future receipt is inconsistent with the
+  // observation point and must not become a sample. Likewise, an out-of-order
+  // frame cannot replace newer device state.
+  if (now < frame.host_arrival ||
+      (last_feedback_time_.has_value() &&
+       frame.host_arrival < *last_feedback_time_)) {
+    return AdapterResult::InvalidCommand;
+  }
+
   ++sequence_;
   last_state_ = decoded;
-  last_feedback_time_ = now;
+  last_feedback_time_ = frame.host_arrival;
   if (classify_status(static_cast<std::uint8_t>(decoded.status.raw_fault_code)) ==
       StatusMeaning::Fault) {
     fault_latched_ = true;

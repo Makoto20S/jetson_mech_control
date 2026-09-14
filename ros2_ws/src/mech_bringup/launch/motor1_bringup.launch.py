@@ -10,6 +10,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -21,6 +22,12 @@ def generate_launch_description():
             FindPackageShare('mech_bringup'), 'config', 'motor1.urdf.xacro'
         ]),
     ])
+    # ParameterValue(value, value_type=str) keeps launch_ros from trying to
+    # yaml-parse the xacro output - without it, ros2 launch fails with
+    # "Unable to parse the value of parameter robot_description as yaml".
+    # Found on the bench: the first broadcaster-only run (2026-09-08) could
+    # not start until this wrapper was applied.
+    robot_description = ParameterValue(robot_description_content, value_type=str)
 
     controllers_file = PathJoinSubstitution([
         FindPackageShare('mech_bringup'), 'config', 'motor1_controllers.yaml'
@@ -38,12 +45,12 @@ def generate_launch_description():
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
-            parameters=[{'robot_description': robot_description_content}],
+            parameters=[{'robot_description': robot_description}],
         ),
         Node(
             package='controller_manager',
             executable='ros2_control_node',
-            parameters=[robot_description_content, controllers_file],
+            parameters=[{'robot_description': robot_description}, controllers_file],
             output='both',
         ),
         Node(
@@ -53,9 +60,32 @@ def generate_launch_description():
         ),
         # Keep the position controller spawner commented out for offline
         # bring-up: uncommenting it arms position commands on the motor.
+        #
+        # When it IS armed (T7), it must not be spawned the plain way. ADR-016
+        # refuses the command claim until valid feedback has flowed, and the
+        # spawner calls switch_controller exactly once with STRICT strictness
+        # (controller_manager/spawner.py): a refused claim is a valid service
+        # response, so the helper's max_attempts retry does not apply and the
+        # spawner logs "Failed to activate controller" and exits 1. Spawning at
+        # launch therefore races the first feedback frame, which at motor1's
+        # configured 50 Hz is up to 20 ms after the hardware activates.
+        #
+        # Load it inactive and activate explicitly once feedback is confirmed:
         # Node(
         #     package='controller_manager',
         #     executable='spawner',
-        #     arguments=['motor1_position_controller'],
+        #     arguments=['motor1_position_controller', '--inactive'],
         # ),
+        #
+        # Then, from the bench, with the owner present:
+        #     tools/bench/activate_position_controller.sh \
+        #         motor1_position_controller
+        # That script retries the claim until ADR-016 lets it through and fails
+        # closed on timeout. Do not reach for `ros2 control switch_controllers
+        # --activate` instead: its --strict flag defaults to false, and
+        # SwitchController.srv says the meaning of "ok" depends on strictness.
+        #
+        # Once active, the target entry is the controller-relative topic
+        # ~/target_position (std_msgs/Float64), which resolves to
+        # /motor1_position_controller/target_position.
     ])
