@@ -117,11 +117,11 @@ constexpr std::size_t kReceiveBudget = 8U;
 
 Ak30ForceControlRuntime::Ak30ForceControlRuntime(
     mech::mech_control_core::Transport& transport, Clock clock,
-    Ak30RuntimeConfig config) noexcept
+    Ak30RuntimeConfig config, FeedbackTelemetryCapture* telemetry) noexcept
     : transport_(transport),
       clock_(std::move(clock)),
       config_(config),
-      session_(transport, session_config_from(config)) {}
+      session_(transport, session_config_from(config)), telemetry_(telemetry) {}
 
 bool Ak30ForceControlRuntime::configure(
     std::size_t resource_count) noexcept {
@@ -145,6 +145,7 @@ bool Ak30ForceControlRuntime::configure(
   expired_ = false;
   last_status_ = mech::mech_control_core::StatusSnapshot{};
   has_valid_sample_ = false;
+  has_observed_status_ = false;
   configured_ = true;
   return true;
 }
@@ -177,6 +178,49 @@ void Ak30ForceControlRuntime::stop() noexcept {
   expired_ = false;
   last_status_ = mech::mech_control_core::StatusSnapshot{};
   has_valid_sample_ = false;
+  has_observed_status_ = false;
+}
+
+void Ak30ForceControlRuntime::capture_status(
+    FeedbackTelemetryKind kind, FeedbackTelemetryReason reason,
+    const mech::mech_control_core::StatusSnapshot& status,
+    MonotonicTime observed_at) noexcept {
+  if (telemetry_ == nullptr) return;
+  FeedbackTelemetryEvent event{};
+  event.kind = kind;
+  event.reason = reason;
+  event.host_receive_sequence = status.sequence;
+  event.observed_at_nanoseconds = observed_at.nanoseconds();
+  event.quality = status.quality;
+  event.device_state = status.device_state;
+  event.raw_fault_code = status.raw_fault_code;
+  event.host_rx_available = status.host_rx_time.has_value();
+  if (event.host_rx_available) {
+    event.host_rx_nanoseconds = status.host_rx_time->nanoseconds();
+    const auto age = mech::mech_control_core::elapsed_since(
+        *status.host_rx_time, observed_at);
+    if (age.has_value()) {
+      event.age_available = true;
+      event.age_nanoseconds = age->nanoseconds();
+    }
+  }
+  (void)telemetry_->try_push(event);
+}
+
+void Ak30ForceControlRuntime::capture_error(
+    FeedbackTelemetryReason reason, MonotonicTime observed_at) noexcept {
+  last_status_ = session_.snapshot(observed_at).status;
+  if (!has_observed_status_ ||
+      last_status_.quality != observed_status_.quality ||
+      last_status_.device_state != observed_status_.device_state ||
+      last_status_.raw_fault_code != observed_status_.raw_fault_code) {
+    capture_status(FeedbackTelemetryKind::StatusTransition,
+                   FeedbackTelemetryReason::None, last_status_, observed_at);
+    observed_status_ = last_status_;
+    has_observed_status_ = true;
+  }
+  capture_status(FeedbackTelemetryKind::RuntimeError, reason, last_status_,
+                 observed_at);
 }
 
 bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
@@ -216,8 +260,13 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
   }
   // The validity window is minted here, once, from the moment the command was
   // received - not in submit_stored(), which runs again on every retry.
+  const auto issued_at = clock_().nanoseconds();
+  const auto maximum = std::numeric_limits<std::int64_t>::max();
+  if (config_.control_period_nanoseconds > (maximum - issued_at) / 2) {
+    return false;
+  }
   const auto deadline = MonotonicTime::from_nanoseconds(
-      clock_().nanoseconds() + 2 * config_.control_period_nanoseconds);
+      issued_at + 2 * config_.control_period_nanoseconds);
   if (!deadline.has_value()) {
     return false;
   }
@@ -364,6 +413,15 @@ bool Ak30ForceControlRuntime::publish_states(
   }
   const auto state = session_.snapshot(now);
   last_status_ = state.status;
+  if (!has_observed_status_ ||
+      state.status.quality != observed_status_.quality ||
+      state.status.device_state != observed_status_.device_state ||
+      state.status.raw_fault_code != observed_status_.raw_fault_code) {
+    capture_status(FeedbackTelemetryKind::StatusTransition,
+                   FeedbackTelemetryReason::None, state.status, now);
+    observed_status_ = state.status;
+    has_observed_status_ = true;
+  }
   const bool usable = state.status.quality == SampleQuality::Valid ||
                       state.status.quality == SampleQuality::Degraded;
   has_valid_sample_ = usable;
@@ -393,12 +451,6 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
   if (!started_ || states == nullptr || count != resource_count_) {
     return false;
   }
-  const MonotonicTime now = clock_();
-
-  if (!submit_stored(now)) {
-    return false;
-  }
-
   // Drain received frames into the session. Receiving WouldBlock (no frame
   // this cycle) is the steady state, not an error.
   for (std::size_t index = 0; index < kReceiveBudget; ++index) {
@@ -408,23 +460,57 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
       break;
     }
     if (received != TransportResult::Ok) {
+      capture_error(FeedbackTelemetryReason::TransportReceive, clock_());
       return false;
     }
-    const auto processed = session_.process(frame, now);
+    // Observe after dequeue: a transport can stamp a frame while this read
+    // cycle is draining, so the pre-drain cycle timestamp may be in its past.
+    const MonotonicTime observed_at = clock_();
+    const auto processed = session_.process(frame, observed_at);
     if (processed != AdapterResult::Ok &&
         processed != AdapterResult::InvalidCommand) {
       // A frame that is not this device's feedback (e.g. a foreign drive on
       // a shared bus) decodes as InvalidCommand and is ignored; anything
       // else is a real failure.
+      capture_error(FeedbackTelemetryReason::FrameProcessing, clock_());
       return false;
+    }
+    if (processed == AdapterResult::Ok) {
+      const auto status = session_.snapshot(observed_at).status;
+      last_status_ = status;
+      capture_status(FeedbackTelemetryKind::FeedbackFrame,
+                     FeedbackTelemetryReason::None, status, observed_at);
+      if (!has_observed_status_ || status.quality != observed_status_.quality ||
+          status.device_state != observed_status_.device_state ||
+          status.raw_fault_code != observed_status_.raw_fault_code) {
+        capture_status(FeedbackTelemetryKind::StatusTransition,
+                       FeedbackTelemetryReason::None, status, observed_at);
+        observed_status_ = status;
+        has_observed_status_ = true;
+      }
     }
   }
 
   if (session_.fault_latched()) {
+    last_status_ = session_.snapshot(clock_()).status;
+    capture_error(FeedbackTelemetryReason::FaultLatched, clock_());
     return false;
   }
 
-  return publish_states(states, count, now);
+  const auto observed_at = clock_();
+  if (!publish_states(states, count, observed_at)) {
+    capture_error(FeedbackTelemetryReason::FeedbackUnusable, observed_at);
+    return false;
+  }
+  // Feedback quality is the safety gate for transmission. Validate it before
+  // submitting a fresh controller command so a target refreshed during lost
+  // feedback cannot produce one final frame on the cycle that detects Stale.
+  const MonotonicTime submission_now = clock_();
+  if (!submit_stored(submission_now)) {
+    capture_error(FeedbackTelemetryReason::CommandSubmission, submission_now);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace mech::mech_bringup

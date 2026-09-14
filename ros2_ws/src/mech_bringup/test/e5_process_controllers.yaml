@@ -1,0 +1,16 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+    motor1_position_controller:
+      type: mech_controllers/DemoController
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+motor1_position_controller:
+  ros__parameters:
+    joint: motor1_joint
+    minimum: -1.0
+    maximum: 1.0
+    max_slew_per_second: 2.0
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000

@@ -1,77 +1,39 @@
 #!/usr/bin/env bash
-# Offline tests for activate_position_controller.sh.
-#
-# The script under test is the one operator-facing action that arms a motor,
-# so the thing it must never do is report a success it did not achieve. These
-# tests drive it against a stub `ros2` on PATH: no ROS, no controller_manager
-# and no device is involved, which is why they run in the portable CI job.
-#
-# The stub is configured through the environment, reset before every case:
-#   STUB_LISTED         1 = list_controllers reports the controller at all
-#   STUB_STATE          state list_controllers reports (inactive/active/...)
-#   STUB_REFUSALS       how many set_controller_state calls fail before one
-#                       succeeds; negative refuses forever
-#   STUB_ACTIVATE_LIES  1 = set_controller_state exits 0 without activating
-#
-# No case runs in a subshell: a count incremented in one would not survive.
+# Integration tests for activate_position_controller.sh using real ROS services.
 set -uo pipefail
+
+if [[ "${MECH_ACTIVATION_TEST_OUTER_TIMEOUT:-0}" != "1" ]]; then
+  export MECH_ACTIVATION_TEST_OUTER_TIMEOUT=1
+  exec timeout --signal=TERM --kill-after=2s 30s "$0" "$@"
+fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 UNDER_TEST="${SCRIPT_DIR}/activate_position_controller.sh"
+SERVER="${SCRIPT_DIR}/test_activation_service_server.py"
 CONTROLLER=motor1_position_controller
-BASE_PATH="${PATH}"
-
 failures=0
 checks=0
-stub_dir=""
+case_dir=""
+server_pid=""
 
-setup_stub() {
-  stub_dir="$(mktemp -d)"
-  mkdir -p "${stub_dir}/bin"
-  cat >"${stub_dir}/bin/ros2" <<'STUB'
-#!/usr/bin/env bash
-set -uo pipefail
-verb="${2:-}"
-case "${verb}" in
-  list_controllers)
-    echo "joint_state_broadcaster[joint_state_broadcaster/JointStateBroadcaster] active"
-    if [[ "${STUB_LISTED}" == "1" ]]; then
-      echo "motor1_position_controller[mech_controllers/DemoController] $(cat "${STUB_DIR}/state")"
+cleanup_case() {
+  if [[ -n "${server_pid}" ]]; then
+    kill "${server_pid}" 2>/dev/null || true
+    local count=0
+    while kill -0 "${server_pid}" 2>/dev/null && [[ "${count}" -lt 50 ]]; do
+      sleep 0.02
+      count=$(( count + 1 ))
+    done
+    if kill -0 "${server_pid}" 2>/dev/null; then
+      kill -KILL "${server_pid}" 2>/dev/null || true
     fi
-    ;;
-  set_controller_state)
-    attempts=$(( $(cat "${STUB_DIR}/attempts") + 1 ))
-    echo "${attempts}" >"${STUB_DIR}/attempts"
-    if [[ "${STUB_REFUSALS}" -lt 0 || "${attempts}" -le "${STUB_REFUSALS}" ]]; then
-      echo "Error activating controller, check controller_manager logs" >&2
-      exit 1
-    fi
-    if [[ "${STUB_ACTIVATE_LIES}" != "1" ]]; then
-      echo active >"${STUB_DIR}/state"
-    fi
-    echo "Successfully activated motor1_position_controller"
-    ;;
-  *)
-    echo "stub ros2: unexpected call: $*" >&2
-    exit 97
-    ;;
-esac
-STUB
-  chmod +x "${stub_dir}/bin/ros2"
-  echo 0 >"${stub_dir}/attempts"
-  echo "${STUB_STATE:-inactive}" >"${stub_dir}/state"
-  export STUB_DIR="${stub_dir}"
-  export STUB_LISTED="${STUB_LISTED:-1}"
-  export STUB_REFUSALS="${STUB_REFUSALS:-0}"
-  export STUB_ACTIVATE_LIES="${STUB_ACTIVATE_LIES:-0}"
-  export PATH="${stub_dir}/bin:${BASE_PATH}"
+    wait "${server_pid}" 2>/dev/null || true
+  fi
+  [[ -z "${case_dir}" ]] || rm -rf "${case_dir}"
+  server_pid=""
+  case_dir=""
 }
-
-teardown_stub() {
-  rm -rf "${stub_dir}"
-  export PATH="${BASE_PATH}"
-  unset STUB_DIR STUB_LISTED STUB_STATE STUB_REFUSALS STUB_ACTIVATE_LIES
-}
+trap cleanup_case EXIT
 
 check() {
   local description="$1" expected="$2" actual="$3"
@@ -80,95 +42,103 @@ check() {
     echo "ok   - ${description}"
   else
     echo "FAIL - ${description}: expected '${expected}', got '${actual}'"
-    echo "       script output:"
-    sed 's/^/       | /' "${stub_dir}/out" 2>/dev/null || true
+    [[ ! -f "${case_dir}/out" ]] || sed 's/^/       | /' "${case_dir}/out"
     failures=$(( failures + 1 ))
   fi
 }
 
-# Reports the script's exit status without letting a non-zero status abort this
-# harness. The status is asserted exactly, not merely as "non-zero": the script
-# documents its exit codes as a contract, and checking only the sign lets a
-# case pass through the wrong refusal path. Several of these cases refuse for
-# more than one reason, so the sign alone proves very little.
+output_contains() { grep -qF -- "$1" "${case_dir}/out" && echo yes || echo no; }
+
 run_under_test() {
   local status=0
-  "${UNDER_TEST}" "$@" >"${stub_dir}/out" 2>&1 || status=$?
+  timeout --signal=TERM --kill-after=1s 8s \
+    "${UNDER_TEST}" "$@" >"${case_dir}/out" 2>&1 || status=$?
   echo "${status}"
 }
 
-attempts_made() { cat "${stub_dir}/attempts"; }
-reported_state() { cat "${stub_dir}/state"; }
-
-# Reports whether the script's output contained a string. Used sparingly: for
-# an operator tool the refusal message is the product, and "not loaded" and
-# "not inactive" both exit 3, so without this the two are indistinguishable
-# and one could silently stop telling the operator what to do about it.
-output_contains() {
-  grep -qF -- "$1" "${stub_dir}/out" && echo yes || echo no
+start_server() {
+  local scenario="$1"
+  cleanup_case
+  case_dir="$(mktemp -d /tmp/mech-activation-test.XXXXXX)"
+  export ROS_DOMAIN_ID=$(( 80 + (RANDOM % 20) ))
+  export ROS_LOG_DIR="${case_dir}/ros-log"
+  mkdir -p "${ROS_LOG_DIR}"
+  /usr/bin/python3 "${SERVER}" --manager /test_controller_manager \
+    --controller "${CONTROLLER}" --scenario "${scenario}" \
+    --record "${case_dir}/requests.jsonl" --ready "${case_dir}/ready" \
+    >"${case_dir}/server.log" 2>&1 &
+  server_pid=$!
+  local count=0
+  while [[ ! -f "${case_dir}/ready" && "${count}" -lt 100 ]]; do
+    sleep 0.02
+    count=$(( count + 1 ))
+  done
+  if [[ ! -f "${case_dir}/ready" ]]; then
+    echo "test service did not start" >&2
+    sed -n '1,120p' "${case_dir}/server.log" >&2
+    exit 2
+  fi
 }
 
-# --- No controller name -------------------------------------------------
-# Arming has no sensible default target, so the name must be given.
-setup_stub
+json_field() {
+  /usr/bin/python3 - "$case_dir/requests.jsonl" "$1" <<'PY'
+import json
+import sys
+rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+switches = [row for row in rows if row["service"] == "switch"]
+key = sys.argv[2]
+print(len(switches) if key == "switch_count" else (switches[-1][key] if switches else ""))
+PY
+}
+
+case_dir="$(mktemp -d /tmp/mech-activation-test.XXXXXX)"
 check "refuses to run without a controller name" 2 "$(run_under_test)"
-check "asks the controller manager for nothing" 0 "$(attempts_made)"
-teardown_stub
+cleanup_case
 
-# --- Controller not loaded ----------------------------------------------
-# Without the --inactive spawner the controller is not there at all. Guessing
-# on the operator's behalf is the behaviour this script exists to remove.
-STUB_LISTED=0 setup_stub
-check "refuses when the controller is not loaded" 3 \
-      "$(run_under_test "${CONTROLLER}" 1)"
-check "does not try to activate a controller it cannot see" 0 "$(attempts_made)"
-check "tells the operator to load it --inactive first" yes \
-      "$(output_contains "--inactive")"
-teardown_stub
+case_dir="$(mktemp -d /tmp/mech-activation-test.XXXXXX)"
+export ROS_DOMAIN_ID=$(( 80 + (RANDOM % 20) ))
+export ROS_LOG_DIR="${case_dir}/ros-log"
+mkdir -p "${ROS_LOG_DIR}"
+started_ns="$(date +%s%N)"
+check "bounds controller-manager discovery" 3 \
+  "$(run_under_test "${CONTROLLER}" 1 /missing_controller_manager)"
+ended_ns="$(date +%s%N)"
+elapsed_ms=$(( (ended_ns - started_ns) / 1000000 ))
+check "applies the total deadline to discovery" yes \
+  "$([[ "${elapsed_ms}" -ge 700 && "${elapsed_ms}" -lt 1800 ]] && echo yes || echo no)"
+cleanup_case
 
-# --- Controller already active ------------------------------------------
-# The world is not what the operator thinks it is. Say so rather than report a
-# success this run did not cause.
-STUB_STATE=active setup_stub
-check "refuses when the controller is already active" 3 \
-      "$(run_under_test "${CONTROLLER}" 1)"
-check "does not re-activate an active controller" 0 "$(attempts_made)"
-teardown_stub
+start_server not_loaded
+check "refuses when the controller is not loaded" 3 "$(run_under_test "${CONTROLLER}" 3 /test_controller_manager)"
+check "does not switch an unknown controller" 0 "$(json_field switch_count)"
+check "tells the operator to load it inactive" yes "$(output_contains --inactive)"
 
-# --- The gate never opens -----------------------------------------------
-# ADR-016 refuses the claim while feedback is not usable.
-#
-# The companion assertion is on the attempt count, not on the controller state
-# afterwards: with the gate refusing forever the stub cannot activate anything,
-# so "it is still inactive" would hold no matter what the script did. Retrying
-# more than once is the property that actually distinguishes this script from
-# the spawner it exists to replace.
-STUB_REFUSALS=-1 setup_stub
-check "fails closed when the gate never opens" 4 \
-      "$(run_under_test "${CONTROLLER}" 1)"
-check "keeps retrying instead of giving up on the first refusal" yes \
-      "$([[ "$(attempts_made)" -gt 1 ]] && echo yes || echo no)"
-teardown_stub
+start_server active
+check "refuses when the controller is already active" 3 "$(run_under_test "${CONTROLLER}" 3 /test_controller_manager)"
+check "does not re-activate an active controller" 0 "$(json_field switch_count)"
 
-# --- The gate opens on a later attempt ----------------------------------
-# This is the whole reason the script exists: the spawner issues exactly one
-# STRICT switch_controller and gives up when it is refused.
-STUB_REFUSALS=2 setup_stub
-check "succeeds once the gate opens on a later attempt" 0 \
-      "$(run_under_test "${CONTROLLER}" 5)"
-check "activates the controller" active "$(reported_state)"
-teardown_stub
+start_server refuse_twice
+check "retries STRICT switching until the claim opens" 0 "$(run_under_test "${CONTROLLER}" 3 /test_controller_manager)"
+check "makes three switch requests" 3 "$(json_field switch_count)"
+check "uses STRICT switch semantics" 2 "$(json_field strictness)"
+check "activates only the requested controller" "['motor1_position_controller']" "$(json_field activate_controllers)"
 
-# --- The command reports success it did not achieve ---------------------
-# `ros2 control switch_controllers --activate` defaults to BEST_EFFORT, and
-# the service definition says the meaning of ok depends on strictness. This
-# script uses the strict verb instead, but still reads the state back: a
-# tool's own report of success is not evidence.
-STUB_ACTIVATE_LIES=1 setup_stub
-check "rejects a reported success the read-back does not confirm" 5 \
-      "$(run_under_test "${CONTROLLER}" 1)"
-teardown_stub
+start_server lie
+check "rejects success without active readback" 5 "$(run_under_test "${CONTROLLER}" 1 /test_controller_manager)"
 
+start_server refuse_forever
+check "reports a bounded definitive refusal" 4 "$(run_under_test "${CONTROLLER}" 1 /test_controller_manager)"
+check "reports confirmed inactive state after refusal" yes "$(output_contains "confirmed 'inactive'")"
+
+start_server hang
+started_ns="$(date +%s%N)"
+check "bounds an unanswered switch request" 4 "$(run_under_test "${CONTROLLER}" 1 /test_controller_manager)"
+ended_ns="$(date +%s%N)"
+elapsed_ms=$(( (ended_ns - started_ns) / 1000000 ))
+check "uses one bounded total deadline" yes "$([[ "${elapsed_ms}" -ge 700 && "${elapsed_ms}" -lt 1800 ]] && echo yes || echo no)"
+check "describes an unanswered request as uncertain" yes "$(output_contains "outcome is uncertain")"
+
+cleanup_case
 echo
 if [[ "${failures}" -ne 0 ]]; then
   echo "${failures} failed / ${checks} checks"

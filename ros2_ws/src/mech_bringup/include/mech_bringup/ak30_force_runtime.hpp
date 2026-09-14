@@ -12,6 +12,50 @@
 
 namespace mech::mech_bringup {
 
+enum class FeedbackTelemetryKind : std::uint8_t {
+  FeedbackFrame,
+  StatusTransition,
+  RuntimeError,
+  LifecycleSummary,
+};
+
+enum class FeedbackTelemetryReason : std::uint8_t {
+  None,
+  CommandSubmission,
+  TransportReceive,
+  FrameProcessing,
+  FaultLatched,
+  FeedbackUnusable,
+  QueueOverflow,
+  Deactivate,
+  Error,
+  Cleanup,
+};
+
+struct FeedbackTelemetryEvent final {
+  FeedbackTelemetryKind kind{FeedbackTelemetryKind::FeedbackFrame};
+  FeedbackTelemetryReason reason{FeedbackTelemetryReason::None};
+  std::uint64_t host_receive_sequence{0U};
+  std::int64_t host_rx_nanoseconds{0};
+  std::int64_t observed_at_nanoseconds{0};
+  std::int64_t age_nanoseconds{0};
+  std::uint64_t motor_command_frames{0U};
+  std::uint64_t pass_through_frames{0U};
+  std::uint64_t diagnostic_loss_count{0U};
+  std::uint32_t raw_fault_code{0U};
+  mech::mech_control_core::SampleQuality quality{};
+  mech::mech_control_core::DeviceState device_state{};
+  bool host_rx_available{false};
+  bool age_available{false};
+};
+
+class FeedbackTelemetryCapture {
+ public:
+  virtual ~FeedbackTelemetryCapture() = default;
+  [[nodiscard]] virtual bool try_push(
+      const FeedbackTelemetryEvent& event) noexcept = 0;
+};
+
 // Configuration for one force-control joint wired through the composite
 // SystemInterface. Mirrors Ak30SessionConfig's fields that a deployment may
 // legitimately set; the sub-mode is explicit configuration (never inferred)
@@ -64,7 +108,8 @@ class Ak30ForceControlRuntime final
   // The transport must outlive this runtime; the clock is called once per
   // read()/write() cycle and must be monotonic.
   Ak30ForceControlRuntime(mech::mech_control_core::Transport& transport,
-                          Clock clock, Ak30RuntimeConfig config) noexcept;
+                          Clock clock, Ak30RuntimeConfig config,
+                          FeedbackTelemetryCapture* telemetry = nullptr) noexcept;
 
   [[nodiscard]] bool configure(std::size_t resource_count) noexcept override;
   [[nodiscard]] bool start() noexcept override;
@@ -121,6 +166,12 @@ class Ak30ForceControlRuntime final
       mech_hardware_ros2_control::CanonicalState* states,
       std::size_t count,
       mech::mech_control_core::MonotonicTime now) noexcept;
+  void capture_status(FeedbackTelemetryKind kind,
+                      FeedbackTelemetryReason reason,
+                      const mech::mech_control_core::StatusSnapshot& status,
+                      mech::mech_control_core::MonotonicTime observed_at) noexcept;
+  void capture_error(FeedbackTelemetryReason reason,
+                     mech::mech_control_core::MonotonicTime observed_at) noexcept;
 
   mech::mech_control_core::Transport& transport_;
   Clock clock_;
@@ -150,6 +201,9 @@ class Ak30ForceControlRuntime final
   mech::mech_control_core::StatusSnapshot last_status_{};
   std::uint64_t motor_command_frames_{0U};
   bool has_valid_sample_{false};
+  FeedbackTelemetryCapture* telemetry_{nullptr};
+  mech::mech_control_core::StatusSnapshot observed_status_{};
+  bool has_observed_status_{false};
 };
 
 }  // namespace mech::mech_bringup

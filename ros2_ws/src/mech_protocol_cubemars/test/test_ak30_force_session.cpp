@@ -378,6 +378,56 @@ TEST_F(Ak30SessionRuntime, MarksTheSampleStaleOnceFeedbackExceedsItsTtl) {
             SampleQuality::Stale);
 }
 
+TEST_F(Ak30SessionRuntime, DelayedQueuedFeedbackKeepsItsHostArrivalAge) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(1000)),
+                             fixtures::at(6001001)),
+            AdapterResult::Ok);
+
+  const auto state = session_.snapshot(fixtures::at(6001001));
+  EXPECT_EQ(state.status.sequence, 1U);
+  ASSERT_TRUE(state.status.host_rx_time.has_value());
+  EXPECT_EQ(state.status.host_rx_time->nanoseconds(), 1000);
+  EXPECT_EQ(state.status.quality, SampleQuality::Stale);
+}
+
+TEST_F(Ak30SessionRuntime, RejectsFeedbackTimestampedAfterObservation) {
+  EXPECT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(2000)),
+                             fixtures::at(1999)),
+            AdapterResult::InvalidCommand);
+  EXPECT_EQ(session_.snapshot(fixtures::at(1999)).status.sequence, 0U);
+}
+
+TEST_F(Ak30SessionRuntime, RejectsOutOfOrderFeedbackWithoutReplacingNewestState) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(2000)),
+                             fixtures::at(3000)),
+            AdapterResult::Ok);
+  EXPECT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(1000)),
+                             fixtures::at(3000)),
+            AdapterResult::InvalidCommand);
+
+  const auto state = session_.snapshot(fixtures::at(3000));
+  EXPECT_EQ(state.status.sequence, 1U);
+  ASSERT_TRUE(state.status.host_rx_time.has_value());
+  EXPECT_EQ(state.status.host_rx_time->nanoseconds(), 2000);
+}
+
+TEST_F(Ak30SessionRuntime, AcceptsDistinctFaultAtTheSameBatchArrival) {
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x00U, fixtures::at(2000)),
+                             fixtures::at(3000)),
+            AdapterResult::Ok);
+  ASSERT_EQ(session_.process(fixtures::feedback_frame(0x01U, fixtures::at(2000)),
+                             fixtures::at(3000)),
+            AdapterResult::Ok);
+
+  const auto state = session_.snapshot(fixtures::at(3000));
+  EXPECT_EQ(state.status.sequence, 2U);
+  EXPECT_EQ(state.status.raw_fault_code, 0x01U);
+  EXPECT_EQ(state.status.device_state,
+            mech::mech_control_core::DeviceState::Fault);
+  ASSERT_TRUE(state.status.host_rx_time.has_value());
+  EXPECT_EQ(state.status.host_rx_time->nanoseconds(), 2000);
+}
+
 // ADR-012's staged watchdog: follow, then freeze the last valid command, then
 // an explicit error past the hard TTL. ttl 4 ms, hard_ttl 6 ms.
 TEST_F(Ak30SessionRuntime, StagesTheCommandWatchdogFollowingHoldingExpired) {

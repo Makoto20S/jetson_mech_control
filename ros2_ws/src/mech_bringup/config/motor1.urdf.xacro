@@ -43,6 +43,13 @@
       <param name="feedback_ttl_ns">60000000</param>
       <param name="zero_offset_rad">5.760604931781636</param>
       <param name="position_is_output_shaft">true</param>
+      <!-- ADR-016 Decision 5 evidence: one record per new feedback
+           sequence (sequence, host arrival time, quality, fault). Off in
+           the shipped file; a bench session that must archive per-frame
+           feedback sets it true here. Declared rather than left to the
+           code default so the switch is discoverable from the deployment
+           file instead of only from the parser's key list. -->
+      <param name="feedback_telemetry_log">false</param>
     </hardware>
     <joint name="motor1_joint">
       <command_interface name="position"/>

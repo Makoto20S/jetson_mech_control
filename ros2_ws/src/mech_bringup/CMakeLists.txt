@@ -16,6 +16,7 @@ find_package(mech_controllers REQUIRED)
 find_package(mech_protocol_cubemars REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(realtime_tools REQUIRED)
 
 # SHARED is required for the pluginlib-loaded Ak30System: pluginlib dlopens
 # the library by name, which cannot work against a static archive.
@@ -41,7 +42,8 @@ ament_target_dependencies(
   mech_controllers
   mech_protocol_cubemars
   hardware_interface
-  pluginlib)
+  pluginlib
+  realtime_tools)
 
 pluginlib_export_plugin_description_file(
   hardware_interface mech_bringup_plugins.xml)
@@ -81,12 +83,39 @@ install(FILES
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   mech_control_core mech_simulation mech_hardware_ros2_control
-  mech_controllers mech_protocol_cubemars)
+  mech_controllers mech_protocol_cubemars realtime_tools)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_test REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  find_package(rclcpp REQUIRED)
+  find_package(std_msgs REQUIRED)
+  find_package(std_srvs REQUIRED)
+
+  # Process-test-only hardware plugin. It exercises the production composite
+  # system and AK3 runtime over FakeTransport, and is absent from production
+  # builds and the production plugin manifest.
+  add_library(${PROJECT_NAME}_e5_test_system SHARED
+    test/e5_test_system.cpp
+    src/ak30_force_runtime.cpp)
+  target_include_directories(${PROJECT_NAME}_e5_test_system PRIVATE include)
+  ament_target_dependencies(${PROJECT_NAME}_e5_test_system
+    hardware_interface
+    mech_control_core
+    mech_hardware_ros2_control
+    mech_protocol_cubemars
+    mech_simulation
+    pluginlib
+    rclcpp
+    std_msgs
+    std_srvs)
+  pluginlib_export_plugin_description_file(
+    hardware_interface test/e5_test_plugins.xml)
+  install(TARGETS ${PROJECT_NAME}_e5_test_system
+    LIBRARY DESTINATION lib)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
@@ -125,6 +154,37 @@ if(BUILD_TESTING)
   set_tests_properties(${PROJECT_NAME}_controller_manager_test PROPERTIES
     ENVIRONMENT_MODIFICATION
       "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
+
+  ament_add_test(${PROJECT_NAME}_activate_position_controller
+    COMMAND bash
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/bench/test_activate_position_controller.sh
+    TIMEOUT 35
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  add_launch_test(test/test_e5_process.launch.py
+    TARGET ${PROJECT_NAME}_e5_process_lifetime
+    TIMEOUT 45)
+  add_launch_test(test/test_e5_process.launch.py
+    TARGET ${PROJECT_NAME}_e5_process_feedback_loss
+    TIMEOUT 35)
+  set_tests_properties(${PROJECT_NAME}_e5_process_lifetime PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=41"
+    RUN_SERIAL TRUE)
+  set_tests_properties(${PROJECT_NAME}_e5_process_feedback_loss PROPERTIES
+    ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42"
+    RUN_SERIAL TRUE)
+  if(CMAKE_CXX_FLAGS MATCHES "fsanitize=address")
+    execute_process(
+      COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=libasan.so
+      OUTPUT_VARIABLE MECH_ASAN_RUNTIME
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${MECH_ASAN_RUNTIME}")
+      set_tests_properties(${PROJECT_NAME}_e5_process_lifetime PROPERTIES
+        ENVIRONMENT "ROS_DOMAIN_ID=41;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
+      set_tests_properties(${PROJECT_NAME}_e5_process_feedback_loss PROPERTIES
+        ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
+    endif()
+  endif()
 
   ament_lint_cmake()
   ament_xmllint()

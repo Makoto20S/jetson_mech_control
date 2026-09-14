@@ -22,11 +22,15 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
@@ -507,15 +511,24 @@ TEST_F(Ak30SystemPluginTest, UnknownSubModeIsRejectedRatherThanDefaulted) {
 
 // ADR-016 Decision 5's logging half, stated as behaviour rather than as log
 // text. The device reports at 50 Hz while the loop runs at 500 Hz, so the
-// record must be keyed on the device's own sequence: one per NEW frame. If it
+// record must be keyed on the host's accepted sequence: one per NEW frame. If it
 // were emitted per control cycle, the log would show ten arrivals for every
 // real one and the arrival timing it exists to establish would be fiction.
 TEST_F(Ak30SystemPluginTest, TelemetryIsEmittedOncePerNewFeedbackFrame) {
   use_fake_serial();
-  std::vector<Ak30System::FeedbackTelemetry> records;
+  struct Recorder {
+    std::vector<Ak30System::FeedbackTelemetry> records;
+    std::mutex mutex;
+    std::thread::id sink_thread;
+  };
+  auto recorder = std::make_shared<Recorder>();
+  auto& records = recorder->records;
+  auto& records_mutex = recorder->mutex;
   system_.set_telemetry_sink_for_testing(
-      [&records](const Ak30System::FeedbackTelemetry& record) {
-        records.push_back(record);
+      [recorder](const Ak30System::FeedbackTelemetry& record) {
+        std::lock_guard<std::mutex> lock(recorder->mutex);
+        recorder->sink_thread = std::this_thread::get_id();
+        recorder->records.push_back(record);
       });
   auto params = valid_params();
   params["feedback_telemetry_log"] = "true";
@@ -529,21 +542,44 @@ TEST_F(Ak30SystemPluginTest, TelemetryIsEmittedOncePerNewFeedbackFrame) {
   const rclcpp::Time time(0);
   const rclcpp::Duration period{std::chrono::nanoseconds(2000000)};
 
-  // Nothing has arrived: there is no sample to describe, so no record.
+  // Startup may emit Unknown, but never a feedback-frame event.
   EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
-  EXPECT_TRUE(records.empty());
+  {
+    std::lock_guard<std::mutex> lock(records_mutex);
+    for (const auto& record : records) {
+      EXPECT_NE(record.kind, FeedbackTelemetryKind::FeedbackFrame);
+    }
+  }
 
   ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
   EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
-  ASSERT_EQ(records.size(), 1U);
-  EXPECT_TRUE(records[0].host_rx_nanoseconds != 0);
+  for (int retry = 0; retry < 100; ++retry) {
+    {
+      std::lock_guard<std::mutex> lock(records_mutex);
+      if (records.size() >= 3U) break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  {
+    std::lock_guard<std::mutex> lock(records_mutex);
+    ASSERT_EQ(records.size(), 3U);
+    EXPECT_NE(recorder->sink_thread, std::this_thread::get_id());
+    EXPECT_EQ(records[0].kind, FeedbackTelemetryKind::StatusTransition);
+    EXPECT_EQ(records[0].quality,
+              mech::mech_control_core::SampleQuality::Unknown);
+    EXPECT_EQ(records[1].kind, FeedbackTelemetryKind::FeedbackFrame);
+    EXPECT_EQ(records[1].host_receive_sequence, 1U);
+    EXPECT_TRUE(records[1].host_rx_nanoseconds != 0);
+    EXPECT_EQ(records[2].kind, FeedbackTelemetryKind::StatusTransition);
+  }
 
   // Four further cycles with no new frame. The sample is still the same one,
   // so the count must not move.
   for (int cycle = 0; cycle < 4; ++cycle) {
     EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
   }
-  EXPECT_EQ(records.size(), 1U)
+  std::lock_guard<std::mutex> lock(records_mutex);
+  EXPECT_EQ(records.size(), 3U)
       << "a bare control cycle was recorded as a device arrival";
 }
 
@@ -568,6 +604,145 @@ TEST_F(Ak30SystemPluginTest, TelemetryIsSilentUnlessTheDeploymentAsksForIt) {
   ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
   EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
   EXPECT_TRUE(records.empty());
+}
+
+TEST_F(Ak30SystemPluginTest, SlowThrowingTelemetrySinkNeverBlocksLifecycle) {
+  use_fake_serial();
+  system_.set_telemetry_sink_for_testing(
+      [](const Ak30System::FeedbackTelemetry&) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        throw std::runtime_error("test sink failure");
+      });
+  auto params = valid_params();
+  params["feedback_telemetry_log"] = "true";
+  ASSERT_EQ(system_.on_init(position_hardware_info(params)),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+  const auto before = std::chrono::steady_clock::now();
+  EXPECT_EQ(system_.read(rclcpp::Time(0), rclcpp::Duration::from_nanoseconds(2000000)),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(system_.on_deactivate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_LT(std::chrono::steady_clock::now() - before,
+            std::chrono::milliseconds(20));
+  for (int retry = 0; retry < 100 && system_.telemetry_output_errors() == 0U;
+       ++retry) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_GT(system_.telemetry_output_errors(), 0U);
+}
+
+TEST_F(Ak30SystemPluginTest, FullTelemetryQueueDropsWithoutBlockingCallbacks) {
+  use_fake_serial();
+  auto sink_entered = std::make_shared<std::atomic<bool>>(false);
+  auto release_sink = std::make_shared<std::atomic<bool>>(false);
+  struct ReleaseSink {
+    std::shared_ptr<std::atomic<bool>> flag;
+    ~ReleaseSink() { flag->store(true, std::memory_order_release); }
+  } release_guard{release_sink};
+  system_.set_telemetry_sink_for_testing(
+      [sink_entered, release_sink](const Ak30System::FeedbackTelemetry&) {
+        sink_entered->store(true, std::memory_order_release);
+        while (!release_sink->load(std::memory_order_acquire)) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+      });
+  auto params = valid_params();
+  params["feedback_telemetry_log"] = "true";
+  ASSERT_EQ(system_.on_init(position_hardware_info(params)),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+
+  const rclcpp::Time time(0);
+  const auto period = rclcpp::Duration::from_nanoseconds(2000000);
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+  ASSERT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  for (int retry = 0; retry < 100 &&
+                      !sink_entered->load(std::memory_order_acquire); ++retry) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(sink_entered->load(std::memory_order_acquire));
+
+  const auto before = std::chrono::steady_clock::now();
+  for (int index = 0; index < 300; ++index) {
+    ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes()));
+    ASSERT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  }
+  // The worker has popped one event and is blocked in the sink. One transition
+  // remains, then 300 frame events fill the remaining 255 slots: exactly 45
+  // frame events are dropped. The lifecycle summary below is the 46th drop.
+  EXPECT_EQ(system_.telemetry_dropped_events(), 45U);
+  EXPECT_EQ(system_.on_deactivate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system_.telemetry_dropped_events(), 46U);
+  EXPECT_LT(std::chrono::steady_clock::now() - before,
+            std::chrono::milliseconds(50));
+  release_sink->store(true, std::memory_order_release);
+}
+
+TEST_F(Ak30SystemPluginTest, DestructionWaitsForBlockedSinkAndDrainsQueue) {
+  auto serial = std::make_shared<FakeSerial>();
+  auto sink_entered = std::make_shared<std::atomic<bool>>(false);
+  auto release_sink = std::make_shared<std::atomic<bool>>(false);
+  auto emitted = std::make_shared<std::atomic<std::uint64_t>>(0U);
+  auto system = std::make_unique<Ak30System>();
+  struct ReleaseSink {
+    std::shared_ptr<std::atomic<bool>> flag;
+    ~ReleaseSink() { flag->store(true, std::memory_order_release); }
+  } release_guard{release_sink};
+
+  system->set_serial_port_factory_for_testing(
+      [serial](const std::string&) { return serial; });
+  system->set_telemetry_sink_for_testing(
+      [sink_entered, release_sink, emitted](
+          const Ak30System::FeedbackTelemetry&) {
+        const auto index = emitted->fetch_add(1U, std::memory_order_acq_rel);
+        if (index != 0U) return;
+        sink_entered->store(true, std::memory_order_release);
+        while (!release_sink->load(std::memory_order_acquire)) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+      });
+  auto params = valid_params();
+  params["feedback_telemetry_log"] = "true";
+  ASSERT_EQ(system->on_init(position_hardware_info(params)),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system->on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_TRUE(serial->inject_rx(feedback_wire_bytes()));
+  ASSERT_EQ(system->read(rclcpp::Time(0),
+                         rclcpp::Duration::from_nanoseconds(2000000)),
+            hardware_interface::return_type::OK);
+  for (int retry = 0; retry < 100 &&
+                      !sink_entered->load(std::memory_order_acquire); ++retry) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(sink_entered->load(std::memory_order_acquire));
+  ASSERT_EQ(system->on_deactivate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+
+  std::atomic<bool> destroyed{false};
+  std::thread destroyer([&system, &destroyed]() {
+    system.reset();
+    destroyed.store(true, std::memory_order_release);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(destroyed.load(std::memory_order_acquire));
+  release_sink->store(true, std::memory_order_release);
+  destroyer.join();
+
+  EXPECT_TRUE(destroyed.load(std::memory_order_acquire));
+  EXPECT_EQ(emitted->load(std::memory_order_acquire), 3U)
+      << "destruction returned before queued feedback and lifecycle telemetry drained";
 }
 
 // The 0x12 vendor frame configures the USB box; it is not a motor command.

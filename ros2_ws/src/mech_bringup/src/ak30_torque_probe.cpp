@@ -230,9 +230,10 @@ int run(const RunOptions& options) noexcept {
     RawCanFrame frame{};
     const auto received = transport.try_receive(frame);
     if (received == TransportResult::Ok) {
-      const auto processed = session.process(frame, current);
+      const MonotonicTime observed_at = now();
+      const auto processed = session.process(frame, observed_at);
       if (processed == AdapterResult::Ok) {
-        const CanonicalDeviceState state = session.snapshot(current);
+        const CanonicalDeviceState state = session.snapshot(observed_at);
         if (state.status.quality ==
             mech::mech_control_core::SampleQuality::Valid) {
           ++samples;

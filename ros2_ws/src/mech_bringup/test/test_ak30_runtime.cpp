@@ -40,6 +40,15 @@ using mech::mech_protocol_cubemars::force_control_can_id;
 using mech::mech_protocol_cubemars::ForceControlSubMode;
 using mech::mech_simulation::FakeTransport;
 
+class RecordingTelemetry final : public FeedbackTelemetryCapture {
+ public:
+  bool try_push(const FeedbackTelemetryEvent& event) noexcept override {
+    events.push_back(event);
+    return true;
+  }
+  std::vector<FeedbackTelemetryEvent> events;
+};
+
 // motor1: drive id 104 decimal -> command 0x0868, feedback 0x2968.
 constexpr std::uint16_t kDriveId = 104U;
 constexpr std::uint32_t kLogicalBus = 1U;
@@ -98,6 +107,45 @@ class TestClock final {
   std::int64_t now_nanoseconds_;
 };
 
+class ReceiveAdvancingTransport final
+    : public mech::mech_control_core::Transport {
+ public:
+  ReceiveAdvancingTransport(FakeTransport& transport, TestClock& clock,
+                            std::int64_t receive_time) noexcept
+      : transport_(transport), clock_(clock), receive_time_(receive_time) {}
+
+  [[nodiscard]] mech::mech_control_core::TransportKind kind()
+      const noexcept override {
+    return transport_.kind();
+  }
+  [[nodiscard]] const mech::mech_control_core::TransportCapabilities&
+  capabilities() const noexcept override {
+    return transport_.capabilities();
+  }
+  [[nodiscard]] bool is_open() const noexcept override {
+    return transport_.is_open();
+  }
+  bool open() noexcept override { return transport_.open(); }
+  void close() noexcept override { transport_.close(); }
+  [[nodiscard]] TransportResult try_receive(RawCanFrame& frame) noexcept override {
+    clock_.set(receive_time_);
+    return transport_.try_receive(frame);
+  }
+  [[nodiscard]] TransportResult try_send(
+      const RawCanFrame& frame) noexcept override {
+    return transport_.try_send(frame);
+  }
+  [[nodiscard]] mech::mech_control_core::TransportStats stats()
+      const noexcept override {
+    return transport_.stats();
+  }
+
+ private:
+  FakeTransport& transport_;
+  TestClock& clock_;
+  std::int64_t receive_time_;
+};
+
 [[nodiscard]] Ak30RuntimeConfig runtime_config() {
   Ak30RuntimeConfig config{};
   config.drive_id = kDriveId;
@@ -120,7 +168,8 @@ class TestClock final {
 
 // Feedback builder mirroring the session test fixtures: 90.0 deg position,
 // 10000 ERPM, 2.0 A Iq, 40 C, no fault.
-[[nodiscard]] RawCanFrame feedback_frame(TestClock& clock) {
+[[nodiscard]] RawCanFrame feedback_frame(TestClock& clock,
+                                         std::uint8_t raw_fault = 0U) {
   std::array<std::uint8_t, 64U> payload{};
   payload[0] = 0x03;
   payload[1] = 0x84;
@@ -129,7 +178,7 @@ class TestClock final {
   payload[4] = 0x00;
   payload[5] = 0xC8;
   payload[6] = 0x28;
-  payload[7] = 0x00;
+  payload[7] = raw_fault;
   return RawCanFrame::create(
              kLogicalBus,
              CanId::create(feedback_can_id(kDriveId),
@@ -160,6 +209,142 @@ TEST_F(Ak30RuntimeTest, ConfigureStartStopLifecycleSucceeds) {
   EXPECT_TRUE(runtime_->start());
   runtime_->stop();
   runtime_->stop();  // idempotent
+}
+
+TEST_F(Ak30RuntimeTest, RejectsCommandDeadlineOverflowWithoutTransmission) {
+  const auto maximum = std::numeric_limits<std::int64_t>::max();
+  for (const auto period : {std::int64_t{2000000}, maximum}) {
+    SCOPED_TRACE(period);
+    config_.control_period_nanoseconds = period;
+    clock_.set(period == maximum ? 0 : maximum - 1);
+    Ak30ForceControlRuntime runtime(
+        *transport_, [this]() { return clock_.now(); }, config_);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.position = 0.25;
+    EXPECT_FALSE(write_authorized(runtime, command));
+    EXPECT_EQ(transport_->stats().tx_frames, 0U);
+    runtime.stop();
+  }
+}
+
+TEST_F(Ak30RuntimeTest, TelemetryPreservesEveryFrameInOneRead) {
+  RecordingTelemetry telemetry;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config_, &telemetry);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  for (int index = 0; index < 3; ++index) {
+    clock_.set(1000000 + index);
+    ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)),
+              TransportResult::Ok);
+  }
+  clock_.set(2000000);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(runtime.read(states, 1U));
+  std::vector<FeedbackTelemetryEvent> frames;
+  for (const auto& event : telemetry.events) {
+    if (event.kind == FeedbackTelemetryKind::FeedbackFrame) frames.push_back(event);
+  }
+  ASSERT_EQ(frames.size(), 3U);
+  EXPECT_EQ(frames[0].host_receive_sequence, 1U);
+  EXPECT_EQ(frames[1].host_receive_sequence, 2U);
+  EXPECT_EQ(frames[2].host_receive_sequence, 3U);
+  EXPECT_EQ(frames[0].host_rx_nanoseconds, 1000000);
+  EXPECT_EQ(frames[2].host_rx_nanoseconds, 1000002);
+}
+
+TEST_F(Ak30RuntimeTest, ObservesReceiveAfterCycleStartWithoutInventingFutureData) {
+  clock_.set(100);
+  RawCanFrame frame = feedback_frame(clock_);
+  frame.host_arrival = at(101);
+  ReceiveAdvancingTransport advancing_transport(*transport_, clock_, 101);
+  Ak30ForceControlRuntime runtime(advancing_transport,
+                                  [this]() { return clock_.now(); }, config_);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(frame), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_TRUE(runtime.read(states, 1U));
+  ASSERT_TRUE(runtime.last_status().host_rx_time.has_value());
+  EXPECT_EQ(runtime.last_status().host_rx_time->nanoseconds(), 101);
+}
+
+TEST_F(Ak30RuntimeTest, ChecksPendingCommandLeaseAfterReceiveWork) {
+  std::size_t clock_call = 0U;
+  const std::int64_t times[] = {0, 3900000, 4100000, 4100000, 4100000,
+                                4100000, 4100000, 4100000};
+  Ak30ForceControlRuntime runtime(
+      *transport_, [&clock_call, &times]() {
+        const auto index = clock_call < std::size(times) ? clock_call
+                                                         : std::size(times) - 1U;
+        ++clock_call;
+        return at(times[index]);
+      },
+      config_);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.position = 0.25;
+  ASSERT_TRUE(write_authorized(runtime, command));
+
+  clock_.set(3900000);
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)),
+            TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->stats().tx_frames, 0U);
+}
+
+TEST_F(Ak30RuntimeTest, TelemetryRecordsSameSequenceStaleTransition) {
+  config_.feedback_period_nanoseconds = 1000000;
+  config_.feedback_ttl_nanoseconds = 2000000;
+  RecordingTelemetry telemetry;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config_, &telemetry);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  clock_.set(1000000);
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(runtime.read(states, 1U));
+  clock_.set(3000001);
+  EXPECT_FALSE(runtime.read(states, 1U));
+  const FeedbackTelemetryEvent* stale = nullptr;
+  for (const auto& event : telemetry.events) {
+    if (event.kind == FeedbackTelemetryKind::StatusTransition &&
+        event.quality == SampleQuality::Stale) stale = &event;
+  }
+  ASSERT_NE(stale, nullptr);
+  EXPECT_EQ(stale->host_receive_sequence, 1U);
+  EXPECT_EQ(stale->observed_at_nanoseconds, 3000001);
+  EXPECT_TRUE(stale->age_available);
+  EXPECT_EQ(stale->age_nanoseconds, 2000001);
+  EXPECT_EQ(telemetry.events.back().kind, FeedbackTelemetryKind::RuntimeError);
+  EXPECT_EQ(telemetry.events.back().reason,
+            FeedbackTelemetryReason::FeedbackUnusable);
+}
+
+TEST_F(Ak30RuntimeTest, TelemetryRecordsFaultBeforeReadFails) {
+  RecordingTelemetry telemetry;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config_, &telemetry);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  clock_.set(1000000);
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_, 1U)),
+            TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_FALSE(runtime.read(states, 1U));
+  ASSERT_GE(telemetry.events.size(), 3U);
+  EXPECT_EQ(telemetry.events[0].kind, FeedbackTelemetryKind::FeedbackFrame);
+  EXPECT_EQ(telemetry.events[0].raw_fault_code, 1U);
+  EXPECT_EQ(telemetry.events[1].kind, FeedbackTelemetryKind::StatusTransition);
+  EXPECT_EQ(telemetry.events.back().kind, FeedbackTelemetryKind::RuntimeError);
+  EXPECT_EQ(telemetry.events.back().reason,
+            FeedbackTelemetryReason::FaultLatched);
+  EXPECT_EQ(runtime.last_status().raw_fault_code, 1U);
 }
 
 TEST_F(Ak30RuntimeTest, RejectsZeroResourceCount) {
@@ -666,6 +851,7 @@ TEST_F(Ak30RuntimeTest, StaleFeedbackFailsClosedWithoutInventingZeros) {
   const mech_hardware_ros2_control::CanonicalCommand refresh{0.25};
   ASSERT_TRUE(write_authorized(runtime, refresh));
   clock_.set(12000001);
+  const auto transmitted_before_stale_read = transport_->stats().tx_frames;
   // Seeded with a recognisable value: a fail-closed read must leave the
   // caller's buffer untouched rather than overwrite it with zeros.
   mech_hardware_ros2_control::CanonicalState stale[1] = {};
@@ -673,6 +859,7 @@ TEST_F(Ak30RuntimeTest, StaleFeedbackFailsClosedWithoutInventingZeros) {
   stale[0].velocity = -7.5;
   stale[0].effort = -7.5;
   EXPECT_FALSE(runtime.read(stale, 1U));
+  EXPECT_EQ(transport_->stats().tx_frames, transmitted_before_stale_read);
   EXPECT_FALSE(runtime.has_valid_sample());
   EXPECT_EQ(stale[0].position, -7.5);
   EXPECT_EQ(stale[0].velocity, -7.5);

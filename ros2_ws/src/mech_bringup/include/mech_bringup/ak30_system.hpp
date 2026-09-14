@@ -67,17 +67,10 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
       std::function<std::shared_ptr<mech::mech_control_core::CdcSerialPort>(
           const std::string&)>;
 
-  // ADR-016 Decision 5: exactly the four fields that must survive the ROS
-  // boundary - quality, sequence, host_rx_time, raw_fault_code. Age is not a
-  // field because it is derivable from consecutive host arrival times, and the
-  // ADR names four things, not five.
-  struct FeedbackTelemetry final {
-    std::uint64_t sequence{0U};
-    std::int64_t host_rx_nanoseconds{0};
-    mech::mech_control_core::SampleQuality quality{};
-    mech::mech_control_core::DeviceState device_state{};
-    std::uint32_t raw_fault_code{0U};
-  };
+  // ADR-016 evidence plus explicit event/observation semantics. The sequence
+  // is assigned by this host after successful decode; it is not a device
+  // sequence and cannot prove wire continuity.
+  using FeedbackTelemetry = FeedbackTelemetryEvent;
 
   // Where a telemetry record goes. The default writes one structured line to
   // the ROS logger; tests substitute a recorder so "emitted once per new frame"
@@ -85,6 +78,7 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
   using TelemetrySink = std::function<void(const FeedbackTelemetry&)>;
 
   Ak30System() noexcept;
+  ~Ak30System() override;
 
   hardware_interface::CallbackReturn on_init(
       const hardware_interface::HardwareInfo& info) override;
@@ -106,6 +100,8 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
   [[nodiscard]] std::uint64_t pass_through_frames() const noexcept {
     return pass_through_frames_;
   }
+  [[nodiscard]] std::uint64_t telemetry_dropped_events() const noexcept;
+  [[nodiscard]] std::uint64_t telemetry_output_errors() const noexcept;
 
   // Tests only; call before on_init (mirrors set_runtime's precondition).
   void set_serial_port_factory_for_testing(SerialPortFactory factory) noexcept;
@@ -114,7 +110,8 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
   void set_telemetry_sink_for_testing(TelemetrySink sink) noexcept;
 
  private:
-  void log_frame_summary(const char* reason) const noexcept;
+  class TelemetryWorker;
+  void enqueue_summary(FeedbackTelemetryReason reason) noexcept;
 
   SerialPortFactory serial_factory_;
   std::string device_path_;
@@ -126,9 +123,7 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
   // status snapshot for diagnostics, never to drive the device.
   Ak30ForceControlRuntime* runtime_view_{nullptr};
   TelemetrySink telemetry_sink_;
-  bool telemetry_enabled_{false};
-  std::uint64_t last_emitted_sequence_{0U};
-  bool has_emitted_{false};
+  std::unique_ptr<TelemetryWorker> telemetry_worker_;
   std::uint64_t pass_through_frames_{0U};
 };
 

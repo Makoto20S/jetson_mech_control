@@ -7,6 +7,9 @@
 #include "mech_bringup/ak30_system.hpp"
 
 #include <chrono>
+#include <atomic>
+#include <exception>
+#include <thread>
 #include <utility>
 
 #include "mech_bringup/ak30_force_runtime.hpp"
@@ -14,6 +17,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "mech_bringup/posix_cdc_serial_port.hpp"
 #include "pluginlib/class_list_macros.hpp"
+#include "realtime_tools/lock_free_queue.hpp"
 
 namespace mech::mech_bringup {
 namespace {
@@ -37,9 +41,113 @@ mech::mech_control_core::MonotonicTime steady_now() noexcept {
       std::chrono::duration_cast<std::chrono::nanoseconds>(ticks).count());
 }
 
+[[nodiscard]] const char* quality_name(
+    mech::mech_control_core::SampleQuality quality) noexcept;
+
 }  // namespace
 
+class Ak30System::TelemetryWorker final : public FeedbackTelemetryCapture {
+ public:
+  static constexpr std::size_t kCapacity = 256U;
+
+  explicit TelemetryWorker(TelemetrySink sink)
+      : sink_(std::move(sink)), thread_([this]() { run(); }) {}
+
+  ~TelemetryWorker() override {
+    stop_.store(true, std::memory_order_release);
+    if (thread_.joinable()) thread_.join();
+  }
+
+  bool try_push(const FeedbackTelemetryEvent& event) noexcept override {
+    if (queue_.push(event)) return true;
+    dropped_.fetch_add(1U, std::memory_order_relaxed);
+    pending_dropped_.fetch_add(1U, std::memory_order_relaxed);
+    return false;
+  }
+
+  [[nodiscard]] std::uint64_t dropped() const noexcept {
+    return dropped_.load(std::memory_order_relaxed);
+  }
+  [[nodiscard]] std::uint64_t output_errors() const noexcept {
+    return output_errors_.load(std::memory_order_relaxed);
+  }
+
+ private:
+  void output(const FeedbackTelemetryEvent& event) noexcept {
+    try {
+      if (sink_) {
+        sink_(event);
+      } else {
+        RCLCPP_INFO(
+            rclcpp::get_logger("ak30_system"),
+            "telemetry kind=%u reason=%u host_receive_seq=%lu host_rx_ns=%ld "
+            "host_rx_available=%u observed_at_ns=%ld age_ns=%ld age_available=%u "
+            "quality=%s device_state=%u fault=%u "
+            "motor_command_frames=%lu pass_through_frames=%lu diagnostic_loss=%lu",
+            static_cast<unsigned>(event.kind),
+            static_cast<unsigned>(event.reason),
+            static_cast<unsigned long>(event.host_receive_sequence),
+            static_cast<long>(event.host_rx_nanoseconds),
+            event.host_rx_available ? 1U : 0U,
+            static_cast<long>(event.observed_at_nanoseconds),
+            static_cast<long>(event.age_nanoseconds),
+            event.age_available ? 1U : 0U, quality_name(event.quality),
+            static_cast<unsigned>(event.device_state),
+            static_cast<unsigned>(event.raw_fault_code),
+            static_cast<unsigned long>(event.motor_command_frames),
+            static_cast<unsigned long>(event.pass_through_frames),
+            static_cast<unsigned long>(event.diagnostic_loss_count));
+      }
+      emitted_.fetch_add(1U, std::memory_order_relaxed);
+    } catch (const std::exception&) {
+      output_errors_.fetch_add(1U, std::memory_order_relaxed);
+    } catch (...) {
+      output_errors_.fetch_add(1U, std::memory_order_relaxed);
+    }
+  }
+
+  void report_drops() noexcept {
+    const auto count = pending_dropped_.exchange(0U, std::memory_order_acq_rel);
+    if (count == 0U) return;
+    FeedbackTelemetryEvent event{};
+    event.kind = FeedbackTelemetryKind::RuntimeError;
+    event.reason = FeedbackTelemetryReason::QueueOverflow;
+    event.diagnostic_loss_count = count;
+    output(event);
+  }
+
+  void run() noexcept {
+    while (!stop_.load(std::memory_order_acquire)) {
+      FeedbackTelemetryEvent event{};
+      if (queue_.pop(event)) {
+        output(event);
+        report_drops();
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    }
+    FeedbackTelemetryEvent event{};
+    while (queue_.pop(event)) output(event);
+    report_drops();
+  }
+
+  // Lifecycle callbacks and the read loop can enqueue from different threads.
+  realtime_tools::LockFreeMPMCQueue<FeedbackTelemetryEvent, kCapacity> queue_;
+  TelemetrySink sink_;
+  std::atomic<bool> stop_{false};
+  std::atomic<std::uint64_t> dropped_{0U};
+  std::atomic<std::uint64_t> pending_dropped_{0U};
+  std::atomic<std::uint64_t> emitted_{0U};
+  std::atomic<std::uint64_t> output_errors_{0U};
+  std::thread thread_;
+};
+
 Ak30System::Ak30System() noexcept = default;
+
+Ak30System::~Ak30System() {
+  if (runtime_view_ != nullptr) runtime_view_->stop();
+  telemetry_worker_.reset();
+}
 
 void Ak30System::set_serial_port_factory_for_testing(
     SerialPortFactory factory) noexcept {
@@ -129,14 +237,16 @@ hardware_interface::CallbackReturn Ak30System::on_init(
   // set_runtime() is refused once the base is initialized
   // (composite_system.cpp), so the runtime must be injected here, before the
   // delegation below - the same ordering the integration tests pin.
+  if (parsed->feedback_telemetry_log) {
+    telemetry_worker_ = std::make_unique<TelemetryWorker>(telemetry_sink_);
+  }
   auto runtime = std::make_unique<Ak30ForceControlRuntime>(
-      *transport_, steady_now, parsed->config);
+      *transport_, steady_now, parsed->config, telemetry_worker_.get());
   runtime_view_ = runtime.get();
   if (!set_runtime(std::move(runtime))) {
     runtime_view_ = nullptr;
     return hardware_interface::CallbackReturn::ERROR;
   }
-  telemetry_enabled_ = parsed->feedback_telemetry_log;
   return CompositeSystem::on_init(info);
 }
 
@@ -165,6 +275,7 @@ hardware_interface::CallbackReturn Ak30System::on_cleanup(
   // on_configure reopens the same chain. on_deactivate deliberately does not
   // close: deactivate -> activate re-entry must keep the channel alive.
   serial_->close();
+  enqueue_summary(FeedbackTelemetryReason::Cleanup);
   return result;
 }
 
@@ -184,47 +295,9 @@ namespace {
 
 }  // namespace
 
-// ADR-016 Decision 5's logging half. Emits at most one record per NEW feedback
-// frame - keyed on the device's own sequence, not on the control cycle - so a
-// 500 Hz loop against a 50 Hz device produces 50 records per second rather than
-// 500 copies of the same sample. A repeated sequence means the manager cycled,
-// not that the device spoke, and recording it would misrepresent the very
-// arrival timing this evidence exists to establish.
 hardware_interface::return_type Ak30System::read(
     const rclcpp::Time& time, const rclcpp::Duration& period) {
-  const auto result = CompositeSystem::read(time, period);
-  if (!telemetry_enabled_ || runtime_view_ == nullptr) {
-    return result;
-  }
-  const auto& status = runtime_view_->last_status();
-  // No sample yet: nothing arrived, so there is nothing to record. This is the
-  // normal startup transient at 50 Hz against a 500 Hz loop (ADR-016).
-  if (!status.host_rx_time.has_value()) {
-    return result;
-  }
-  if (has_emitted_ && status.sequence == last_emitted_sequence_) {
-    return result;
-  }
-  last_emitted_sequence_ = status.sequence;
-  has_emitted_ = true;
-
-  const FeedbackTelemetry record{status.sequence,
-                                 status.host_rx_time->nanoseconds(),
-                                 status.quality, status.device_state,
-                                 status.raw_fault_code};
-  if (telemetry_sink_) {
-    telemetry_sink_(record);
-    return result;
-  }
-  // Fixed field order, one line per frame, so a bench log can be parsed after
-  // the fact without guessing.
-  RCLCPP_INFO(rclcpp::get_logger("ak30_system"),
-              "feedback seq=%lu host_rx_ns=%ld quality=%s fault=%u",
-              static_cast<unsigned long>(record.sequence),
-              static_cast<long>(record.host_rx_nanoseconds),
-              quality_name(record.quality),
-              static_cast<unsigned>(record.raw_fault_code));
-  return result;
+  return CompositeSystem::read(time, period);
 }
 
 // One summary line on the way out, on both the normal and the failing path.
@@ -234,25 +307,34 @@ hardware_interface::return_type Ak30System::read(
 hardware_interface::CallbackReturn Ak30System::on_deactivate(
     const rclcpp_lifecycle::State& previous_state) {
   const auto result = CompositeSystem::on_deactivate(previous_state);
-  log_frame_summary("deactivate");
+  enqueue_summary(FeedbackTelemetryReason::Deactivate);
   return result;
 }
 
 hardware_interface::CallbackReturn Ak30System::on_error(
     const rclcpp_lifecycle::State& previous_state) {
   const auto result = CompositeSystem::on_error(previous_state);
-  log_frame_summary("error");
+  enqueue_summary(FeedbackTelemetryReason::Error);
   return result;
 }
 
-void Ak30System::log_frame_summary(const char* reason) const noexcept {
-  const auto motor_frames =
+void Ak30System::enqueue_summary(FeedbackTelemetryReason reason) noexcept {
+  if (telemetry_worker_ == nullptr) return;
+  FeedbackTelemetryEvent event{};
+  event.kind = FeedbackTelemetryKind::LifecycleSummary;
+  event.reason = reason;
+  event.motor_command_frames =
       runtime_view_ == nullptr ? 0U : runtime_view_->motor_command_frames();
-  RCLCPP_INFO(rclcpp::get_logger("ak30_system"),
-              "frame summary on %s: motor_command_frames=%lu "
-              "pass_through_frames=%lu",
-              reason, static_cast<unsigned long>(motor_frames),
-              static_cast<unsigned long>(pass_through_frames_));
+  event.pass_through_frames = pass_through_frames_;
+  (void)telemetry_worker_->try_push(event);
+}
+
+std::uint64_t Ak30System::telemetry_dropped_events() const noexcept {
+  return telemetry_worker_ == nullptr ? 0U : telemetry_worker_->dropped();
+}
+
+std::uint64_t Ak30System::telemetry_output_errors() const noexcept {
+  return telemetry_worker_ == nullptr ? 0U : telemetry_worker_->output_errors();
 }
 
 }  // namespace mech::mech_bringup
