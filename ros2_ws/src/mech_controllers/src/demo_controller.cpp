@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "mech_control_core/command_contract.hpp"
 #include "pluginlib/class_list_macros.hpp"
 
 namespace mech::mech_controllers {
@@ -186,9 +187,12 @@ controller_interface::CallbackReturn DemoController::on_configure(
 
 controller_interface::CallbackReturn DemoController::on_activate(
     const rclcpp_lifecycle::State&) {
-  if (command_interfaces_.size() != 1U || state_interfaces_.size() != 1U ||
+  if (command_interfaces_.size() != 2U || state_interfaces_.size() != 1U ||
       command_interfaces_[0].get_name() !=
           joint_name_ + "/" + hardware_interface::HW_IF_POSITION ||
+      command_interfaces_[1].get_name() !=
+          joint_name_ + "/" +
+              mech::mech_control_core::kCommandGenerationInterface ||
       state_interfaces_[0].get_name() !=
           joint_name_ + "/" + hardware_interface::HW_IF_POSITION) {
     return controller_interface::CallbackReturn::ERROR;
@@ -222,8 +226,16 @@ controller_interface::CallbackReturn DemoController::on_deactivate(
 
 controller_interface::InterfaceConfiguration
 DemoController::command_interface_configuration() const {
+  // ADR-017 Decision 9: this project's own controllers are always in the strong
+  // tier. The weak tier exists to accept third-party controllers, not as a back
+  // door for ours. Claiming the generation interface is what lets the hardware
+  // tell this controller falling silent apart from the manager merely cycling;
+  // without it a DemoController that stopped writing would leave the motor on
+  // its last target with nothing able to notice.
   return {controller_interface::interface_configuration_type::INDIVIDUAL,
-          {joint_name_ + "/" + hardware_interface::HW_IF_POSITION}};
+          {joint_name_ + "/" + hardware_interface::HW_IF_POSITION,
+           joint_name_ + "/" +
+               mech::mech_control_core::kCommandGenerationInterface}};
 }
 
 controller_interface::InterfaceConfiguration
@@ -238,7 +250,7 @@ DemoController::state_interface_configuration() const {
 controller_interface::return_type DemoController::update(
     const rclcpp::Time&, const rclcpp::Duration& period) {
   if (!active_.load(std::memory_order_acquire) ||
-      command_interfaces_.size() != 1U || period.nanoseconds() < 0) {
+      command_interfaces_.size() != 2U || period.nanoseconds() < 0) {
     return controller_interface::return_type::ERROR;
   }
   const auto now = clock_();
@@ -260,11 +272,33 @@ controller_interface::return_type DemoController::update(
     }
   }
 
-  if (limiter_.stage(now) == WatchdogStage::Expired) {
+  const auto current_stage = limiter_.stage(now);
+  if (current_stage == WatchdogStage::Expired) {
     return controller_interface::return_type::ERROR;
   }
   command_ = limiter_.update(command_, period.seconds(), now);
   command_interfaces_[0].set_value(command_);
+  // ADR-017 Decision 3: the generation changes only when this controller
+  // actually has something new to say, which is exactly while it is following a
+  // target it still considers live. Deliberately NOT every cycle:
+  //
+  // - Holding (the target went stale, or none has ever arrived) means the value
+  //   written above is a frozen one. Bumping here would tell the hardware its
+  //   command was refreshed when nothing refreshed it - the very thing this
+  //   interface exists to prevent - and would keep the hardware's own staged
+  //   watchdog permanently satisfied by a controller that has gone quiet. Not
+  //   bumping lets both watchdogs freeze and then fault in step.
+  // - Expired returned above without writing at all.
+  //
+  // The counter only ever increases and is NOT reset on activation. ADR-017
+  // Decision 3.2 compares by inequality, and CompositeSystem re-seeds its
+  // baseline from the buffer when a claim changes hands, so continuing from the
+  // previous value is what guarantees the first write after a re-claim reads as
+  // new rather than colliding with the baseline.
+  if (current_stage == WatchdogStage::Following) {
+    command_interfaces_[1].set_value(
+        static_cast<double>(++command_generation_));
+  }
   return controller_interface::return_type::OK;
 }
 

@@ -111,6 +111,12 @@ class DemoController final : public controller_interface::ControllerInterface {
   std::atomic<std::uint64_t> generation_{0U};
   std::uint64_t applied_generation_{0U};
   double command_{0.0};
+  // ADR-017: the value this controller publishes on its claimed
+  // command_generation interface. Distinct from generation_/applied_generation_
+  // above, which count INCOMING targets; this one counts outgoing commands.
+  // Monotonic for the object's lifetime and deliberately never reset - see
+  // update() for why a re-claim depends on that.
+  std::uint64_t command_generation_{0U};
   std::atomic<bool> active_{false};
 };
 

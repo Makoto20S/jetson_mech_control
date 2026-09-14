@@ -15,6 +15,7 @@
 #include "hardware_interface/loaned_state_interface.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
+#include "mech_control_core/command_contract.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64.hpp"
 
@@ -48,11 +49,13 @@ class DemoControllerTest : public ::testing::Test {
     node->set_parameter({"hard_ttl_nanoseconds", 6000000});
   }
 
-  // Hands the controller one command and one state interface over the joint's
-  // position, both backed by doubles the test can read and write.
+  // Hands the controller the interfaces it claims: the joint's position command
+  // and, per ADR-017, its command_generation - both backed by doubles the test
+  // can read - plus the position state interface.
   void assign_interfaces() {
     std::vector<hardware_interface::LoanedCommandInterface> commands;
     commands.emplace_back(command_interface_);
+    commands.emplace_back(generation_interface_);
     std::vector<hardware_interface::LoanedStateInterface> states;
     states.emplace_back(state_interface_);
     controller_.assign_interfaces(std::move(commands), std::move(states));
@@ -142,9 +145,13 @@ class DemoControllerTest : public ::testing::Test {
   const rclcpp::Time frozen_ros_time_{1000000000};
 
   double command_value_{0.0};
+  double generation_value_{0.0};
   double state_value_{0.25};
   hardware_interface::CommandInterface command_interface_{
       kJoint, hardware_interface::HW_IF_POSITION, &command_value_};
+  hardware_interface::CommandInterface generation_interface_{
+      kJoint, mech::mech_control_core::kCommandGenerationInterface,
+      &generation_value_};
   hardware_interface::StateInterface state_interface_{
       kJoint, hardware_interface::HW_IF_POSITION, &state_value_};
   // A plausible steady_clock reading, so no test can pass by accident on a
@@ -397,6 +404,77 @@ TEST_F(DemoControllerTest, DiscardsTargetsPublishedWhileDeactivated) {
   ASSERT_EQ(cycle(), controller_interface::return_type::OK);
   // Still holding the activation seed: nothing was replayed.
   EXPECT_DOUBLE_EQ(command_value_, 0.25);
+}
+
+// ADR-017 Decision 9: this project's own controllers are in the strong tier, so
+// DemoController must ASK for the generation interface. If it ever stops
+// claiming it, the hardware silently drops this controller into the weak tier
+// and a silent DemoController goes back to holding the motor on its last target
+// with nothing able to notice. Names are checked, not just the count, because
+// the hardware matches on the joint-qualified name.
+TEST_F(DemoControllerTest, ClaimsTheGenerationInterfaceAlongsideTheMotionOne) {
+  ASSERT_EQ(controller_.on_configure(lifecycle_state()),
+            controller_interface::CallbackReturn::SUCCESS);
+  const auto config = controller_.command_interface_configuration();
+  EXPECT_EQ(config.type,
+            controller_interface::interface_configuration_type::INDIVIDUAL);
+  EXPECT_EQ(config.names,
+            (std::vector<std::string>{
+                std::string(kJoint) + "/" + hardware_interface::HW_IF_POSITION,
+                std::string(kJoint) + "/" +
+                    mech::mech_control_core::kCommandGenerationInterface}));
+}
+
+// The behaviour the whole ADR-017 mechanism rests on, stated from the
+// controller's side: the generation changes when and only when this controller
+// has something new to say. A manager cycle on its own must not move it.
+//
+// Read together with the hardware half. CompositeSystem treats an unchanged
+// generation as "not refreshed" and the runtime then sends nothing
+// (SilentControllerDoesNotRefreshItsCommand, in mech_bringup, drives that under
+// a real ControllerManager). This test is what makes DemoController qualify for
+// that protection rather than merely be eligible for it.
+TEST_F(DemoControllerTest, GenerationChangesOnlyWhileFollowingALiveTarget) {
+  Probe probe(*this);
+
+  // Activated, no target yet. The controller writes its activation seed to hold
+  // position, but that is a held value rather than a command - the limiter is
+  // Holding - so the hardware must not be told anything was refreshed.
+  advance(kPeriodNanoseconds);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  const double before_any_target = generation_value_;
+  advance(kPeriodNanoseconds);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(generation_value_, before_any_target)
+      << "a bare manager cycle refreshed the generation";
+
+  // A target arrives: every cycle spent slewing toward it is a real command, so
+  // every one of them must read as new.
+  probe.publish_and_wait(0.5, 1U);
+  advance(kPeriodNanoseconds);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  const double first = generation_value_;
+  EXPECT_NE(first, before_any_target);
+  advance(kPeriodNanoseconds);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_NE(generation_value_, first) << "a following cycle was not a refresh";
+
+  // Now the publisher falls silent past the soft TTL. The limiter freezes the
+  // command, and the generation must freeze with it - otherwise this controller
+  // would keep the hardware's watchdog satisfied while having nothing to say,
+  // which is exactly the defect ADR-017 exists to close.
+  //
+  // The target was submitted two cycles ago, so this lands 4 ms after it: past
+  // the 4 ms soft TTL and inside the 6 ms hard one. That is Holding. Going a
+  // cycle further would reach Expired, where update() refuses outright and
+  // never gets as far as the question this test asks.
+  const double before_silence = generation_value_;
+  const double frozen_command = command_value_;
+  advance(2000000);
+  ASSERT_EQ(cycle(), controller_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(generation_value_, before_silence)
+      << "a silent controller still claimed a refresh";
+  EXPECT_DOUBLE_EQ(command_value_, frozen_command);
 }
 
 }  // namespace
