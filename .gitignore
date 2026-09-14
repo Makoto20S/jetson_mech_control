@@ -8,6 +8,7 @@
 /memory/
 /.codex/
 /.agents/
+/.zcode/
 /tmp/
 
 # Legacy presentation bundle contains pre-FND-000 assumptions and excluded
