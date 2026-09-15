@@ -8,7 +8,6 @@
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "mech_control_core/command_contract.hpp"
-#include "pluginlib/class_list_macros.hpp"
 
 namespace mech::mech_controllers {
 
@@ -338,6 +337,3 @@ bool DemoController::set_target(double target) noexcept {
 }
 
 }  // namespace mech::mech_controllers
-
-PLUGINLIB_EXPORT_CLASS(mech::mech_controllers::DemoController,
-                       controller_interface::ControllerInterface)

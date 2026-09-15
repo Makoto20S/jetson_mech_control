@@ -134,6 +134,12 @@ if(BUILD_TESTING)
   # context and a ControllerManager node, which the offline unit tests do not.
   find_package(controller_manager REQUIRED)
   find_package(controller_interface REQUIRED)
+  # Do not link either project plugin here: that would register factories before
+  # the class loaders and hide the production hardware-first loading order.
+  ament_add_gtest(${PROJECT_NAME}_plugin_loading_test
+    test/test_plugin_loading.cpp)
+  ament_target_dependencies(${PROJECT_NAME}_plugin_loading_test
+    hardware_interface controller_interface pluginlib)
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
   )

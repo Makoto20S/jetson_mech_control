@@ -32,6 +32,12 @@ ament_target_dependencies(
 ament_target_dependencies(${PROJECT_NAME}
   controller_interface pluginlib rclcpp rclcpp_lifecycle realtime_tools std_msgs)
 
+# Keep registration out of the linkable implementation: the hardware library
+# uses TargetLimiter and must not register controller factories in its loader.
+add_library(${PROJECT_NAME}_plugin SHARED src/demo_controller_plugin.cpp)
+target_link_libraries(${PROJECT_NAME}_plugin ${PROJECT_NAME})
+ament_target_dependencies(${PROJECT_NAME}_plugin controller_interface pluginlib)
+
 pluginlib_export_plugin_description_file(
   controller_interface mech_controllers_plugins.xml)
 
@@ -41,6 +47,7 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
+install(TARGETS ${PROJECT_NAME}_plugin LIBRARY DESTINATION lib)
 install(DIRECTORY include/ DESTINATION include)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(

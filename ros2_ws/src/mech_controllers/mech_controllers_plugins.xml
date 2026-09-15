@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<library path="mech_controllers">
+<library path="mech_controllers_plugin">
   <class name="mech_controllers/DemoController"
          type="mech::mech_controllers::DemoController"
          base_class_type="controller_interface::ControllerInterface">
