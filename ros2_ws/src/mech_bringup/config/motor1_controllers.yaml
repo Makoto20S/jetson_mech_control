@@ -33,8 +33,11 @@ joint_state_broadcaster:
 motor1_position_controller:
   ros__parameters:
     joint: motor1_joint
-    minimum: -1.0
-    maximum: 1.0
+    # Canonical radians, inside both the URDF limits and the AK3.0 device
+    # range after motor1's +5.760604931781636 rad offset: [-6.2394, 11.7606].
+    # Recheck these bounds if the mapping changes; they are not mechanical stops.
+    minimum: -12.0
+    maximum: 6.0
     max_slew_per_second: 2.0
     target_ttl_nanoseconds: 100000000
     target_hard_ttl_nanoseconds: 106000000
