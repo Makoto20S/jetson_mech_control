@@ -268,7 +268,7 @@ flowchart LR
 
 **有依据的推断**：高频观测/目标 topic 默认候选 QoS 为 `KEEP_LAST(1)`、best-effort，理由是陈旧值比丢一帧更危险；模式切换、实验控制和配置使用 reliable service/action。最终 QoS 在同机 GPU 压力测试中比较 best-effort 与 reliable 后锁定。
 
-**已批准的初始政策（[ADR-018](../adr/ADR-018-upstream-target-lifetime.md)）**：Python 目标初始 20~50 Hz，`DemoController` 在当前 500 Hz 控制循环中做有界保持/插值，上游目标暂定 100/106 ms；controller-to-hardware 命令租约独立保持 4/6 ms。100 ms 来自两个最慢名义周期，尚非抖动实测上界；Jetson 无设备 nominal/stress 样本只能描述对应主机与运行。GPU 和 Python 使用 SCHED_OTHER；CPU affinity 只按具体 Jetson 测量配置，不硬编码核号。
+**已批准的初始政策（[ADR-018](../adr/ADR-018-upstream-target-lifetime.md)）**：Python 目标初始 20~50 Hz，`PositionCommandController` 在当前 500 Hz 控制循环中做有界保持/插值，上游目标暂定 100/106 ms；controller-to-hardware 命令租约独立保持 4/6 ms。100 ms 来自两个最慢名义周期，尚非抖动实测上界；Jetson 无设备 nominal/stress 样本只能描述对应主机与运行。GPU 和 Python 使用 SCHED_OTHER；CPU affinity 只按具体 Jetson 测量配置，不硬编码核号。
 
 ## 12. 线程与时序图
 
@@ -412,7 +412,7 @@ FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 | [ADR-015](../adr/ADR-015-command-transmit-authorization.md) | Accepted | resource claim 从记账升级为逐 joint 的发送授权：未 claim、已 stop、已 deactivate/cleanup/error 的 joint 不得把命令交给 `RuntimePort`；`RuntimePort::write` 入参改为 `CommandDispatch`（命令与授权位成对传递）并新增 `cancel_pending(index) noexcept` 用于立即撤销 pending 命令；`controller_manager` 继续调用硬件 `write()` 不构成命令刷新；字段布局与 ADR-012/ADR-014 语义不变 |
 | [ADR-016](../adr/ADR-016-feedback-quality-fail-closed.md) | Accepted | 反馈质量诚实上报：`Unknown`/`Stale`/`Invalid` 不得写入数值零；`Stale`/`Invalid` 使 `read()` 失败并锁存故障；`Unknown`（从未采样）不报故障但该关节不可被 claim（`RuntimePort` 新增 `has_valid_sample()`）；反馈有效期必须不小于设备回报周期并在 configure 期校验；quality/sequence/host_rx_time/fault 必须在 ROS 边界之外仍可查。状态接口形状不变 |
 | [ADR-017](../adr/ADR-017-command-freshness-generation-interface.md) | Accepted | 命令新鲜度两档：每关节始终导出 `command_generation` 命令接口，是否 claim 由控制器决定。强档（已 claim）代号不变即不发送、撤销时基线重置，一并关闭重新激活重放；弱档（只 claim 运动接口）维持现行为，缺口登记为已接受风险以保证标准 ros2_control 控制器可直接驱动本硬件。修订 ADR-014 Decision 2；状态接口形状不变 |
-| [ADR-018](../adr/ADR-018-upstream-target-lifetime.md) | Accepted | `DemoController` 上游目标暂定 100/106 ms，以支持 20–50 Hz producer；controller-to-hardware 租约保持 4/6 ms，标准控制器弱档不变；Jetson 无设备 timing 样本只描述对应运行，不构成硬实时上界 |
+| [ADR-018](../adr/ADR-018-upstream-target-lifetime.md) | Accepted | `PositionCommandController` 上游目标暂定 100/106 ms，以支持 20–50 Hz producer；controller-to-hardware 租约保持 4/6 ms，标准控制器弱档不变；Jetson 无设备 timing 样本只描述对应运行，不构成硬实时上界 |
 
 状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
 

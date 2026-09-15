@@ -220,7 +220,7 @@ TEST_F(DeploymentFilesTest, UrdfUsesAk30SystemCompositionPlugin) {
 }
 
 TEST_F(DeploymentFilesTest, ControllersYamlUsesTheRegisteredPluginName) {
-  EXPECT_NE(controllers_.find("mech_controllers/DemoController"),
+  EXPECT_NE(controllers_.find("mech_controllers/PositionCommandController"),
             std::string::npos);
   EXPECT_NE(controllers_.find("joint_state_broadcaster/JointStateBroadcaster"),
             std::string::npos);

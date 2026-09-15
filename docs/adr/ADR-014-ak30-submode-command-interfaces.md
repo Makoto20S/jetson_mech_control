@@ -75,7 +75,7 @@ AK3.0 力控（L07 §4.2）的三个子模式共用控制模式 ID `8` 与同一
 ### Negative / 负面与代价
 
 - `CompositeSystem` 从「position-only」放宽为「集合成员」：校验从单一名字比对变为集合成员检查，必须由测试钉住「恰好一个命令接口」不被未来改成「任意子集」。（[ADR-017](ADR-017-command-freshness-generation-interface.md) 已把该不变式修订为「恰好一个**运动**命令接口，外加一个 `command_generation` 接口」；「不得变成任意子集」的要求不变。）
-- Torque/Velocity 尚无 ros2 控制器（`DemoController` 是 position-only）：部署变体只能带 `joint_state_broadcaster`，命令接口的 claim/write 由测试与未来控制器切片覆盖。
+- Torque/Velocity 尚无 ros2 控制器（`PositionCommandController` 是 position-only）：部署变体只能带 `joint_state_broadcaster`，命令接口的 claim/write 由测试与未来控制器切片覆盖。
 - 部署文件从 1 套变 3 套（position/torque/velocity URDF 变体），结构校验测试同步增长。
 - URDF 声明与 `sub_mode` 参数是两个来源，不一致时靠 bringup 结构校验兜底（离线 CI 检查，非运行期）。
 

@@ -12,6 +12,6 @@ TEST(ProductionPluginLoading, HardwareThenControllerHaveIndependentFactories) {
   // Construction only: no on_init/configure/activate and no device access.
   pluginlib::ClassLoader<controller_interface::ControllerInterface> controller_loader(
       "controller_interface", "controller_interface::ControllerInterface");
-  EXPECT_NE(controller_loader.createSharedInstance("mech_controllers/DemoController"),
+  EXPECT_NE(controller_loader.createSharedInstance("mech_controllers/PositionCommandController"),
             nullptr);
 }

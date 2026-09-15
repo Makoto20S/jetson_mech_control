@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "mech_controllers/demo_controller.hpp"
+#include "mech_controllers/position_command_controller.hpp"
 #include "mech_hardware_ros2_control/composite_system.hpp"
 
 namespace mech::mech_bringup {

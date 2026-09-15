@@ -1,4 +1,4 @@
-#include "mech_controllers/demo_controller.hpp"
+#include "mech_controllers/position_command_controller.hpp"
 
 #include <chrono>
 #include <condition_variable>
@@ -32,10 +32,10 @@ constexpr char kJoint[] = "motor1_joint";
       lifecycle_msgs::msg::State::PRIMARY_STATE_UNKNOWN, "test");
 }
 
-// Drives a real DemoController plugin instance with fake interfaces and a
+// Drives a real PositionCommandController plugin instance with fake interfaces and a
 // clock the test owns. Nothing here touches hardware or a controller_manager;
 // what it pins is the controller's own contract.
-class DemoControllerTest : public ::testing::Test {
+class PositionCommandControllerTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() { rclcpp::init(0, nullptr); }
   static void TearDownTestSuite() { rclcpp::shutdown(); }
@@ -96,9 +96,9 @@ class DemoControllerTest : public ::testing::Test {
   // so each test states only what it publishes and what it expects back.
   class Probe final {
    public:
-    explicit Probe(DemoControllerTest& test) : test_(test) {
+    explicit Probe(PositionCommandControllerTest& test) : test_(test) {
       test.activate_with_test_clock();
-      node_ = std::make_shared<rclcpp::Node>("demo_controller_probe");
+      node_ = std::make_shared<rclcpp::Node>("position_command_controller_probe");
       publisher_ = node_->create_publisher<std_msgs::msg::Float64>(
           "/motor1_position_controller/target_position",
           rclcpp::SystemDefaultsQoS());
@@ -131,7 +131,7 @@ class DemoControllerTest : public ::testing::Test {
     }
 
    private:
-    DemoControllerTest& test_;
+    PositionCommandControllerTest& test_;
     std::shared_ptr<rclcpp::Node> node_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr publisher_;
     rclcpp::executors::SingleThreadedExecutor executor_;
@@ -160,7 +160,7 @@ class DemoControllerTest : public ::testing::Test {
   // A plausible steady_clock reading, so no test can pass by accident on a
   // small absolute time.
   std::int64_t now_{113000000000000};
-  DemoController controller_;
+  PositionCommandController controller_;
 };
 
 TEST(TargetLimiter, ClampsSlewWhileFollowing) {
@@ -250,14 +250,14 @@ TEST(TargetLimiter, NonFiniteInputHoldsLastValidValueNotZero) {
   EXPECT_DOUBLE_EQ(held_negative_period, followed);
 }
 
-TEST(DemoControllerConfigure, RejectsHardTtlNotGreaterThanTtl) {
+TEST(PositionCommandControllerConfigure, RejectsHardTtlNotGreaterThanTtl) {
   BoundedTarget limits{-1.0, 1.0, 1.0, 100, 100};
   TargetLimiter limiter;
   EXPECT_FALSE(limiter.configure(limits));
 }
 
-TEST_F(DemoControllerTest, DeclaresProductionTargetLifetimeDefaults) {
-  DemoController controller;
+TEST_F(PositionCommandControllerTest, DeclaresProductionTargetLifetimeDefaults) {
+  PositionCommandController controller;
   ASSERT_EQ(controller.init("production_defaults"),
             controller_interface::return_type::OK);
   const auto node = controller.get_node();
@@ -269,9 +269,9 @@ TEST_F(DemoControllerTest, DeclaresProductionTargetLifetimeDefaults) {
   EXPECT_FALSE(node->has_parameter("hard_ttl_nanoseconds"));
 }
 
-TEST_F(DemoControllerTest, RejectsExplicitLegacyTargetLifetimeNames) {
+TEST_F(PositionCommandControllerTest, RejectsExplicitLegacyTargetLifetimeNames) {
   for (const auto& legacy_name : {"ttl_nanoseconds", "hard_ttl_nanoseconds"}) {
-    DemoController controller;
+    PositionCommandController controller;
     rclcpp::NodeOptions options;
     options.allow_undeclared_parameters(true)
         .automatically_declare_parameters_from_overrides(true)
@@ -290,7 +290,7 @@ TEST_F(DemoControllerTest, RejectsExplicitLegacyTargetLifetimeNames) {
 //
 // Here ROS time is frozen and only the injected monotonic clock advances, well
 // past the 6 ms hard TTL. The target must expire.
-TEST_F(DemoControllerTest, FrozenRosTimeStillLetsAStaleTargetExpire) {
+TEST_F(PositionCommandControllerTest, FrozenRosTimeStillLetsAStaleTargetExpire) {
   controller_.set_clock_for_testing([this]() { return now_; });
   ASSERT_EQ(controller_.on_configure(lifecycle_state()),
             controller_interface::CallbackReturn::SUCCESS);
@@ -314,7 +314,7 @@ TEST_F(DemoControllerTest, FrozenRosTimeStillLetsAStaleTargetExpire) {
 // A target's lifetime begins when it crosses the subscription/caller boundary,
 // not whenever the manager next happens to run update(). Otherwise executor or
 // control-loop backlog gives an already stale target a brand-new lease.
-TEST_F(DemoControllerTest, TargetDelayedPastHardTtlExpiresOnFirstUpdate) {
+TEST_F(PositionCommandControllerTest, TargetDelayedPastHardTtlExpiresOnFirstUpdate) {
   activate_with_test_clock();
 
   ASSERT_TRUE(controller_.set_target(0.5));
@@ -325,7 +325,7 @@ TEST_F(DemoControllerTest, TargetDelayedPastHardTtlExpiresOnFirstUpdate) {
   EXPECT_DOUBLE_EQ(generation_value_, 0.0);
 }
 
-TEST_F(DemoControllerTest, ExactProductionTargetLifetimeBoundaries) {
+TEST_F(PositionCommandControllerTest, ExactProductionTargetLifetimeBoundaries) {
   auto node = controller_.get_node();
   node->set_parameter({"target_ttl_nanoseconds", 100000000});
   node->set_parameter({"target_hard_ttl_nanoseconds", 106000000});
@@ -354,7 +354,7 @@ TEST_F(DemoControllerTest, ExactProductionTargetLifetimeBoundaries) {
   EXPECT_DOUBLE_EQ(command_value_, before_holding_command);
 }
 
-TEST_F(DemoControllerTest, TwentyHertzSameValueTargetsRemainLive) {
+TEST_F(PositionCommandControllerTest, TwentyHertzSameValueTargetsRemainLive) {
   auto node = controller_.get_node();
   node->set_parameter({"target_ttl_nanoseconds", 100000000});
   node->set_parameter({"target_hard_ttl_nanoseconds", 106000000});
@@ -372,7 +372,7 @@ TEST_F(DemoControllerTest, TwentyHertzSameValueTargetsRemainLive) {
   EXPECT_GT(generation_value_, before_final_cycle);
 }
 
-TEST_F(DemoControllerTest, ConcurrentProducersPublishDistinctGenerations) {
+TEST_F(PositionCommandControllerTest, ConcurrentProducersPublishDistinctGenerations) {
   std::mutex barrier_mutex;
   std::condition_variable barrier_cv;
   int arrivals = 0;
@@ -410,7 +410,7 @@ TEST_F(DemoControllerTest, ConcurrentProducersPublishDistinctGenerations) {
 // A callback can pass the active check, be descheduled across a complete
 // deactivate/reactivate, and only then publish into the RT inbox. The target
 // belongs to the old claim and must not be replayed by the new one.
-TEST_F(DemoControllerTest, CallbackCrossingReactivationCannotReplayOldTarget) {
+TEST_F(PositionCommandControllerTest, CallbackCrossingReactivationCannotReplayOldTarget) {
   std::promise<void> clock_entered;
   std::shared_future<void> resume_clock =
       std::async(std::launch::deferred, []() {}).share();
@@ -451,10 +451,10 @@ TEST_F(DemoControllerTest, CallbackCrossingReactivationCannotReplayOldTarget) {
 // The controller's target must be reachable over ROS, not only through a C++
 // call nothing in a deployment can make. The topic is controller-relative so
 // its full name follows the controller's namespace.
-TEST_F(DemoControllerTest, AcceptsATargetFromItsTopic) {
+TEST_F(PositionCommandControllerTest, AcceptsATargetFromItsTopic) {
   activate_with_test_clock();
 
-  auto publisher_node = std::make_shared<rclcpp::Node>("demo_controller_probe");
+  auto publisher_node = std::make_shared<rclcpp::Node>("position_command_controller_probe");
   auto publisher = publisher_node->create_publisher<std_msgs::msg::Float64>(
       "/motor1_position_controller/target_position",
       rclcpp::SystemDefaultsQoS());
@@ -483,7 +483,7 @@ TEST_F(DemoControllerTest, AcceptsATargetFromItsTopic) {
 // elsewhere: the only alternative to a measured seed is a fabricated one, and
 // on a position interface a fabricated 0.0 is a commanded move to the
 // calibrated zero.
-TEST_F(DemoControllerTest, RefusesToActivateOnNonFiniteFeedback) {
+TEST_F(PositionCommandControllerTest, RefusesToActivateOnNonFiniteFeedback) {
   controller_.set_clock_for_testing([this]() { return now_; });
   ASSERT_EQ(controller_.on_configure(lifecycle_state()),
             controller_interface::CallbackReturn::SUCCESS);
@@ -497,7 +497,7 @@ TEST_F(DemoControllerTest, RefusesToActivateOnNonFiniteFeedback) {
 // carrying the same number as the last one is still something said. If refresh
 // were keyed on the value changing, a publisher holding a steady setpoint would
 // look identical to a publisher that died.
-TEST_F(DemoControllerTest, AnUnchangedValueStillRefreshesTheTtl) {
+TEST_F(PositionCommandControllerTest, AnUnchangedValueStillRefreshesTheTtl) {
   Probe probe(*this);
   probe.publish_and_wait(0.5, 1U);
 
@@ -517,7 +517,7 @@ TEST_F(DemoControllerTest, AnUnchangedValueStillRefreshesTheTtl) {
 // The mirror of the rule above: only a message may refresh the TTL. Turning
 // the control loop cannot, or a silent publisher would be indistinguishable
 // from a live one for as long as the manager keeps cycling.
-TEST_F(DemoControllerTest, BareControlCyclesDoNotRefreshTheTtl) {
+TEST_F(PositionCommandControllerTest, BareControlCyclesDoNotRefreshTheTtl) {
   Probe probe(*this);
   probe.publish_and_wait(0.5, 1U);
 
@@ -534,7 +534,7 @@ TEST_F(DemoControllerTest, BareControlCyclesDoNotRefreshTheTtl) {
 // would turn that bug into a full-scale motion command, so it is dropped
 // before it can become a target at all. The trailing valid message is the
 // sentinel that proves delivery really happened.
-TEST_F(DemoControllerTest, RejectsNonFiniteTargetsFromTheTopic) {
+TEST_F(PositionCommandControllerTest, RejectsNonFiniteTargetsFromTheTopic) {
   Probe probe(*this);
   probe.publish(std::numeric_limits<double>::quiet_NaN());
   probe.publish(std::numeric_limits<double>::infinity());
@@ -555,7 +555,7 @@ TEST_F(DemoControllerTest, RejectsNonFiniteTargetsFromTheTopic) {
 // A target published while the joint belonged to nobody is not a target for
 // the next activation. Dropping it at the subscription is what stops a
 // re-activation from replaying it.
-TEST_F(DemoControllerTest, DiscardsTargetsPublishedWhileDeactivated) {
+TEST_F(PositionCommandControllerTest, DiscardsTargetsPublishedWhileDeactivated) {
   Probe probe(*this);
   ASSERT_EQ(controller_.on_deactivate(lifecycle_state()),
             controller_interface::CallbackReturn::SUCCESS);
@@ -573,12 +573,12 @@ TEST_F(DemoControllerTest, DiscardsTargetsPublishedWhileDeactivated) {
 }
 
 // ADR-017 Decision 9: this project's own controllers are in the strong tier, so
-// DemoController must ASK for the generation interface. If it ever stops
+// PositionCommandController must ASK for the generation interface. If it ever stops
 // claiming it, the hardware silently drops this controller into the weak tier
-// and a silent DemoController goes back to holding the motor on its last target
+// and a silent PositionCommandController goes back to holding the motor on its last target
 // with nothing able to notice. Names are checked, not just the count, because
 // the hardware matches on the joint-qualified name.
-TEST_F(DemoControllerTest, ClaimsTheGenerationInterfaceAlongsideTheMotionOne) {
+TEST_F(PositionCommandControllerTest, ClaimsTheGenerationInterfaceAlongsideTheMotionOne) {
   ASSERT_EQ(controller_.on_configure(lifecycle_state()),
             controller_interface::CallbackReturn::SUCCESS);
   const auto config = controller_.command_interface_configuration();
@@ -598,9 +598,9 @@ TEST_F(DemoControllerTest, ClaimsTheGenerationInterfaceAlongsideTheMotionOne) {
 // Read together with the hardware half. CompositeSystem treats an unchanged
 // generation as "not refreshed" and the runtime then sends nothing
 // (SilentControllerDoesNotRefreshItsCommand, in mech_bringup, drives that under
-// a real ControllerManager). This test is what makes DemoController qualify for
+// a real ControllerManager). This test is what makes PositionCommandController qualify for
 // that protection rather than merely be eligible for it.
-TEST_F(DemoControllerTest, GenerationChangesOnlyWhileFollowingALiveTarget) {
+TEST_F(PositionCommandControllerTest, GenerationChangesOnlyWhileFollowingALiveTarget) {
   Probe probe(*this);
 
   // Activated, no target yet. The controller writes its activation seed to hold

@@ -4,7 +4,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-15
 - **Owner:** Project owner
-- **Scope:** DemoController target policy and deployment configuration; hardware lease unchanged
+- **Scope:** PositionCommandController target policy and deployment configuration; hardware lease unchanged
 
 ## Status rationale / 状态依据
 
@@ -25,7 +25,7 @@ lease on 2026-09-15. This ADR records that authorized policy before implementati
 
 ## Decision / 决策
 
-1. DemoController uses monotonic callback arrival for upstream target aging.
+1. PositionCommandController uses monotonic callback arrival for upstream target aging.
    Its explicit target soft/hard lifetime is 100/106 ms for the initial 20-50 Hz
    deployment. The 100 ms value is an engineering policy of two slowest nominal
    periods, not a measured worst-case guarantee. The 6 ms hold tail is aligned

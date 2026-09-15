@@ -52,7 +52,7 @@ class TargetLimiter final {
   bool has_held_{false};
 };
 
-class DemoController final : public controller_interface::ControllerInterface {
+class PositionCommandController final : public controller_interface::ControllerInterface {
  public:
   // A monotonic time source in nanoseconds, used for every watchdog deadline.
   // Injectable so tests can step the staged watchdog deterministically;
@@ -76,7 +76,7 @@ class DemoController final : public controller_interface::ControllerInterface {
     std::uint64_t activation_epoch{0U};
   };
 
-  DemoController();
+  PositionCommandController();
 
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(

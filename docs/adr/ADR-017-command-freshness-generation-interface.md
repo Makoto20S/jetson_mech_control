@@ -76,8 +76,8 @@ ADR-015 之所以能把「控制器崩溃/被停用」这条路关掉，正是�
 
 8. **修订 ADR-014 Decision 第 2 条。** 「每关节恰好一个命令接口」改为「每关节恰好一个**运动**命令接口（`position`/`velocity`/`effort` 三者之一，与 `sub_mode` fail-closed 匹配），**外加一个始终导出、可选 claim 的 `command_generation` 接口**」。ADR-014 关于子模式对应关系、Velocity 强制 `effort = 0`、状态接口形状不变的其余决策一律不变。
 
-9. **本项目自己的控制器一律走强档。** `DemoController` 以及 T8/T9 的速度与力矩控制器必须 claim 并维护代号接口。弱档存在的目的是接纳第三方控制器，不是给自研控制器留后门。
-   `DemoController` 的低频上游目标有效期与本接口承载的硬件刷新分属两层，见 [ADR-018](ADR-018-upstream-target-lifetime.md)；该政策不增强弱档对第三方控制器上游静默的可观测性。
+9. **本项目自己的控制器一律走强档。** `PositionCommandController` 以及 T8/T9 的速度与力矩控制器必须 claim 并维护代号接口。弱档存在的目的是接纳第三方控制器，不是给自研控制器留后门。
+   `PositionCommandController` 的低频上游目标有效期与本接口承载的硬件刷新分属两层，见 [ADR-018](ADR-018-upstream-target-lifetime.md)；该政策不增强弱档对第三方控制器上游静默的可观测性。
 
 10. **明确记录本机制观测不到的东西。** 强档下硬件能观测的是代号的**变化**，不是写入动作本身；一个反复写入同一个代号值的控制器与一个停止写入的控制器在硬件层完全等价。这是设计边界而非缺陷：本 ADR 的威胁模型是「控制器安静地停止工作」，不是「控制器蓄意伪装」。
 
@@ -135,7 +135,7 @@ ADR-015 之所以能把「控制器崩溃/被停用」这条路关掉，正是�
 - 这是 `RuntimePort` 相邻契约一周内的第三次破坏性变更。本仓库内的三个实现者会同步更新；**任何本仓库之外的实现者都会直接编译失败**。
 - 强档下发送频率随控制器刷新率变化，任何按「每控制周期一帧」推导的发送侧带宽估算需要按 ADR-006 的模型复核。（接收侧的 `kReceiveBudget` 由设备回报速率决定，不受本 ADR 影响。）
 - 硬件需要同时维护两条命令路径，测试面翻倍：每个行为都要在强档与弱档各验一次。
-- 改动面：`CompositeSystem` 与 `RuntimePort`、仓库内三个 `RuntimePort` 实现者、`WriterController` 与 `DemoController`、三个 motor1 xacro、以及部署结构测试。
+- 改动面：`CompositeSystem` 与 `RuntimePort`、仓库内三个 `RuntimePort` 实现者、`WriterController` 与 `PositionCommandController`、三个 motor1 xacro、以及部署结构测试。
 - ADR-014 Decision 第 2 条被修订，此前所有引用「每关节恰好一个命令接口」的表述都需要同步。
 
 ## Validation / 验证
