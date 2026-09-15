@@ -14,4 +14,6 @@ TEST(ProductionPluginLoading, HardwareThenControllerHaveIndependentFactories) {
       "controller_interface", "controller_interface::ControllerInterface");
   EXPECT_NE(controller_loader.createSharedInstance("mech_controllers/PositionCommandController"),
             nullptr);
+  EXPECT_NE(controller_loader.createSharedInstance("mech_controllers/VelocityCommandController"),
+            nullptr);
 }
