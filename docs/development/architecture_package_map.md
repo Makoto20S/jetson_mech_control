@@ -28,7 +28,7 @@
 | `mech_control_core` | 协议无关核心：`RawCanFrame`/`BusRuntime`/canonical 命令与状态类型、`AdapterResult`、freshness/TTL、`ProtocolProfile` 枚举 | 仅 `ProtocolProfile` 枚举值命名（`Ak30ForceControlExtended`/`Ak30ServoExtended`，ADR-013 定义）——这是**配置期固定 profile 的注册表**（清单第 3 条：一个 profile 一个显式枚举，无自动探测），不是品牌逻辑分支 | **不动**（新品牌 = 在枚举加一个值 + ADR） |
 | `mech_simulation` | FakeTransport/FakeSerial 等离线测试替身 | 否 | **不动** |
 | `mech_hardware_ros2_control` | `CompositeSystem`（SystemInterface）：生命周期/claim/switch/看门狗浮出/接口导出。接口形状是**通用** position/velocity/effort（ADR-014） | 否 | **不动** |
-| `mech_controllers` | 通用控制器（DemoController 等） | 否 | **不动** |
+| `mech_controllers` | 通用控制器（PositionCommandController 等） | 否 | **不动** |
 | `mech_protocol_cubemars` | **唯一的品牌包**：AK3.0 力控+伺服 wire 编解码、证据门映射（`mapping_is_sufficient`）、`DeviceCodec`/`DeviceSession`（分级看门狗、故障锁存） | 是（CubeMars AK3.0） | **新增平行的** `mech_protocol_<新品牌>` 包；本包不动 |
 | `mech_bringup` | 部署组合层：探针（bench 验证用）、`Ak30RuntimeParams`（fail-closed URDF 参数解析）、`Ak30ForceControlRuntime`（RuntimePort 接线）、deployment 示例（URDF/controllers/launch） | 部署层（组合点按 profile 分） | 加新品牌的组合点/参数解析；既有内容不动 |
 
@@ -65,7 +65,7 @@
 
 1. ~~**launch → 真机的生产组合点还不存在。**~~ **已补（2026-09-08 组合点切片，PR #13：`mech_bringup/Ak30System` 组合插件 + 三个部署 xacro 改指向它）。** 历史记录（2026-09-07 调查）：`Ak30RuntimeParams::parse()` 当时没有生产调用方；`0x12` 透传初始化只有探针发；pluginlib 构造的 `CompositeSystem` 必然带内置 LoopbackRuntime，直接 `ros2 launch` 会广播假状态。2026-09-06 切片把这一项刻意划在范围外（示例只做结构校验），不是架构漂移。
 2. **本文创建时开发处于 owner 暂停状态**（架构方向质询未裁决）：组合点切片设计过、未开工。（2026-09-08 已解除：疑虑解决、切片实施完毕。）
-3. **Torque/Velocity 尚无 ros2 控制器**（DemoController 仅 position）；接口形状已就绪，命令方待后续切片。
+3. **Torque/Velocity 尚无 ros2 控制器**（PositionCommandController 仅 position）；接口形状已就绪，命令方待后续切片。
 4. **真机首跑尚未发生**（组合点切片只做离线验证）：broadcaster-only 首跑是下一任务，需 owner 逐次授权 + 到场（ADR-006 Decision 7 边界）。
 
 ## 6. 给以后 AI 的判据 / How to tell the layers apart quickly

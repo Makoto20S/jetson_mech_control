@@ -34,7 +34,7 @@ class TestControllerManager(Node):
             item = ControllerState()
             item.name = self.args.controller
             item.state = self.state
-            item.type = "mech_controllers/DemoController"
+            item.type = "mech_controllers/PositionCommandController"
             response.controller = [item]
         return response
 

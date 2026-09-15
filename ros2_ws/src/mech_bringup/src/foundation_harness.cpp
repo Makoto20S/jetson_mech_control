@@ -103,7 +103,7 @@ bool FoundationHarness::cycle(std::int64_t now_nanoseconds,
   // this cycle is about to produce.
   const auto read = hardware_.read(time, period);
   const auto previous = command_interfaces_[0].get_value();
-  // Mirror DemoController::update(): past the hard deadline the command has
+  // Mirror PositionCommandController::update(): past the hard deadline the command has
   // lapsed and the cycle is a failure, so the harness exercises the same
   // "enter a defined fault" path a real controller would.
   const auto stage = limiter_.stage(now_nanoseconds);

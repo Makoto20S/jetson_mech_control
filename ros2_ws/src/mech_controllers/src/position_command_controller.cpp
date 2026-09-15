@@ -1,4 +1,4 @@
-#include "mech_controllers/demo_controller.hpp"
+#include "mech_controllers/position_command_controller.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -86,7 +86,7 @@ WatchdogStage TargetLimiter::stage(std::int64_t now_nanoseconds) const noexcept 
   // No target has ever been submitted, so there is nothing legitimate to
   // follow and nothing stale either: this watchdog measures how old a target
   // is, and a target that never existed has no age. Hold - the caller keeps
-  // whatever value it seeded (for DemoController, the position just measured
+  // whatever value it seeded (for PositionCommandController, the position just measured
   // at activation), and never slews toward the default target_ of 0.0, which
   // on a position interface is a commanded move to the calibrated zero.
   //
@@ -105,25 +105,25 @@ WatchdogStage TargetLimiter::stage(std::int64_t now_nanoseconds) const noexcept 
   return WatchdogStage::Expired;
 }
 
-DemoController::DemoController()
+PositionCommandController::PositionCommandController()
     : clock_([]() noexcept {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(
                    std::chrono::steady_clock::now().time_since_epoch())
             .count();
       }) {}
 
-void DemoController::set_clock_for_testing(MonotonicClock clock) noexcept {
+void PositionCommandController::set_clock_for_testing(MonotonicClock clock) noexcept {
   if (clock) clock_ = std::move(clock);
 }
 
-std::uint64_t DemoController::target_generation() const noexcept {
+std::uint64_t PositionCommandController::target_generation() const noexcept {
   return generation_.load(std::memory_order_acquire);
 }
 
 // Runs on the executor thread for a topic message, or on the caller's thread
 // for set_target(). The generation is published last, with release ordering,
 // so update() can never see a new generation paired with an older value.
-bool DemoController::accept(double target, std::int64_t arrival_nanoseconds,
+bool PositionCommandController::accept(double target, std::int64_t arrival_nanoseconds,
                             std::uint64_t activation_epoch) noexcept {
   std::lock_guard<std::mutex> lock(producer_mutex_);
   if (!active_.load(std::memory_order_acquire) ||
@@ -137,7 +137,7 @@ bool DemoController::accept(double target, std::int64_t arrival_nanoseconds,
   return true;
 }
 
-controller_interface::CallbackReturn DemoController::on_init() {
+controller_interface::CallbackReturn PositionCommandController::on_init() {
   try {
     const auto& overrides =
         get_node()->get_node_parameters_interface()->get_parameter_overrides();
@@ -157,7 +157,7 @@ controller_interface::CallbackReturn DemoController::on_init() {
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::CallbackReturn DemoController::on_configure(
+controller_interface::CallbackReturn PositionCommandController::on_configure(
     const rclcpp_lifecycle::State&) {
   try {
     joint_name_ = get_node()->get_parameter("joint").as_string();
@@ -202,7 +202,7 @@ controller_interface::CallbackReturn DemoController::on_configure(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::CallbackReturn DemoController::on_activate(
+controller_interface::CallbackReturn PositionCommandController::on_activate(
     const rclcpp_lifecycle::State&) {
   if (command_interfaces_.size() != 2U || state_interfaces_.size() != 1U ||
       command_interfaces_[0].get_name() !=
@@ -235,7 +235,7 @@ controller_interface::CallbackReturn DemoController::on_activate(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::CallbackReturn DemoController::on_deactivate(
+controller_interface::CallbackReturn PositionCommandController::on_deactivate(
     const rclcpp_lifecycle::State&) {
   active_.store(false, std::memory_order_release);
   activation_epoch_.fetch_add(1U, std::memory_order_acq_rel);
@@ -244,12 +244,12 @@ controller_interface::CallbackReturn DemoController::on_deactivate(
 }
 
 controller_interface::InterfaceConfiguration
-DemoController::command_interface_configuration() const {
+PositionCommandController::command_interface_configuration() const {
   // ADR-017 Decision 9: this project's own controllers are always in the strong
   // tier. The weak tier exists to accept third-party controllers, not as a back
   // door for ours. Claiming the generation interface is what lets the hardware
   // tell this controller falling silent apart from the manager merely cycling;
-  // without it a DemoController that stopped writing would leave the motor on
+  // without it a PositionCommandController that stopped writing would leave the motor on
   // its last target with nothing able to notice.
   return {controller_interface::interface_configuration_type::INDIVIDUAL,
           {joint_name_ + "/" + hardware_interface::HW_IF_POSITION,
@@ -258,7 +258,7 @@ DemoController::command_interface_configuration() const {
 }
 
 controller_interface::InterfaceConfiguration
-DemoController::state_interface_configuration() const {
+PositionCommandController::state_interface_configuration() const {
   return {controller_interface::interface_configuration_type::INDIVIDUAL,
           {joint_name_ + "/" + hardware_interface::HW_IF_POSITION}};
 }
@@ -266,7 +266,7 @@ DemoController::state_interface_configuration() const {
 // The rclcpp::Time argument is deliberately unused: see MonotonicClock in the
 // header. `period` is the control period rather than a deadline, so it still
 // comes from the manager.
-controller_interface::return_type DemoController::update(
+controller_interface::return_type PositionCommandController::update(
     const rclcpp::Time&, const rclcpp::Duration& period) {
   if (!active_.load(std::memory_order_acquire) ||
       command_interfaces_.size() != 2U || period.nanoseconds() < 0) {
@@ -326,7 +326,7 @@ controller_interface::return_type DemoController::update(
 // The non-ROS entry, kept so unit tests can drive the watchdog without an
 // executor. It routes through the same buffer and counter as the
 // subscription, so the two entries cannot drift apart.
-bool DemoController::set_target(double target) noexcept {
+bool PositionCommandController::set_target(double target) noexcept {
   const auto activation_epoch =
       activation_epoch_.load(std::memory_order_acquire);
   if (!active_.load(std::memory_order_acquire) || !std::isfinite(target)) {

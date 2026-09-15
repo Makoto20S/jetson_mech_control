@@ -13,14 +13,14 @@ controller_manager:
       type: joint_state_broadcaster/JointStateBroadcaster
 
     motor1_position_controller:
-      type: mech_controllers/DemoController
+      type: mech_controllers/PositionCommandController
 
 joint_state_broadcaster:
   ros__parameters:
     use_local_topics: false
 
-# The demo controller is the bounded, slew-limited reference position
-# controller from mech_controllers (mech_controllers/DemoController). Its
+# PositionCommandController is the bounded, slew-limited position command
+# controller from mech_controllers. Its
 # target is clamped to [minimum, maximum] and slews at max_slew_per_second,
 # with ADR-018's provisional upstream target lifetime. The independent
 # controller-to-hardware lease remains 4/6 ms in the motor xacro.
