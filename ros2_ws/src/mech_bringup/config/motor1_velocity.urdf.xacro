@@ -4,10 +4,8 @@
      runtime maps only the velocity member into the wire frame; kd
      provides the damping path, and effort is FORCED to zero because the
      wire's effort field rides along as feedforward t_ff in every
-     sub-mode - the bench-proven Kd bound (torque <= Kd * velocity
-     command, speed <= the command) only holds without feedforward
-     (2026-09-05 evidence). The B4 evidence gate leaves the exported
-     position state zero-filled while velocity/effort are real.
+     sub-mode. Velocity and effort have evidenced feedback; the position
+     placeholder is unsupported and must not be used as displacement data.
 
      WARNING: launching this URDF against real hardware with a controller
      commanding velocity drives the motor within the Kd-damped envelope.
@@ -15,8 +13,8 @@
      evidence, and every real-motor run needs the owner's explicit
      per-test authorization per the ADR-006 Decision-7 forensic-bench
      profile. Kd=1 with a small velocity command is the bench-proven
-     safe shape; keep Kd non-zero - a zero-Kd velocity command degrades
-     toward unbounded acceleration on a friction-only bench.
+     tested shape. With Kp=0 and t_ff=0, zero Kd removes velocity regulation;
+     command limits alone do not guarantee physical speed or stopping bounds.
 
      The parameters map one-to-one onto mech_bringup's Ak30RuntimeParams;
      an unknown or missing key fails configure. The command interface

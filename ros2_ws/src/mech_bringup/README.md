@@ -42,6 +42,35 @@ all three deployment xacro examples load it.
   commented out: uncommenting it arms position commands, which stay
   gated by ADR-006 and per-test owner authorization.
 
+## T8 velocity deployment
+
+Use the separate `launch/motor1_velocity_bringup.launch.py` with
+`config/motor1_velocity.urdf.xacro` and `config/motor1_velocity_controllers.yaml`.
+It serializes the broadcaster and velocity spawners and loads
+`motor1_velocity_controller` **inactive**. Launching still opens the physical
+transport; inactive does not make this an offline launch. The offline test
+evaluates the actual xacro/launch parameters without starting any nodes.
+
+The controller consumes `/motor1_velocity_controller/target_velocity`
+(`std_msgs/msg/Float64`, rad/s); its example bounds are ±0.5 rad/s, with a
+0.5 rad/s² command ramp. The URDF uses Kp=0, Kd=1, and the runtime forces t_ff=0.
+For an approved future bench run: stop the other deployment, verify current
+feedback and shaft rest, activate using a STRICT switch, verify ACTIVE, then
+send fresh zero targets before any bounded nonzero ramp. Keep publishing at
+20–50 Hz. This configuration does not switch the deployed position operator.
+
+Normal stopping requires continued fresh zero targets through the ramp and
+confirmation of actual near-zero speed before deactivation. Target loss or
+deactivation stops refresh/transmission; it does not promise mechanical braking.
+Velocity mode supplies evidenced velocity/effort feedback, **not position**;
+the position state placeholder must not be used to infer displacement or rest.
+The launch therefore omits robot_state_publisher. Initialization is independent
+of that position state; hardware feedback validity is still required to claim.
+
+See [controller semantics](../mech_controllers/README.md) for target lifetime,
+activation and recovery. Real velocity-controller acceptance remains a separate
+authorized bench task; offline frame mapping does not establish physical limits.
+
 ## Safety boundary
 
 No default build or test opens a serial device or sends a CAN frame. All
