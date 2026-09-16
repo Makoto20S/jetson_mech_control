@@ -1,8 +1,8 @@
 # Jetson 通用机电控制框架规划索引
 
 > 规划基线：2026-07-28
-> 最近收敛：2026-09-16（位置控制器里程碑已发布；T8 速度控制器离线实现与验收）
-> 当前状态：Foundation RC2 已完成；PositionCommandController 已随 PR #16 合并，tag `position-controller-complete` 标记位置控制器收口。当前推进 **T8 VelocityCommandController**；T9 EffortCommandController 后续单独实施。设备操作仍逐次授权。
+> 最近收敛：2026-09-16（位置控制器里程碑已发布；T8/T9 软件离线验收与台架准备）
+> 当前状态：Foundation RC2 已完成；PositionCommandController 已随 PR #16 合并，tag `position-controller-complete` 标记位置控制器收口。T8 VelocityCommandController 与 T9 EffortCommandController 软件离线验收完成；T9 台架准备完成，T8 临时台架工具需同步审查修复后再使用。两者均未完成实机验收，设备操作仍逐次授权。
 
 Foundation 及早期 AK3.0 软件/探针阶段的记录保留在 §3；当前实现包含
 ADR-014 子模式映射、ADR-015 发送授权、ADR-016 反馈质量、ADR-017 两档刷新
@@ -30,8 +30,8 @@ ADR-001/002/003/004/005/009/012/013 为 Accepted；[ADR-006](../adr/ADR-006-cond
 - 当前设备背景：两台基于 AKE60-8 的定制双编码器电机和两台 HI12；实际固件、配置、协议、节点和物理拓扑仍需逐台取证。
 - 实际目标机背景：NVIDIA Orin NX 16GB 模组（`P3767-0000`）+ **合众恒跃 HZHY HYAI-311UAV 第三方载板**（2026-08-23 实物照片核验；软件设备树报 `p3768-0000` 是厂商基于 devkit 配置构建镜像的产物）。**2026-08-23 已完成平台迁移**：JetPack 6.2 / L4T R36.4.3 / Ubuntu 22.04.5 / 内核 5.15.148-tegra，`nvidia-l4t-*` 已锁定、ROS 2 Humble 已安装——FND-004A 的原生 Jammy/Humble 前置条件**已满足**。
 - CAN 拓扑意向（2026-08-23 用户确认）：电机接入高擎通用盒子（7路CAN功率板）的电源+CAN 通道，Jetson 经 USB CDC 收发；HI12 接入方案待定。激活仍受 ADR-006 证据闸门约束。
-- 当前阶段：T8 独立速度控制器与离线链路验收；Foundation 已完成。
-- 当前安全边界：T8 只做无设备构建/测试；不启用 CAN、不操作设备、不切换实机部署。
+- 当前阶段：T8/T9 软件离线验收完成，T9 无设备台架演练完成；T8 旧台架工具需修复并重新演练。两者等待独立的实机验收；Foundation 已完成。
+- 当前安全边界：T9 只做无设备构建/测试和候选准备；不发送电机命令、不切换实机部署。T8/T9 实机运行分别授权，验收后再合并。
 - 当前实现入口：[Foundation v0.1 控制框架搭建计划](07_framework_bootstrap_plan.md)。
 - 完整 MVP 与硬件验收入口：[MVP 执行、验证与项目治理计划](03_mvp_delivery_plan.md)。
 
@@ -48,11 +48,16 @@ ADR-001/002/003/004/005/009/012/013 为 Accepted；[ADR-006](../adr/ADR-006-cond
 | 阶段 3 软件切片（Position 子模式） | **已合并（PR #11）** | `mech_bringup` 新增 `Ak30ForceControlRuntime`（RuntimePort 接线 `Ak30ForceControlSession`，`command_stage()` 首个生产消费方：Following 提交/Holding 冻结/Expired 在 3 周期预算内显式失败且不合成 0.0）+ `Ak30RuntimeParams`（fail-closed 参数解析）+ deployment 示例（URDF/controllers.yaml/launch，位置控制器 spawner 默认注释）；236 离线测试全绿；B14 专项与 B4/B9/B14/B15 厂商复核并行 |
 | Torque/Velocity 命令接口切片（ADR-014） | **ADR Accepted + 已合并（PR #12）** | [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md)：`CanonicalCommand` 扩展三字段、CompositeSystem 每关节恰好一个命令接口 ∈ {position, velocity, effort}；runtime 按子模式映射（Velocity 强制 effort=0 防前馈叠加）+ `sub_mode` 部署参数 + 三套 URDF 变体（position/torque/velocity）与接口名匹配结构校验；离线测试全绿；真机运行仍逐次授权（ADR-006 Decision 7） |
 | 位置控制器里程碑 | **已合并/发布（2026-09-16）** | 独立 `PositionCommandController`，PR #16 与 `position-controller-complete`；位置功能收口不代表精度或实时性认证 |
-| T8 速度控制器 | **离线实现及本地/ARM64/sanitizer 验收完成，待 PR 合并** | 独立 `VelocityCommandController`；velocity+command_generation、速度/加速度限制、目标有效期；共享有界目标机制，默认 inactive 的独立部署入口；验收包含实际 manager 到 FakeTransport 帧、过期/停用/重新激活静默 |
-| T9 力矩控制器 | **待实施** | 独立 `EffortCommandController`；实机前还需 raw ERPM 超速/新鲜度保护，不能使用 Torque 模式中未证实的标准 velocity |
+| T8 速度控制器 | **离线实现及本地/ARM64/sanitizer 验收完成，待实机验收后合并** | 独立 `VelocityCommandController`；velocity+command_generation、速度/加速度限制、目标有效期；共享有界目标机制，默认 inactive 的独立部署入口；验收包含实际 manager 到 FakeTransport 帧、过期/停用/重新激活静默 |
+| T9 力矩控制器 | **离线实现及本地/ARM64/sanitizer 验收完成，待实机验收** | 独立 `EffortCommandController`；effort+command_generation、力矩限幅/斜坡/目标有效期；默认 inactive 的固定 Torque 部署；raw ERPM 超速锁存及发送前新鲜度保护；标准 velocity/position 不作静止依据；零力矩需另行确认滑行结束 |
 
-T8 的接口和启动/停止策略见 [mech_controllers](../../ros2_ws/src/mech_controllers/README.md)
-与 [速度部署说明](../../ros2_ws/src/mech_bringup/README.md#t8-velocity-deployment)。
+T8/T9 的接口和启动/停止策略见 [mech_controllers](../../ros2_ws/src/mech_controllers/README.md)、
+[速度部署说明](../../ros2_ws/src/mech_bringup/README.md#t8-velocity-deployment)
+与 [力矩部署说明](../../ros2_ws/src/mech_bringup/README.md#t9-effort-deployment)。
+离线验收和台架软件准备不等于实机通过；夹具、现场断能能力及每次目标仍须确认。
+T9 工具审查发现的中断升级、最终日志失败、候选目录绑定、插件元数据校验及
+诊断输出失败时停用保障问题，也影响旧 T8 临时工具。T8 实机测试前须同步修复、
+重新演练并生成新候选包；此项不涉及 T8 控制器源代码或现有 PR 的修改。
 
 如果烟测后需要修复，必须在新 commit 上重新完整执行 FND-004A；里程碑 tag 不得指向未实际通过的 commit。
 
