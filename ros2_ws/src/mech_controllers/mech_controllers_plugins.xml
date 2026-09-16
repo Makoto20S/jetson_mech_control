@@ -10,4 +10,9 @@
          base_class_type="controller_interface::ControllerInterface">
     <description>Bounded velocity commands with acceleration and target TTL.</description>
   </class>
+  <class name="mech_controllers/EffortCommandController"
+         type="mech::mech_controllers::EffortCommandController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Bounded effort commands with slew and target TTL.</description>
+  </class>
 </library>
