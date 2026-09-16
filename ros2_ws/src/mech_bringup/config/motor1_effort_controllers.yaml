@@ -1,0 +1,21 @@
+# Fixed torque deployment. Zero effort is not a mechanical stop.
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    motor1_effort_controller:
+      type: mech_controllers/EffortCommandController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+motor1_effort_controller:
+  ros__parameters:
+    joint: motor1_joint
+    minimum: -0.1  # Output-shaft equivalent N*m (Iq-derived feedback).
+    maximum: 0.1
+    max_slew_per_second: 0.2  # N*m/s, including deliberate zero return.
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000

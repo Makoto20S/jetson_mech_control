@@ -143,6 +143,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
     test/test_velocity_controller_manager.cpp
+    test/test_effort_controller_manager.cpp
   )
   target_compile_definitions(${PROJECT_NAME}_controller_manager_test PRIVATE
     MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -173,6 +174,12 @@ if(BUILD_TESTING)
   ament_add_test(${PROJECT_NAME}_velocity_launch
     COMMAND "${Python3_EXECUTABLE}"
       ${CMAKE_CURRENT_SOURCE_DIR}/test/test_velocity_launch.py
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_effort_launch
+    COMMAND "${Python3_EXECUTABLE}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/test_effort_launch.py
     TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
