@@ -4,14 +4,15 @@
 
 namespace mech::mech_controllers {
 
-class PositionCommandController final : public SingleJointCommandController {
+class VelocityCommandController final : public SingleJointCommandController {
  public:
-  PositionCommandController();
+  VelocityCommandController();
   controller_interface::InterfaceConfiguration
   state_interface_configuration() const override;
 
  private:
   [[nodiscard]] bool initial_command(double& value) const noexcept override;
+  [[nodiscard]] bool valid_limits(const BoundedTarget& limits) const noexcept override;
 };
 
 }  // namespace mech::mech_controllers

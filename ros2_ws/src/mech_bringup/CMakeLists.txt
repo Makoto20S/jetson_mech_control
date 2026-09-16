@@ -142,7 +142,10 @@ if(BUILD_TESTING)
     hardware_interface controller_interface pluginlib)
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
+    test/test_velocity_controller_manager.cpp
   )
+  target_compile_definitions(${PROJECT_NAME}_controller_manager_test PRIVATE
+    MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(${PROJECT_NAME}_controller_manager_test ${PROJECT_NAME})
   ament_target_dependencies(${PROJECT_NAME}_controller_manager_test
     controller_manager
@@ -165,6 +168,12 @@ if(BUILD_TESTING)
     COMMAND bash
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/bench/test_activate_position_controller.sh
     TIMEOUT 35
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_velocity_launch
+    COMMAND "${Python3_EXECUTABLE}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/test_velocity_launch.py
+    TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
   add_launch_test(test/test_e5_process.launch.py

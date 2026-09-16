@@ -5,4 +5,9 @@
          base_class_type="controller_interface::ControllerInterface">
     <description>Bounded position command controller with slew and target TTL.</description>
   </class>
+  <class name="mech_controllers/VelocityCommandController"
+         type="mech::mech_controllers::VelocityCommandController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Bounded velocity commands with acceleration and target TTL.</description>
+  </class>
 </library>

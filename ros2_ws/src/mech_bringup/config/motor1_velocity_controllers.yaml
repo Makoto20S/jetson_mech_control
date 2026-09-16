@@ -1,0 +1,21 @@
+# Velocity deployment example. Loading inactive is not authorization to run a motor.
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    motor1_velocity_controller:
+      type: mech_controllers/VelocityCommandController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+motor1_velocity_controller:
+  ros__parameters:
+    joint: motor1_joint
+    minimum: -0.5  # Output-shaft rad/s; bounds must contain zero.
+    maximum: 0.5
+    max_slew_per_second: 0.5  # rad/s^2; deliberate stops use the same ramp.
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000
