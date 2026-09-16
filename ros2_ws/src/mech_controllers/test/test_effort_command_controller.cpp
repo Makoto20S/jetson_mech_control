@@ -202,4 +202,3 @@ TEST_F(EffortCommandControllerTest, ConsumesTheEffortTopicWithoutAStateSubscript
 
 }  // namespace
 }  // namespace mech::mech_controllers
-

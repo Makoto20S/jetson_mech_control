@@ -23,4 +23,3 @@ bool EffortCommandController::valid_limits(const BoundedTarget& limits) const no
 }
 
 }  // namespace mech::mech_controllers
-

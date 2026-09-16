@@ -16,4 +16,3 @@ class EffortCommandController final : public SingleJointCommandController {
 };
 
 }  // namespace mech::mech_controllers
-

@@ -358,4 +358,3 @@ TEST_F(EffortControllerManagerTest, RejectsConflictingControllerWithoutTransmitt
 
 }  // namespace
 }  // namespace mech::mech_bringup
-

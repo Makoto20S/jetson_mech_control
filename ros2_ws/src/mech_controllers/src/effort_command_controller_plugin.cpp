@@ -3,4 +3,3 @@
 
 PLUGINLIB_EXPORT_CLASS(mech::mech_controllers::EffortCommandController,
                       controller_interface::ControllerInterface)
-
