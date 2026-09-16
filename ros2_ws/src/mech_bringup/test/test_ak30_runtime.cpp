@@ -189,6 +189,14 @@ class ReceiveAdvancingTransport final
       .value();
 }
 
+[[nodiscard]] RawCanFrame speed_feedback(TestClock& clock, std::int16_t erpm) {
+  auto frame = feedback_frame(clock);
+  const auto raw = static_cast<std::uint16_t>(erpm / 10);
+  frame.payload[2] = static_cast<std::uint8_t>(raw >> 8U);
+  frame.payload[3] = static_cast<std::uint8_t>(raw);
+  return frame;
+}
+
 class Ak30RuntimeTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -661,6 +669,7 @@ TEST_F(Ak30RuntimeTest, TorqueSubModeEmitsEffortOnlyGoldenFrame) {
   EXPECT_TRUE(write_authorized(runtime, command));
 
   clock_.set(2000000);
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
   EXPECT_TRUE(runtime.read(states, 1U));
   ASSERT_EQ(transport_->pending_transmit(), 1U);
@@ -672,6 +681,225 @@ TEST_F(Ak30RuntimeTest, TorqueSubModeEmitsEffortOnlyGoldenFrame) {
       0x00, 0x00, 0x00, 0x7F, 0xFF, 0x7F, 0xF9, 0x10};
   for (std::size_t index = 0; index < 8U; ++index) {
     EXPECT_EQ(sent.payload[index], expected[index]) << "byte " << index;
+  }
+}
+
+TEST_F(Ak30RuntimeTest, TorqueMissingFeedbackCannotTransmit) {
+  auto config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 0.1;
+  ASSERT_TRUE(write_authorized(runtime, command));
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+TEST_F(Ak30RuntimeTest, TorqueOverspeedCannotTransmitPendingCommand) {
+  auto config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 0.1;
+  ASSERT_TRUE(write_authorized(runtime, command));
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+TEST_F(Ak30RuntimeTest, TorqueRawSpeedLimitBothSignsAndExactBoundary) {
+  for (const std::int16_t erpm : {290, 300, 310, -290, -300, -310}) {
+    SCOPED_TRACE(erpm);
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.sub_mode = ForceControlSubMode::Torque;
+    config.torque_max_abs_erpm = 300.0;
+    RecordingTelemetry telemetry;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); },
+                                    config, &telemetry);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.effort = 0.1;
+    ASSERT_TRUE(write_authorized(runtime, command));
+    ASSERT_EQ(transport.inject_receive(speed_feedback(clock_, erpm)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    const bool safe = std::abs(erpm) <= 300;
+    EXPECT_EQ(runtime.read(states, 1U), safe);
+    EXPECT_EQ(transport.pending_transmit(), safe ? 1U : 0U);
+    ASSERT_FALSE(telemetry.events.empty());
+    EXPECT_TRUE(telemetry.events.front().raw_erpm_available);
+    EXPECT_DOUBLE_EQ(telemetry.events.front().raw_erpm, erpm);
+    EXPECT_EQ(telemetry.events.front().host_receive_sequence, 1U);
+    EXPECT_EQ(telemetry.events.front().host_rx_nanoseconds, clock_.now().nanoseconds());
+    // Torque's unsupported canonical velocity stays zero even at raw overspeed.
+    EXPECT_DOUBLE_EQ(states[0].velocity, 0.0);
+  }
+}
+
+TEST_F(Ak30RuntimeTest, TorqueCrossingStaysLatchedAcrossDrainAndClaimCancellation) {
+  auto config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  RecordingTelemetry telemetry;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config, &telemetry);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 0.1;
+  ASSERT_TRUE(write_authorized(runtime, command));
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 310)), TransportResult::Ok);
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_FALSE(runtime.read(states, 1U));
+  std::size_t frame_count = 0U;
+  for (const auto& event : telemetry.events) {
+    if (event.kind == FeedbackTelemetryKind::FeedbackFrame) ++frame_count;
+  }
+  EXPECT_EQ(frame_count, 2U);
+  runtime.cancel_pending(0U);
+  EXPECT_FALSE(runtime.has_valid_sample());
+  ASSERT_TRUE(write_authorized(runtime, command));
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(runtime.motor_command_frames(), 0U);
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+  runtime.stop();
+  ASSERT_TRUE(runtime.start());
+  // Explicit recovery still requires fresh observation before another command.
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states, 1U));
+  ASSERT_TRUE(write_authorized(runtime, command));
+  EXPECT_TRUE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 1U);
+}
+
+TEST_F(Ak30RuntimeTest, TorqueRejectsInvalidRawSpeedLimits) {
+  for (const double limit : {0.0, -1.0, std::nan(""),
+                            std::numeric_limits<double>::infinity()}) {
+    auto config = runtime_config();
+    config.sub_mode = ForceControlSubMode::Torque;
+    config.torque_max_abs_erpm = limit;
+    Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); }, config);
+    EXPECT_FALSE(runtime.configure(1U));
+  }
+}
+
+TEST_F(Ak30RuntimeTest, TorqueInvalidAndForeignFramesCannotProvideRawSpeed) {
+  for (int invalid = 0; invalid < 7; ++invalid) {
+    SCOPED_TRACE(invalid);
+    FakeTransport transport{16U};
+    RecordingTelemetry telemetry;
+    auto config = runtime_config();
+    config.sub_mode = ForceControlSubMode::Torque;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); },
+                                    config, &telemetry);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    auto frame = speed_feedback(clock_, 0);
+    switch (invalid) {
+      case 0: frame.logical_bus = 2U; break;
+      case 1: frame.id.value = feedback_can_id(kDriveId + 1U); break;
+      case 2: frame.payload_size = 7U; break;
+      case 3: frame.direction = FrameDirection::Tx; break;
+      case 4: frame.host_arrival = at(1); break;
+      case 5: frame.remote_request = true; break;
+      case 6: frame.error_frame = true; break;
+    }
+    ASSERT_EQ(transport.inject_receive(frame), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.effort = 0.1;
+    ASSERT_TRUE(write_authorized(runtime, command));
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    EXPECT_FALSE(runtime.read(states, 1U));
+    EXPECT_EQ(transport.pending_transmit(), 0U);
+    for (const auto& event : telemetry.events) EXPECT_FALSE(event.raw_erpm_available);
+  }
+}
+
+TEST_F(Ak30RuntimeTest, TorqueStaleFeedbackBlocksFreshCommandAndKeepsRawProvenance) {
+  auto config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  RecordingTelemetry telemetry;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config, &telemetry);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, -100)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(runtime.read(states, 1U));
+  clock_.set(config.feedback_ttl_nanoseconds + 1);
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 0.1;
+  ASSERT_TRUE(write_authorized(runtime, command));
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+  ASSERT_FALSE(telemetry.events.empty());
+  const auto& event = telemetry.events.back();
+  EXPECT_TRUE(event.raw_erpm_available);
+  EXPECT_DOUBLE_EQ(event.raw_erpm, -100.0);
+  EXPECT_EQ(event.host_receive_sequence, 1U);
+  EXPECT_EQ(event.host_rx_nanoseconds, 0);
+  EXPECT_EQ(event.quality, SampleQuality::Stale);
+}
+
+TEST_F(Ak30RuntimeTest, TorqueFeedbackExpiringBeforeSubmissionCannotTransmit) {
+  auto config = runtime_config();
+  config.sub_mode = ForceControlSubMode::Torque;
+  std::size_t clock_calls = 0U;
+  Ak30ForceControlRuntime runtime(*transport_, [&]() {
+    return at(++clock_calls <= 3U ? 0 : config.feedback_ttl_nanoseconds + 1);
+  }, config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  mech_hardware_ros2_control::CanonicalCommand command{};
+  command.effort = 0.1;
+  ASSERT_TRUE(write_authorized(runtime, command));
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_FALSE(runtime.has_valid_sample());
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+TEST_F(Ak30RuntimeTest, TorqueFaultBlocksCommandAndOutOfOrderFrameCannotRefreshSpeed) {
+  for (const bool fault : {false, true}) {
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.sub_mode = ForceControlSubMode::Torque;
+    RecordingTelemetry telemetry;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); },
+                                    config, &telemetry);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    clock_.set(1000000);
+    ASSERT_EQ(transport.inject_receive(speed_feedback(clock_, 100)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    auto frame = speed_feedback(clock_, 0);
+    if (fault) {
+      frame.payload[7] = 1U;
+    } else {
+      frame.host_arrival = at(0);
+      clock_.advance(config.feedback_ttl_nanoseconds + 1);
+    }
+    ASSERT_EQ(transport.inject_receive(frame), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.effort = 0.1;
+    ASSERT_TRUE(write_authorized(runtime, command));
+    EXPECT_FALSE(runtime.read(states, 1U));
+    EXPECT_EQ(transport.pending_transmit(), 0U);
+    const auto& event = telemetry.events.back();
+    EXPECT_TRUE(event.raw_erpm_available);
+    EXPECT_DOUBLE_EQ(event.raw_erpm, fault ? 0.0 : 100.0);
+    EXPECT_EQ(event.host_receive_sequence, fault ? 2U : 1U);
   }
 }
 
@@ -728,6 +956,7 @@ TEST_F(Ak30RuntimeTest, TorqueSubModeWatchdogFreezesThenFaults) {
   EXPECT_TRUE(write_authorized(runtime, command));
 
   clock_.set(2000000);
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
   mech_hardware_ros2_control::CanonicalState states[1] = {};
   EXPECT_TRUE(runtime.read(states, 1U));
   ASSERT_EQ(transport_->pending_transmit(), 1U);
@@ -744,6 +973,7 @@ TEST_F(Ak30RuntimeTest, TorqueSubModeWatchdogFreezesThenFaults) {
   EXPECT_EQ(transport_->pending_transmit(), 0U);
 
   clock_.set(8000001);
+  ASSERT_EQ(transport_->inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
   EXPECT_FALSE(runtime.read(states, 1U));
   EXPECT_TRUE(runtime.expired());
   EXPECT_EQ(transport_->pending_transmit(), 0U);

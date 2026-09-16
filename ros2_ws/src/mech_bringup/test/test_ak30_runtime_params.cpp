@@ -48,6 +48,18 @@ TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   EXPECT_EQ(parsed->device_path, "/dev/ttyACM0");
 }
 
+TEST(Ak30RuntimeParams, TorqueRequiresExplicitPositiveRawErpmLimit) {
+  Params params{{"device_path", "/dev/ttyACM0"}, {"sub_mode", "torque"}};
+  EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+  for (const auto* invalid : {"0", "-1", "nan", "inf", "", "300oops"}) {
+    SCOPED_TRACE(invalid);
+    params["torque_max_abs_erpm"] = invalid;
+    EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+  }
+  params["torque_max_abs_erpm"] = "300";
+  EXPECT_TRUE(Ak30RuntimeParams::parse(params).has_value());
+}
+
 // Since ADR-014 the sub-mode is an explicit parameter; the default stays
 // Position so existing deployments parse unchanged. The URDF command
 // interface must match (pinned offline by test_deployment_files.cpp).
@@ -68,9 +80,11 @@ TEST(Ak30RuntimeParams, SubModeDefaultsToPositionAndParsesAllThreeValues) {
   Params torque;
   torque["device_path"] = "/dev/ttyACM0";
   torque["sub_mode"] = "torque";
+  torque["torque_max_abs_erpm"] = "300";
   const auto parsed_torque = Ak30RuntimeParams::parse(torque);
   ASSERT_TRUE(parsed_torque.has_value());
   EXPECT_EQ(parsed_torque->config.sub_mode, ForceControlSubMode::Torque);
+  EXPECT_DOUBLE_EQ(parsed_torque->config.torque_max_abs_erpm, 300.0);
 
   Params explicit_position;
   explicit_position["device_path"] = "/dev/ttyACM0";

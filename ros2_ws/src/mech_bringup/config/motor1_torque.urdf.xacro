@@ -42,8 +42,9 @@
       <param name="logical_bus">1</param>
       <param name="drive_id">104</param>
       <param name="sub_mode">torque</param>
-      <param name="kp">1.0</param>
-      <param name="kd">1.0</param>
+      <param name="kp">0.0</param>
+      <param name="kd">0.0</param>
+      <param name="torque_max_abs_erpm">300.0</param>
       <param name="control_period_ns">2000000</param>
       <param name="command_ttl_ns">4000000</param>
       <param name="command_hard_ttl_ns">6000000</param>

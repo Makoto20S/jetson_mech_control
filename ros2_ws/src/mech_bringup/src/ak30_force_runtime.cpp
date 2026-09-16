@@ -40,6 +40,12 @@ using mech::mech_protocol_cubemars::mapping_is_sufficient;
 constexpr std::size_t kReceiveBudget = 8U;
 
 [[nodiscard]] bool config_is_valid(const Ak30RuntimeConfig& config) noexcept {
+  if (config.sub_mode ==
+          mech::mech_protocol_cubemars::ForceControlSubMode::Torque &&
+      (!std::isfinite(config.torque_max_abs_erpm) ||
+       config.torque_max_abs_erpm <= 0.0)) {
+    return false;
+  }
   if (config.drive_id > 255U || config.logical_bus == 0U ||
       config.control_period_nanoseconds <= 0 ||
       config.command_ttl_nanoseconds <= 0 ||
@@ -146,6 +152,8 @@ bool Ak30ForceControlRuntime::configure(
   last_status_ = mech::mech_control_core::StatusSnapshot{};
   has_valid_sample_ = false;
   has_observed_status_ = false;
+  raw_erpm_available_ = false;
+  torque_overspeed_latched_ = false;
   configured_ = true;
   return true;
 }
@@ -160,6 +168,8 @@ bool Ak30ForceControlRuntime::start() noexcept {
   if (session_.activate() != AdapterResult::Ok) {
     return false;
   }
+  raw_erpm_available_ = false;
+  torque_overspeed_latched_ = false;
   started_ = true;
   return true;
 }
@@ -179,6 +189,7 @@ void Ak30ForceControlRuntime::stop() noexcept {
   last_status_ = mech::mech_control_core::StatusSnapshot{};
   has_valid_sample_ = false;
   has_observed_status_ = false;
+  raw_erpm_available_ = false;
 }
 
 void Ak30ForceControlRuntime::capture_status(
@@ -194,6 +205,10 @@ void Ak30ForceControlRuntime::capture_status(
   event.quality = status.quality;
   event.device_state = status.device_state;
   event.raw_fault_code = status.raw_fault_code;
+  event.raw_erpm_available = raw_erpm_available_ &&
+      status.sequence == raw_erpm_status_.sequence &&
+      status.host_rx_time == raw_erpm_status_.host_rx_time;
+  if (event.raw_erpm_available) event.raw_erpm = raw_erpm_;
   event.host_rx_available = status.host_rx_time.has_value();
   if (event.host_rx_available) {
     event.host_rx_nanoseconds = status.host_rx_time->nanoseconds();
@@ -451,6 +466,13 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
   if (!started_ || states == nullptr || count != resource_count_) {
     return false;
   }
+  const bool torque_mode = config_.sub_mode ==
+      mech::mech_protocol_cubemars::ForceControlSubMode::Torque;
+  if (torque_overspeed_latched_) {
+    has_valid_sample_ = false;
+    capture_error(FeedbackTelemetryReason::TorqueOverspeed, clock_());
+    return false;
+  }
   // Drain received frames into the session. Receiving WouldBlock (no frame
   // this cycle) is the steady state, not an error.
   for (std::size_t index = 0; index < kReceiveBudget; ++index) {
@@ -466,6 +488,7 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
     // Observe after dequeue: a transport can stamp a frame while this read
     // cycle is draining, so the pre-drain cycle timestamp may be in its past.
     const MonotonicTime observed_at = clock_();
+    if (frame.logical_bus != config_.logical_bus) continue;
     const auto processed = session_.process(frame, observed_at);
     if (processed != AdapterResult::Ok &&
         processed != AdapterResult::InvalidCommand) {
@@ -477,6 +500,18 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
     }
     if (processed == AdapterResult::Ok) {
       const auto status = session_.snapshot(observed_at).status;
+      // Session acceptance proves shape, device identity and timestamp ordering.
+      // Reuse the wire decoder to retain the raw field that canonical Torque
+      // state deliberately cannot represent. Never derive ERPM from SI velocity.
+      mech::mech_protocol_cubemars::ForceControlPayload payload{};
+      for (std::size_t byte = 0; byte < payload.size(); ++byte) {
+        payload[byte] = frame.payload[byte];
+      }
+      mech::mech_protocol_cubemars::ForceControlFeedback feedback{};
+      mech::mech_protocol_cubemars::decode_feedback(payload, feedback);
+      raw_erpm_ = feedback.electrical_speed_erpm;
+      raw_erpm_status_ = status;
+      raw_erpm_available_ = true;
       last_status_ = status;
       capture_status(FeedbackTelemetryKind::FeedbackFrame,
                      FeedbackTelemetryReason::None, status, observed_at);
@@ -488,8 +523,17 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
         observed_status_ = status;
         has_observed_status_ = true;
       }
+      // Check every accepted frame, even when another frame is already queued.
+      // The crossing is a lifecycle latch; claim cancellation cannot clear it.
+      if (torque_mode && std::abs(raw_erpm_) > config_.torque_max_abs_erpm) {
+        torque_overspeed_latched_ = true;
+        has_valid_sample_ = false;
+        capture_error(FeedbackTelemetryReason::TorqueOverspeed, observed_at);
+      }
     }
   }
+
+  if (torque_overspeed_latched_) return false;
 
   if (session_.fault_latched()) {
     last_status_ = session_.snapshot(clock_()).status;
@@ -506,6 +550,20 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
   // submitting a fresh controller command so a target refreshed during lost
   // feedback cannot produce one final frame on the cycle that detects Stale.
   const MonotonicTime submission_now = clock_();
+  if (torque_mode) {
+    const auto status = session_.snapshot(submission_now).status;
+    const bool usable = raw_erpm_available_ && status.has_sample() &&
+        status.sequence == raw_erpm_status_.sequence &&
+        status.host_rx_time == raw_erpm_status_.host_rx_time &&
+        (status.quality == SampleQuality::Valid ||
+         status.quality == SampleQuality::Degraded) &&
+        !session_.fault_latched();
+    if (!usable && (have_pending_ || status.has_sample())) {
+      has_valid_sample_ = false;
+      capture_error(FeedbackTelemetryReason::TorqueSpeedUnavailable, submission_now);
+      return false;
+    }
+  }
   if (!submit_stored(submission_now)) {
     capture_error(FeedbackTelemetryReason::CommandSubmission, submission_now);
     return false;

@@ -82,7 +82,7 @@ class Ak30System::TelemetryWorker final : public FeedbackTelemetryCapture {
             rclcpp::get_logger("ak30_system"),
             "telemetry kind=%u reason=%u host_receive_seq=%lu host_rx_ns=%ld "
             "host_rx_available=%u observed_at_ns=%ld age_ns=%ld age_available=%u "
-            "quality=%s device_state=%u fault=%u "
+            "quality=%s device_state=%u fault=%u raw_erpm_available=%u raw_erpm=%.17g "
             "motor_command_frames=%lu pass_through_frames=%lu diagnostic_loss=%lu",
             static_cast<unsigned>(event.kind),
             static_cast<unsigned>(event.reason),
@@ -94,6 +94,7 @@ class Ak30System::TelemetryWorker final : public FeedbackTelemetryCapture {
             event.age_available ? 1U : 0U, quality_name(event.quality),
             static_cast<unsigned>(event.device_state),
             static_cast<unsigned>(event.raw_fault_code),
+            event.raw_erpm_available ? 1U : 0U, event.raw_erpm,
             static_cast<unsigned long>(event.motor_command_frames),
             static_cast<unsigned long>(event.pass_through_frames),
             static_cast<unsigned long>(event.diagnostic_loss_count));
