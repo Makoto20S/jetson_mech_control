@@ -54,7 +54,9 @@ not a travel limit: in Position sub-mode the applied torque is
 error bound is a `0.5 N*m` ceiling on the torque any controller can request.
 For scale, static friction on the unloaded shaft is about `0.2 N*m`. Missing,
 non-finite, `min >= max` or non-positive values reject configure before any
-device I/O; the other sub-modes do not take these parameters.
+device I/O. The other sub-modes do not require these parameters, but the set is
+all-or-nothing everywhere: once any one of the three appears, all three must be
+present and valid or configure fails.
 
 The check runs in the AK3.0 runtime before submission and never clamps. The
 absolute bounds are inclusive and are checked on every Position command; the

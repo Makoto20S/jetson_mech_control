@@ -48,11 +48,13 @@ encodable value.
 
 ## Decision / 决策
 
-1. **Three deployment parameters, canonical rad, required in Position
-   sub-mode:** `position_min_rad`, `position_max_rad`,
-   `position_max_error_rad`. Missing, non-finite, `min >= max` or
-   `error <= 0` rejects configure before any device I/O, in the order T3
-   established. Other sub-modes are unaffected.
+1. **Three deployment parameters, canonical rad:** `position_min_rad`,
+   `position_max_rad`, `position_max_error_rad`. They are **required in
+   Position sub-mode**. In Velocity and Torque they are optional, but the set
+   is all-or-nothing: once any one of the three appears, all three must be
+   present and valid. Missing, non-finite, `min >= max` or `error <= 0`
+   rejects initialization before any device I/O, in the order T3 established.
+   The envelope check itself runs only in Position sub-mode.
 2. **Absolute bounds are checked unconditionally** for every Position command
    in `submit_stored()`. The bounds are inclusive: a violation is
    `target < min` or `target > max`.
@@ -67,9 +69,10 @@ encodable value.
    that value ever leaves.
 5. **A violation latches.** The runtime sets its position-envelope latch,
    emits `FeedbackTelemetryReason::PositionEnvelope`, and `read()` fails every
-   cycle until `configure()`/`start()` runs. Claim cancellation does not clear
-   it. This is the same fail-closed rule the `torque_max_abs_erpm` overspeed
-   latch follows.
+   cycle until `configure()`/`start()` runs. It also clears
+   `has_valid_sample()`, so under ADR-016 the joint becomes unclaimable until
+   the lifecycle restarts. Claim cancellation does not clear it. This is the
+   same fail-closed rule the `torque_max_abs_erpm` overspeed latch follows.
 6. **The gate lives at the shared hardware layer, so it binds every
    controller** — in-house or upstream, strong tier or weak tier. ADR-014's
    interface shape, ADR-015's claim authorization, ADR-016's feedback gate and
@@ -114,8 +117,8 @@ number means a different N*m at a different `Kp`.
   An upstream controller with a wrong goal cannot ask for more than
   `position_max_error_rad * Kp`, and cannot travel outside the absolute bounds.
 - The weak-tier gap ADR-017 accepted keeps its likelihood but acquires a
-  bounded physical consequence, and is finally entered in the risk register as
-  `03_mvp_delivery_plan.md` §12 R23.
+  bounded physical consequence. It is registered as `03_mvp_delivery_plan.md`
+  §12 R23.
 - A violation is visible rather than absorbed: a telemetry reason plus a
   latched `read()` failure, not a silently altered command.
 
@@ -130,8 +133,9 @@ number means a different N*m at a different `Kp`.
   and recorded in `mech_bringup`'s README). Bench tooling must take its
   post-latch rest evidence from a fresh passive observation, not from a
   deactivation acknowledgement.
-- `03_mvp_delivery_plan.md` §6's "命令 watchdog" acceptance row is true for the
-  strong tier only and is annotated accordingly, pointing at R23.
+- `03_mvp_delivery_plan.md` §6's "命令 watchdog" criterion applies to the
+  strong tier only: it does not cover a weak-tier controller that stays active
+  while no longer producing new targets. That case is R23.
 - This bounds the consequence, not the cause. A silent-but-active weak-tier
   controller still holds its last command; the envelope limits how hard, not
   how long.

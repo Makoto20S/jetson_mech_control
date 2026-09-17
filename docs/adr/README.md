@@ -40,7 +40,7 @@ python3 tools/ci/check_adrs.py
 python3 tools/ci/context_check.py
 ```
 
-检查器验证全部十个 ADR 文件、状态枚举、必需章节、内部链接和规划入口的反向链接。它是文档结构检查，不替代后续 core、vcan、ARM64 或硬件验收。
+检查器验证全部十五个 ADR 文件、状态枚举、必需章节、内部链接和规划入口的反向链接。它是文档结构检查，不替代后续 core、vcan、ARM64 或硬件验收。
 
 ## Deferred candidates / 延后候选
 
