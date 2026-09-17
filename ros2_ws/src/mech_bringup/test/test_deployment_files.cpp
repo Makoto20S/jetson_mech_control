@@ -322,5 +322,43 @@ TEST_F(DeploymentFilesTest, PositionVariantShipsTheHardwareEnvelope) {
   }
 }
 
+// The hardware envelope and the controller's own clamp are two spellings of
+// one mechanical decision, written in two files that nothing else ties
+// together. They are allowed to differ in kind - the controller clamps, the
+// hardware refuses and latches - but not in value: a controller whose clamp
+// let a target past the hardware bound would turn an ordinary command into a
+// latched component, and a controller clamped tighter than the hardware would
+// leave the envelope untestable from the deployment.
+TEST_F(DeploymentFilesTest, PositionEnvelopeBoundsMatchControllerTargetBounds) {
+  const std::string& urdf = urdfs_["motor1.urdf.xacro"];
+  std::map<std::string, std::string> params;
+  std::size_t position = 0;
+  while (true) {
+    const auto hit = urdf.find("<param name=\"", position);
+    if (hit == std::string::npos) {
+      break;
+    }
+    const auto start = hit + 13;
+    const auto name_end = urdf.find('"', start);
+    ASSERT_NE(name_end, std::string::npos);
+    const auto value_start = urdf.find('>', name_end) + 1;
+    const auto value_end = urdf.find("</param>", value_start);
+    ASSERT_NE(value_end, std::string::npos);
+    params[urdf.substr(start, name_end - start)] =
+        urdf.substr(value_start, value_end - value_start);
+    position = value_end;
+  }
+  const auto parsed = Ak30RuntimeParams::parse(params);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_DOUBLE_EQ(parsed->config.position_min_rad, -12.0);
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_rad, 6.0);
+
+  // Matched against the shipped YAML text rather than a parsed controller
+  // config: this file is read by the controller's own parameter loading at
+  // runtime, and the point here is that the two files cannot drift.
+  EXPECT_NE(controllers_.find("minimum: -12.0"), std::string::npos);
+  EXPECT_NE(controllers_.find("maximum: 6.0"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace mech::mech_bringup

@@ -235,6 +235,12 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
   // after construction, so the override is in effect by the time it is read.
   [[nodiscard]] virtual bool strong_tier() const { return true; }
 
+  // Lets a derived fixture tighten the runtime configuration before the
+  // component is imported; the default is the shared runtime_config().
+  [[nodiscard]] virtual Ak30RuntimeConfig fixture_runtime_config() const {
+    return runtime_config();
+  }
+
   static void SetUpTestSuite() {
     if (!rclcpp::ok()) rclcpp::init(0, nullptr);
   }
@@ -249,7 +255,7 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
     // Inject before import_component: ResourceManager calls on_init() during
     // the import, and set_runtime() is rejected once initialized.
     ASSERT_TRUE(system->set_runtime(std::make_unique<Ak30ForceControlRuntime>(
-        *transport_, [this]() { return now(); }, runtime_config())));
+        *transport_, [this]() { return now(); }, fixture_runtime_config())));
 
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
     resources->import_component(std::move(system), hardware_info());
@@ -571,6 +577,46 @@ TEST_F(WeakTierIntegrationTest, WeakTierControllerKeepsSendingWhileSilent) {
   cycle(20);
   EXPECT_GT(transmitted(), after_first_command);
   EXPECT_EQ(controller_->writes(), 1U);
+}
+
+// ADR-019 through a real ControllerManager. The envelope is the answer to the
+// gap the test above pins: a weak-tier controller cannot be made trustworthy,
+// so the bound has to live in the hardware, below anything a controller can
+// reach. The tightened error bound here is what the fixture's own numbers
+// demand - the feedback frame decodes to about -4.19 rad and WriterController
+// targets 0.25, so 0.5 rad of allowed error puts the very first authorized
+// write outside the envelope.
+class WeakTierEnvelopeTest : public WeakTierIntegrationTest {
+ protected:
+  [[nodiscard]] Ak30RuntimeConfig fixture_runtime_config() const override {
+    auto config = runtime_config();
+    config.position_max_error_rad = 0.5;
+    return config;
+  }
+};
+
+// The controller writes throughout, and asserting that it did is half the
+// claim: without it, zero transmissions would equally describe a controller
+// that never commanded anything. What this test says is that the target WAS
+// written into the command interface and the hardware still put no frame on
+// the wire, and that nothing was clamped down to a reachable value instead.
+//
+// The refused deactivation is the observable for "the component latched".
+// Humble's ControllerManager exposes no resource-manager accessor, so the
+// component's state is only reachable through behaviour: a latched component
+// fails read(), its interfaces stop being available, and the manager therefore
+// refuses the STRICT switch that would stop the controller. A manager that
+// accepted this switch would mean the hardware was still healthy - i.e. the
+// envelope never fired.
+TEST_F(WeakTierEnvelopeTest, WeakTierControllerCannotEscapeTheEnvelope) {
+  establish_feedback();
+  controller_->allow_writes(kWritesUntilSilenced);
+  activate_controller();
+  cycle(20);
+  EXPECT_EQ(transmitted(), 0U);
+  EXPECT_GT(controller_->writes(), 0U);
+  EXPECT_NE(drive_switch({}, {kControllerName}),
+            controller_interface::return_type::OK);
 }
 
 }  // namespace
