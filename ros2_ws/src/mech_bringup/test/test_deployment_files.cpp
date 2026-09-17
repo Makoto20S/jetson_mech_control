@@ -303,5 +303,24 @@ TEST_F(DeploymentFilesTest, PositionControllerSpawnerIsNeverArmedActive) {
       << "; this guard is no longer guarding anything";
 }
 
+// ADR-019: the Position variant ships an explicit hardware envelope; the
+// Velocity and Torque variants do not carry position bounds they never use.
+TEST_F(DeploymentFilesTest, PositionVariantShipsTheHardwareEnvelope) {
+  for (const auto& variant : variants_) {
+    SCOPED_TRACE(variant.file);
+    const std::string& urdf = urdfs_[variant.file];
+    const bool position_mode = variant.sub_mode ==
+        mech::mech_protocol_cubemars::ForceControlSubMode::Position;
+    for (const auto& [key, value] :
+         std::vector<std::pair<std::string, std::string>>{
+             {"position_min_rad", "-12.0"},
+             {"position_max_rad", "6.0"},
+             {"position_max_error_rad", "0.5"}}) {
+      const auto tag = "<param name=\"" + key + "\">" + value + "</param>";
+      EXPECT_EQ(urdf.find(tag) != std::string::npos, position_mode) << key;
+    }
+  }
+}
+
 }  // namespace
 }  // namespace mech::mech_bringup

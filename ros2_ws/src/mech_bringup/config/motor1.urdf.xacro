@@ -36,6 +36,13 @@
       <param name="drive_id">104</param>
       <param name="kp">1.0</param>
       <param name="kd">1.0</param>
+      <!-- ADR-019 hardware envelope, canonical radians. The absolute bounds
+           equal the controller YAML's target bounds; the error bound is the
+           hardware ceiling on Kp * error, i.e. 0.5 N*m at kp = 1.0. A
+           command outside either is never sent and latches the runtime. -->
+      <param name="position_min_rad">-12.0</param>
+      <param name="position_max_rad">6.0</param>
+      <param name="position_max_error_rad">0.5</param>
       <param name="control_period_ns">2000000</param>
       <param name="command_ttl_ns">4000000</param>
       <param name="command_hard_ttl_ns">6000000</param>
