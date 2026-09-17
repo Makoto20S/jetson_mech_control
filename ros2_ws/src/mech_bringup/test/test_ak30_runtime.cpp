@@ -917,10 +917,10 @@ TEST_F(Ak30RuntimeTest, Ak30RuntimeConfigDefaultsSpanTheWireRange) {
 // 90 deg minus the provisional zero offset carried by Ak30Mapping{}.
 constexpr double kFixtureFeedbackPosition = 1.5707963267948966 - 5.760604931781636;
 
-// ADR-019: the absolute bounds are inclusive and are checked even before the
-// first feedback sample; the error bound needs a usable sample.
+// ADR-019: the absolute bounds are inclusive on both ends and are checked even
+// before the first feedback sample; the error bound needs a usable sample.
 TEST_F(Ak30RuntimeTest, PositionEnvelopeBoundsAreInclusive) {
-  for (const double target : {-4.5, -4.25, -4.0, -3.999, -4.001}) {
+  for (const double target : {-4.6, -4.501, -4.5, -4.25, -4.0, -3.999, -4.001}) {
     SCOPED_TRACE(target);
     FakeTransport transport{16U};
     auto config = runtime_config();

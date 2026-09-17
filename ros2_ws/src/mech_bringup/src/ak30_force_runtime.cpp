@@ -382,20 +382,23 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
     return false;
   }
   // ADR-019: the hardware-side envelope. Absolute bounds are checked
-  // unconditionally; the error bound needs a usable feedback sample, and
-  // ADR-016 already refuses to reach this point on stale feedback, so the
-  // only sample-less path is the never-sampled startup transient, where no
-  // claim can exist. Nothing is clamped: a violating target is dropped, the
-  // runtime latches, and read() keeps failing until the lifecycle restarts.
+  // unconditionally; the error bound needs a usable feedback sample, and the
+  // usability decision is the one publish_states() already made this cycle -
+  // re-deriving it from a later snapshot would let a sample that aged past
+  // the feedback TTL between the two clock reads turn the error bound off
+  // while still submitting the command. ADR-016 fails the whole read() on a
+  // sample that aged out after being seen, so the only path that reaches here
+  // without one is the never-sampled startup transient, where has_valid_sample()
+  // keeps the joint unclaimable and no command can exist. Nothing is clamped:
+  // a violating target is dropped, the runtime latches, and read() keeps
+  // failing until the lifecycle restarts.
   if (config_.sub_mode ==
       mech::mech_protocol_cubemars::ForceControlSubMode::Position) {
     const double target = pending_[0].position;
     const auto state = session_.snapshot(now);
-    const bool usable = state.status.quality == SampleQuality::Valid ||
-                        state.status.quality == SampleQuality::Degraded;
     const bool outside_bounds = target < config_.position_min_rad ||
                                 target > config_.position_max_rad;
-    const bool outside_error = usable &&
+    const bool outside_error = has_valid_sample_ &&
         std::abs(target - state.position) > config_.position_max_error_rad;
     if (outside_bounds || outside_error) {
       position_envelope_latched_ = true;
