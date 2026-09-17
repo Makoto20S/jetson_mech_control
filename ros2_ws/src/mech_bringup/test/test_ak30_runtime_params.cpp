@@ -29,6 +29,9 @@ TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   params["feedback_ttl_ns"] = "60000000";
   params["zero_offset_rad"] = "5.760604931781636";
   params["position_is_output_shaft"] = "true";
+  params["position_min_rad"] = "-12.0";
+  params["position_max_rad"] = "6.0";
+  params["position_max_error_rad"] = "0.5";
 
   const auto parsed = Ak30RuntimeParams::parse(params);
   ASSERT_TRUE(parsed.has_value());
@@ -60,12 +63,75 @@ TEST(Ak30RuntimeParams, TorqueRequiresExplicitPositiveRawErpmLimit) {
   EXPECT_TRUE(Ak30RuntimeParams::parse(params).has_value());
 }
 
+// ADR-019: Position sub-mode must state its hardware envelope explicitly.
+// The other two sub-modes accept the keys (a shared xacro may carry them) but
+// do not require them, mirroring torque_max_abs_erpm outside Torque.
+TEST(Ak30RuntimeParams, PositionRequiresExplicitFiniteEnvelope) {
+  Params params{{"device_path", "/dev/ttyACM0"}, {"sub_mode", "position"}};
+  EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+  params["position_min_rad"] = "-12.0";
+  EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+  params["position_max_rad"] = "6.0";
+  EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+  params["position_max_error_rad"] = "0.5";
+  const auto parsed = Ak30RuntimeParams::parse(params);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_DOUBLE_EQ(parsed->config.position_min_rad, -12.0);
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_rad, 6.0);
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_error_rad, 0.5);
+
+  // The implicit default sub-mode is Position too, so the bare map that used
+  // to parse now needs the envelope as well.
+  Params implicit{{"device_path", "/dev/ttyACM0"}};
+  EXPECT_FALSE(Ak30RuntimeParams::parse(implicit).has_value());
+}
+
+TEST(Ak30RuntimeParams, PositionEnvelopeRejectsNonFiniteOrderedOrZeroValues) {
+  const Params base{{"device_path", "/dev/ttyACM0"}, {"sub_mode", "position"},
+                    {"position_min_rad", "-1.0"}, {"position_max_rad", "1.0"},
+                    {"position_max_error_rad", "0.5"}};
+  ASSERT_TRUE(Ak30RuntimeParams::parse(base).has_value());
+  for (const auto* invalid : {"nan", "inf", "", "1.0oops"}) {
+    for (const auto* key : {"position_min_rad", "position_max_rad",
+                            "position_max_error_rad"}) {
+      SCOPED_TRACE(std::string(key) + "=" + invalid);
+      Params params = base;
+      params[key] = invalid;
+      EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+    }
+  }
+  Params reversed = base;
+  reversed["position_min_rad"] = "1.0";  // == max
+  EXPECT_FALSE(Ak30RuntimeParams::parse(reversed).has_value());
+  reversed["position_min_rad"] = "2.0";  // > max
+  EXPECT_FALSE(Ak30RuntimeParams::parse(reversed).has_value());
+  for (const auto* invalid : {"0", "-0.5"}) {
+    Params params = base;
+    params["position_max_error_rad"] = invalid;
+    EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value());
+  }
+}
+
+TEST(Ak30RuntimeParams, OtherSubModesAcceptButDoNotRequireTheEnvelope) {
+  Params velocity{{"device_path", "/dev/ttyACM0"}, {"sub_mode", "velocity"}};
+  EXPECT_TRUE(Ak30RuntimeParams::parse(velocity).has_value());
+  velocity["position_min_rad"] = "-1.0";
+  velocity["position_max_rad"] = "1.0";
+  velocity["position_max_error_rad"] = "0.5";
+  EXPECT_TRUE(Ak30RuntimeParams::parse(velocity).has_value());
+  velocity["position_max_error_rad"] = "0";  // still validated when present
+  EXPECT_FALSE(Ak30RuntimeParams::parse(velocity).has_value());
+}
+
 // Since ADR-014 the sub-mode is an explicit parameter; the default stays
 // Position so existing deployments parse unchanged. The URDF command
 // interface must match (pinned offline by test_deployment_files.cpp).
 TEST(Ak30RuntimeParams, SubModeDefaultsToPositionAndParsesAllThreeValues) {
   Params defaults;
   defaults["device_path"] = "/dev/ttyACM0";
+  defaults["position_min_rad"] = "-12.0";
+  defaults["position_max_rad"] = "6.0";
+  defaults["position_max_error_rad"] = "0.5";
   const auto parsed = Ak30RuntimeParams::parse(defaults);
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->config.sub_mode, ForceControlSubMode::Position);
@@ -89,6 +155,9 @@ TEST(Ak30RuntimeParams, SubModeDefaultsToPositionAndParsesAllThreeValues) {
   Params explicit_position;
   explicit_position["device_path"] = "/dev/ttyACM0";
   explicit_position["sub_mode"] = "position";
+  explicit_position["position_min_rad"] = "-12.0";
+  explicit_position["position_max_rad"] = "6.0";
+  explicit_position["position_max_error_rad"] = "0.5";
   const auto parsed_position = Ak30RuntimeParams::parse(explicit_position);
   ASSERT_TRUE(parsed_position.has_value());
   EXPECT_EQ(parsed_position->config.sub_mode, ForceControlSubMode::Position);
@@ -121,6 +190,9 @@ TEST(Ak30RuntimeParams, ExpectedCommandInterfaceNameMatchesSubMode) {
 TEST(Ak30RuntimeParams, DefaultsAreTheBenchEvidencedMotor1Values) {
   Params params;
   params["device_path"] = "/dev/ttyACM0";
+  params["position_min_rad"] = "-12.0";
+  params["position_max_rad"] = "6.0";
+  params["position_max_error_rad"] = "0.5";
   const auto parsed = Ak30RuntimeParams::parse(params);
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->config.drive_id, 104U);
@@ -192,6 +264,9 @@ TEST(Ak30RuntimeParams, DevicePathIsMandatory) {
 
   Params only_path;
   only_path["device_path"] = "/dev/ttyACM0";
+  only_path["position_min_rad"] = "-12.0";
+  only_path["position_max_rad"] = "6.0";
+  only_path["position_max_error_rad"] = "0.5";
   const auto ok = Ak30RuntimeParams::parse(only_path);
   ASSERT_TRUE(ok.has_value());
   EXPECT_EQ(ok->device_path, "/dev/ttyACM0");
@@ -205,6 +280,9 @@ TEST(Ak30RuntimeParams, DevicePathIsMandatory) {
 TEST(Ak30RuntimeParams, FeedbackTelemetryLogDefaultsOffAndIsOptIn) {
   Params params;
   params["device_path"] = "/dev/ttyACM0";
+  params["position_min_rad"] = "-12.0";
+  params["position_max_rad"] = "6.0";
+  params["position_max_error_rad"] = "0.5";
   const auto off = Ak30RuntimeParams::parse(params);
   ASSERT_TRUE(off.has_value());
   EXPECT_FALSE(off->feedback_telemetry_log)

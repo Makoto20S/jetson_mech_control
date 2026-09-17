@@ -98,6 +98,16 @@ struct Ak30RuntimeConfig final {
   // Device-native electrical RPM, independent of unsupported Torque SI velocity.
   // Deployments must explicitly provide this positive limit.
   double torque_max_abs_erpm{300.0};
+  // ADR-019: hardware-side position envelope, Position sub-mode only, in
+  // canonical radians. A target outside [min, max] or farther than
+  // max_error from the latest usable feedback position is never sent and
+  // latches the runtime. Deployments must set all three explicitly (the
+  // parser enforces it); the code defaults only span the wire's own
+  // +/-12.56 rad range so unit tests written before ADR-019 keep exercising
+  // the watchdog without an envelope in the way.
+  double position_min_rad{-12.56};
+  double position_max_rad{12.56};
+  double position_max_error_rad{25.12};
 };
 
 // The first production consumer of Ak30ForceControlSession::command_stage()
