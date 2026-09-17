@@ -391,16 +391,24 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
   // without one is the never-sampled startup transient, where has_valid_sample()
   // keeps the joint unclaimable and no command can exist. Nothing is clamped:
   // a violating target is dropped, the runtime latches, and read() keeps
-  // failing until the lifecycle restarts.
+  // failing until the lifecycle restarts. A command that outlived its deadline
+  // was already dropped just above, so an expired target never reaches this
+  // gate and is reported as CommandSubmission, not PositionEnvelope; read()
+  // fails either way, only the telemetry reason differs.
   if (config_.sub_mode ==
       mech::mech_protocol_cubemars::ForceControlSubMode::Position) {
     const double target = pending_[0].position;
     const auto state = session_.snapshot(now);
+    // A target the envelope cannot evaluate is treated as outside it: both
+    // comparisons below are false for NaN, so without this the gate would pass
+    // a value it never checked. write() already refuses non-finite input, so
+    // this is the gate refusing to depend on the layer above it.
+    const bool unevaluable = !std::isfinite(target);
     const bool outside_bounds = target < config_.position_min_rad ||
                                 target > config_.position_max_rad;
     const bool outside_error = has_valid_sample_ &&
         std::abs(target - state.position) > config_.position_max_error_rad;
-    if (outside_bounds || outside_error) {
+    if (unevaluable || outside_bounds || outside_error) {
       position_envelope_latched_ = true;
       has_valid_sample_ = false;
       pending_[0] = CanonicalCommand{};

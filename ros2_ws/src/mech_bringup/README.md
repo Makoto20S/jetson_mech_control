@@ -77,6 +77,32 @@ observation. See
 [ADR-019](../../../docs/adr/ADR-019-hardware-position-envelope.md); its status
 is Proposed and no bench evidence for the envelope exists yet.
 
+### What the error bound costs this deployment
+
+The absolute bounds are unchanged from what the controller YAML already
+enforced. The error bound is new, and at motor1's shipped `Kp = 1` it is a real
+limit on how far a bench move may reach, not a formality:
+
+- Bench tracking error is roughly equal to the commanded travel. On 2026-09-15
+  a `+10 deg` target moved the shaft `0.2 deg` and settled at `9.8 deg` of
+  error (`0.171 rad`); the `+30 deg` run settled at `15.7 deg`.
+- `PositionCommandController` ramps its command open-loop at
+  `max_slew_per_second: 2.0 rad/s`, regardless of where the shaft actually is.
+  It does not wait for the shaft to catch up.
+
+Together, under the shipped `position_max_error_rad = 0.5`, a single target
+more than about `0.5 rad` (`29 deg`) from the current position latches the
+hardware part way through the ramp, and STRICT deactivation is then refused
+until the controller manager is restarted (the T9 finding above). The
+`2.0 rad/s` slew rate is not reachable under this envelope at `Kp = 1`: with
+`Kd = 1` and zero commanded velocity, holding `2 rad/s` would need more than
+`2 rad` of error.
+
+The `0.5 rad` value is the owner-approved one and is kept, because it is the
+torque ceiling (`0.5 N*m` at `Kp = 1`), not a travel budget. Bench procedures
+must plan each move to stay inside it — the T10 trajectory's `0.1745 rad` step
+is inside.
+
 ## T8 velocity deployment
 
 Use the separate `launch/motor1_velocity_bringup.launch.py` with

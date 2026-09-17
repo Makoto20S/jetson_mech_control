@@ -966,7 +966,13 @@ TEST_F(Ak30RuntimeTest, PositionEnvelopeErrorBoundBothSigns) {
     ASSERT_TRUE(runtime.read(states, 1U));
     ASSERT_NEAR(states[0].position, kFixtureFeedbackPosition, 1e-9);
     mech_hardware_ros2_control::CanonicalCommand command{};
-    command.position = kFixtureFeedbackPosition + delta;
+    // Built from the measured value the runtime just published, not from the
+    // constant above: the exact +/-0.5 rows assert the bound is inclusive, and
+    // that claim only holds if the subtraction the runtime performs is exact.
+    // At this magnitude (p ~ -4.19) the double (p + 0.5) - p is exact, so the
+    // comparison lands on the bound rather than one ulp past it; against a
+    // constant that merely rounds to the decoded position it would not.
+    command.position = states[0].position + delta;
     ASSERT_TRUE(write_authorized(runtime, command));
     const bool inside = std::abs(delta) <= 0.5;
     EXPECT_EQ(runtime.read(states, 1U), inside);
@@ -974,8 +980,50 @@ TEST_F(Ak30RuntimeTest, PositionEnvelopeErrorBoundBothSigns) {
   }
 }
 
-TEST_F(Ak30RuntimeTest, PositionEnvelopeLatchSurvivesCancelAndInRangeCommand) {
-  auto config = runtime_config();
+// ADR-019, the unevaluable target. The envelope's own comparisons are both
+// false for a NaN target, so the gate now treats "cannot evaluate" as a
+// violation. This test pins the FIRST wall, not that branch: write() validates
+// the sub-mode's consumed field, so a non-finite position is refused before it
+// can ever become a pending command. The envelope's isfinite() guard is
+// therefore defence in depth against a future path into pending_, and cannot
+// be reached through the public interface - keeping this test at the write()
+// level records which layer actually holds today, instead of asserting a
+// branch no caller can exercise.
+TEST_F(Ak30RuntimeTest, PositionEnvelopeNonFiniteTargetIsRefusedBeforeTheGate) {
+  for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+    SCOPED_TRACE(bad);
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.position_max_error_rad = 0.5;
+    RecordingTelemetry telemetry;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); },
+                                    config, &telemetry);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.position = bad;
+    EXPECT_FALSE(write_authorized(runtime, command));
+    EXPECT_EQ(transport.pending_transmit(), 0U);
+    EXPECT_EQ(runtime.motor_command_frames(), 0U);
+    // No latch: the value was rejected as a command, not as an envelope
+    // violation, so a later in-range target must still be accepted.
+    mech_hardware_ros2_control::CanonicalCommand good{};
+    good.position = states[0].position + 0.1;
+    ASSERT_TRUE(write_authorized(runtime, good));
+    EXPECT_TRUE(runtime.read(states, 1U));
+    EXPECT_EQ(runtime.motor_command_frames(), 1U);
+    for (const auto& event : telemetry.events) {
+      EXPECT_NE(event.reason, FeedbackTelemetryReason::PositionEnvelope);
+    }
+  }
+}
+
+TEST_F(Ak30RuntimeTest, PositionEnvelopeLatchSurvivesCancelAndInRangeCommand) {  auto config = runtime_config();
   config.position_max_error_rad = 0.5;
   RecordingTelemetry telemetry;
   Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },

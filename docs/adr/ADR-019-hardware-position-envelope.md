@@ -54,7 +54,7 @@ encodable value.
    Position sub-mode**. In Velocity and Torque they are optional, but the set
    is all-or-nothing: once any one of the three appears, all three must be
    present and valid. Missing, non-finite, `min >= max` or `error <= 0`
-   rejects initialization before any device I/O, in the order T3 established.
+   rejects initialization before any device I/O, in `on_init`.
    The envelope check itself runs only in Position sub-mode.
 2. **Absolute bounds are checked unconditionally** for every Position command
    in `submit_stored()`. The bounds are inclusive: a violation is
@@ -79,8 +79,9 @@ encodable value.
    interface shape, ADR-015's claim authorization, ADR-016's feedback gate and
    ADR-017's two tiers are unchanged.
 7. **motor1 ships `-12.0 / 6.0 / 0.5`** in `config/motor1.urdf.xacro`. The
-   absolute bounds match the existing controller YAML, so
-   `PositionCommandController` behaviour is unchanged; the error bound is new.
+   absolute bounds match the existing controller YAML and add nothing beyond
+   it; the error bound is new, and it is a real limit on the shipped
+   deployment's reach — see Consequences/Negative.
 
 ## Physical meaning / 物理含义
 
@@ -89,6 +90,13 @@ Because the applied torque is `Kp * (command - measured)`,
 hardware for. At motor1's `Kp = 1 N*m/rad` the shipped `0.5 rad` means
 `0.5 N*m`. For scale: static friction on the unloaded shaft is about
 `0.2 N*m`, and that torque produced roughly `28 rad/s^2` after breakaway.
+
+The ceiling bounds what a controller may **request**; it does not bound what
+the device does afterwards. Once a command is accepted the drive holds that
+target on its own, so if an external force displaces the shaft while no new
+frame is being accepted — the moments right after a latch, for instance — the
+device-side torque `Kp * (last_command - position)` can grow past the ceiling
+until the drive's own 1000 ms loss-of-control timeout releases it.
 
 The absolute bounds are a travel limit; the error bound is a force limit. The
 ceiling is a product, not a property of the envelope alone — the same rad
@@ -129,6 +137,24 @@ number means a different N*m at a different `Kp`.
   instance — latches the whole component, not just that one command. Choosing
   the bound trades reach against the torque ceiling; there is no value that
   avoids both failure modes.
+- **The shipped deployment's reach is materially reduced, and the numbers say
+  by how much.** At `Kp = 1` the bench tracking error is roughly equal to the
+  commanded travel: on 2026-09-15 a `+10 deg` target moved the shaft `0.2 deg`
+  and settled at `9.8 deg` of error (`0.171 rad`), and the `+30 deg` run
+  settled at `15.7 deg`. `PositionCommandController` meanwhile ramps its
+  command open-loop at `max_slew_per_second: 2.0 rad/s` regardless of where the
+  shaft is. Under the shipped `position_max_error_rad = 0.5`, therefore, a
+  single target farther than about `0.5 rad` (`29 deg`) from the current
+  position latches the hardware mid-travel, after which STRICT deactivation is
+  refused until the controller manager restarts (the T9 finding below). The
+  `2.0 rad/s` slew is not reachable under this envelope at `Kp = 1` at all:
+  with `Kd = 1` and zero commanded velocity, sustaining `2 rad/s` would need
+  more than `2 rad` of error. The absolute bounds are unchanged; this is the
+  error bound alone, and it is a new, deliberate limit on the shipped
+  deployment rather than a restatement of what the controller YAML already did.
+  The owner-approved `0.5` is kept because it is the torque ceiling
+  (`0.5 N*m`), not a travel budget — bench procedures must plan each move to
+  stay inside it, and the T10 trajectory's `0.1745 rad` step does.
 - Once the latch fails `read()` closed, ros2_control moves the hardware into
   its error state and **refuses STRICT deactivation** (observed on the T9 bench
   and recorded in `mech_bringup`'s README). Bench tooling must take its

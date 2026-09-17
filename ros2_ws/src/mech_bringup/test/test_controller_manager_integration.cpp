@@ -68,6 +68,18 @@ constexpr std::int64_t kFeedbackPeriodNs = 20000000;
 // WriterController::allow_writes() for why a small fixed budget is unsafe.
 constexpr std::size_t kWritesUntilSilenced = 100000U;
 
+// Records every telemetry event the runtime emits. try_push() runs inside
+// read(), i.e. on the thread driving the manager loop, and every read of
+// events happens after cycling stops - so the plain vector needs no guard.
+class RecordingTelemetry final : public FeedbackTelemetryCapture {
+ public:
+  bool try_push(const FeedbackTelemetryEvent& event) noexcept override {
+    events.push_back(event);
+    return true;
+  }
+  std::vector<FeedbackTelemetryEvent> events;
+};
+
 [[nodiscard]] Ak30RuntimeConfig runtime_config() {
   Ak30RuntimeConfig config{};
   config.drive_id = kDriveId;
@@ -241,6 +253,14 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
     return runtime_config();
   }
 
+  // Telemetry sink handed to the runtime at construction. Null by default, so
+  // the existing cases keep the production-shaped "no sink" wiring; a derived
+  // fixture that needs the failure REASON out of the hardware returns its own
+  // recorder. Such a recorder must outlive the runtime: TearDown drops
+  // manager_ (and with it the ResourceManager that owns the runtime) before
+  // any member of a derived fixture is destroyed.
+  [[nodiscard]] virtual FeedbackTelemetryCapture* telemetry() { return nullptr; }
+
   static void SetUpTestSuite() {
     if (!rclcpp::ok()) rclcpp::init(0, nullptr);
   }
@@ -255,7 +275,8 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
     // Inject before import_component: ResourceManager calls on_init() during
     // the import, and set_runtime() is rejected once initialized.
     ASSERT_TRUE(system->set_runtime(std::make_unique<Ak30ForceControlRuntime>(
-        *transport_, [this]() { return now(); }, fixture_runtime_config())));
+        *transport_, [this]() { return now(); }, fixture_runtime_config(),
+        telemetry())));
 
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
     resources->import_component(std::move(system), hardware_info());
@@ -593,6 +614,15 @@ class WeakTierEnvelopeTest : public WeakTierIntegrationTest {
     config.position_max_error_rad = 0.5;
     return config;
   }
+
+  // Declared here rather than in the base so only this case pays for it; the
+  // base's TearDown releases the manager before this member dies, which is
+  // what keeps the runtime from writing into a destroyed recorder.
+  [[nodiscard]] FeedbackTelemetryCapture* telemetry() override {
+    return &telemetry_;
+  }
+
+  RecordingTelemetry telemetry_;
 };
 
 // The controller writes throughout, and asserting that it did is half the
@@ -608,6 +638,14 @@ class WeakTierEnvelopeTest : public WeakTierIntegrationTest {
 // refuses the STRICT switch that would stop the controller. A manager that
 // accepted this switch would mean the hardware was still healthy - i.e. the
 // envelope never fired.
+//
+// On its own, though, a refusal only says the component failed, and every
+// other fail-closed rule in this stack (ADR-012 expiry, ADR-016 feedback
+// quality) produces the same refusal. The telemetry reason is what separates
+// them, so it is asserted here. The controller staying ACTIVE after the
+// refused switch is the second half - the manager did not partially apply the
+// switch, so the claim is still held and the refusal is about the hardware,
+// not the controller.
 TEST_F(WeakTierEnvelopeTest, WeakTierControllerCannotEscapeTheEnvelope) {
   establish_feedback();
   controller_->allow_writes(kWritesUntilSilenced);
@@ -617,6 +655,17 @@ TEST_F(WeakTierEnvelopeTest, WeakTierControllerCannotEscapeTheEnvelope) {
   EXPECT_GT(controller_->writes(), 0U);
   EXPECT_NE(drive_switch({}, {kControllerName}),
             controller_interface::return_type::OK);
+  EXPECT_EQ(controller_->get_state().id(),
+            lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
+
+  std::size_t envelope_errors = 0U;
+  for (const auto& event : telemetry_.events) {
+    if (event.kind == FeedbackTelemetryKind::RuntimeError &&
+        event.reason == FeedbackTelemetryReason::PositionEnvelope) {
+      ++envelope_errors;
+    }
+  }
+  EXPECT_GT(envelope_errors, 0U);
 }
 
 }  // namespace
