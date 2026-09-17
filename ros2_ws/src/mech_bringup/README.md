@@ -99,7 +99,22 @@ Optional feedback telemetry includes `raw_erpm_available` and `raw_erpm`, tied
 to accepted RX sequence/time. These are device diagnostics, not a promotion of
 Torque mode's unsupported canonical velocity. Tools must reject missing/stale
 diagnostics and never use placeholder velocity/position as rest evidence.
-Real effort-controller acceptance requires its own approved bounded trial.
+
+Bench acceptance on motor1 (2026-09-17, unloaded shaft, Kp=Kd=0): a zero-effort
+1 s trial completed the full activate/zero/rest/deactivate cycle, and a
++0.2 N*m trial with a 5000 ERPM ceiling echoed 0.21-0.22 N*m while static
+friction held the shaft, then accelerated at roughly 28 rad/s^2 after breakaway
+and latched the overspeed guard within 0.2 s. Pure torque with no damping and
+no load has no steady speed, so any raw ceiling below the motor's own limit
+ends such a run; a sustained visible spin needs a damping term or a load.
+
+Once the overspeed latch fails `read()` closed, ros2_control moves the hardware
+into its error state. A subsequent STRICT deactivation of the effort controller
+is rejected there ("Not acceptable command interfaces combination") and the
+controller's update returns errors until the manager is shut down; submission
+has already stopped and the shaft coasts. Bench tooling must therefore obtain
+its post-latch rest evidence from a fresh passive observation instead of from
+the deactivation acknowledgement. Physical force accuracy still needs metrology.
 
 ## Safety boundary
 
