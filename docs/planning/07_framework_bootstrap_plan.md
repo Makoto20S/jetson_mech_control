@@ -260,6 +260,7 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 | [ADR-016](../adr/ADR-016-feedback-quality-fail-closed.md) | Accepted | 反馈质量失效关闭：未知/陈旧/无效不得填零；陈旧与无效锁存故障；从未采样时关节不可被 claim；反馈有效期不得小于设备回报周期（默认 6 ms 与实测约 50 Hz 回报不自洽） |
 | [ADR-017](../adr/ADR-017-command-freshness-generation-interface.md) | Accepted | 命令新鲜度两档代号接口：硬件层无法观测「是否有人写过」裸 `double*`，改由每关节一个始终导出、可选 claim 的 `command_generation` 接口承载。claim 了的走强档（代号不变即不发送），没 claim 的走弱档并把缺口登记为已接受风险——强制版本已被否决，因为它会让第三方控制器无法驱动本硬件 |
 | [ADR-018](../adr/ADR-018-upstream-target-lifetime.md) | Accepted | `PositionCommandController` 上游目标暂定 100/106 ms，支持 20–50 Hz policy producer；硬件命令租约保持 4/6 ms，标准控制器弱档兼容性不变；Jetson 无设备测量不得表述为硬实时上界 |
+| [ADR-019](../adr/ADR-019-hardware-position-envelope.md) | Proposed | Position 子模式的硬件位置包络：绝对区间（含端点）与相对最新可用反馈的 `position_max_error_rad`，越界不裁剪、不发送、锁存并由生命周期清除；闸门在共享硬件层，第三方控制器同样受约束，`position_max_error_rad × Kp` 构成命令力矩上限。实机证据尚缺，台架通过后才转 Accepted |
 
 七份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
 

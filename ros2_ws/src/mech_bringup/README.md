@@ -42,6 +42,38 @@ all three deployment xacro examples load it.
   commented out: uncommenting it arms position commands, which stay
   gated by ADR-006 and per-test owner authorization.
 
+## Position deployment envelope (ADR-019)
+
+`config/motor1.urdf.xacro` requires three hardware parameters in Position
+sub-mode: `position_min_rad` and `position_max_rad` (motor1 example: `-12.0`
+and `6.0`) bound where the shaft may be commanded to go, and
+`position_max_error_rad` (motor1 example: `0.5`) bounds how far a command may
+sit from the latest usable feedback position. The second one is a force limit,
+not a travel limit: in Position sub-mode the applied torque is
+`Kp * (command - measured)`, so with motor1's `Kp = 1 N*m/rad` a `0.5 rad`
+error bound is a `0.5 N*m` ceiling on the torque any controller can request.
+For scale, static friction on the unloaded shaft is about `0.2 N*m`. Missing,
+non-finite, `min >= max` or non-positive values reject configure before any
+device I/O; the other sub-modes do not take these parameters.
+
+The check runs in the AK3.0 runtime before submission and never clamps. The
+absolute bounds are inclusive and are checked on every Position command; the
+error bound is evaluated only on cycles where the feedback sample was judged
+usable, so a command is never compared against a stale or absent number. A
+violation drops the command — no frame carrying that value is transmitted —
+latches the runtime, emits the `PositionEnvelope` telemetry reason, and makes
+`read()` fail every cycle until `configure()`/`start()` runs. Claim
+cancellation does not clear the latch. Because the gate sits in the shared
+hardware layer, it binds **every** controller that claims the joint, including
+upstream `ros2_control` controllers that the project did not write; that is the
+point of it. The post-latch behaviour is the same one the T9 overspeed latch
+showed (see [T9 effort deployment](#t9-effort-deployment)): ros2_control moves
+the hardware into its error state and rejects STRICT deactivation there, so
+bench tooling must take post-latch rest evidence from a fresh passive
+observation. See
+[ADR-019](../../../docs/adr/ADR-019-hardware-position-envelope.md); its status
+is Proposed and no bench evidence for the envelope exists yet.
+
 ## T8 velocity deployment
 
 Use the separate `launch/motor1_velocity_bringup.launch.py` with
