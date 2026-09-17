@@ -22,6 +22,7 @@ const std::set<std::string>& known_keys() noexcept {
       "drive_id",
       "device_id",
       "sub_mode",
+      "torque_max_abs_erpm",
       "kp",
       "kd",
       "control_period_ns",
@@ -151,6 +152,14 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
     } else {
       return std::nullopt;
     }
+  }
+  if (const auto it = params.find("torque_max_abs_erpm"); it != params.end()) {
+    double value = 0.0;
+    if (!parse_double(it->second, value) || value <= 0.0) return std::nullopt;
+    config.torque_max_abs_erpm = value;
+  } else if (config.sub_mode ==
+             mech::mech_protocol_cubemars::ForceControlSubMode::Torque) {
+    return std::nullopt;
   }
   if (const auto it = params.find("kp"); it != params.end()) {
     double value = 0.0;

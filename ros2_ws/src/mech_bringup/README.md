@@ -71,6 +71,51 @@ See [controller semantics](../mech_controllers/README.md) for target lifetime,
 activation and recovery. Real velocity-controller acceptance remains a separate
 authorized bench task; offline frame mapping does not establish physical limits.
 
+## T9 effort deployment
+
+`launch/motor1_effort_bringup.launch.py` pairs `motor1_torque.urdf.xacro` with
+`motor1_effort_controllers.yaml`, serializes the spawners and loads the effort
+controller inactive. It opens the physical transport when executed; constructing
+the launch description in an offline test does not. The fixed Torque profile
+uses Kp=Kd=0 and only the effort field. No hot mode switching is supported.
+
+Targets arrive on `/motor1_effort_controller/target_effort` as Float64 in N*m.
+Example limits are +/-0.1 N*m and 0.2 N*m/s, with upstream TTL100/106 ms and
+hardware lease4/6 ms. Normal zero return must continue publishing through the
+ramp and verify coast-down using fresh raw ERPM; neither zero effort nor
+deactivation guarantees a mechanical stop. Physical force accuracy needs
+independent metrology; the exported effort is estimated from Iq and Kt.
+
+Torque deployments require an explicit finite positive `torque_max_abs_erpm`
+hardware parameter (motor1 example:300). The AK3.0 runtime checks raw signed
+ERPM from accepted feedback before submitting pending torque. Exceeding the
+absolute limit latches a host fault and stops submission, including when a
+later sample in the same drain is below the limit. Claim cancellation cannot
+clear that fault. Feedback loss remains subject to the60 ms validity window.
+This guard is sample-based and stops sending; it does not brake, guarantee a
+physical speed bound or replace local emergency power removal.
+
+Optional feedback telemetry includes `raw_erpm_available` and `raw_erpm`, tied
+to accepted RX sequence/time. These are device diagnostics, not a promotion of
+Torque mode's unsupported canonical velocity. Tools must reject missing/stale
+diagnostics and never use placeholder velocity/position as rest evidence.
+
+Bench acceptance on motor1 (2026-09-17, unloaded shaft, Kp=Kd=0): a zero-effort
+1 s trial completed the full activate/zero/rest/deactivate cycle, and a
++0.2 N*m trial with a 5000 ERPM ceiling echoed 0.21-0.22 N*m while static
+friction held the shaft, then accelerated at roughly 28 rad/s^2 after breakaway
+and latched the overspeed guard within 0.2 s. Pure torque with no damping and
+no load has no steady speed, so any raw ceiling below the motor's own limit
+ends such a run; a sustained visible spin needs a damping term or a load.
+
+Once the overspeed latch fails `read()` closed, ros2_control moves the hardware
+into its error state. A subsequent STRICT deactivation of the effort controller
+is rejected there ("Not acceptable command interfaces combination") and the
+controller's update returns errors until the manager is shut down; submission
+has already stopped and the shaft coasts. Bench tooling must therefore obtain
+its post-latch rest evidence from a fresh passive observation instead of from
+the deactivation acknowledgement. Physical force accuracy still needs metrology.
+
 ## Safety boundary
 
 No default build or test opens a serial device or sends a CAN frame. All

@@ -98,8 +98,14 @@ class TestClock final {
 // configured 50 Hz against a 500 Hz loop, so the first sample is about ten
 // cycles away and a controller must wait for it.
 [[nodiscard]] bool establish_feedback(CompositeSystem& system,
-                                      FakeTransport& transport) {
-  if (transport.inject_receive(feedback_frame(0)) != TransportResult::Ok) {
+                                      FakeTransport& transport,
+                                      bool stationary = false) {
+  auto frame = feedback_frame(0);
+  if (stationary) {
+    frame.payload[2] = 0U;
+    frame.payload[3] = 0U;
+  }
+  if (transport.inject_receive(frame) != TransportResult::Ok) {
     return false;
   }
   return system.read(rclcpp::Time(0),
@@ -388,7 +394,7 @@ TEST_P(Ak30SubModeSystemTest, RoundTripsThroughTheSubModeCommandInterface) {
             hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(system.on_activate(lifecycle_state()),
             hardware_interface::CallbackReturn::SUCCESS);
-  ASSERT_TRUE(establish_feedback(system, transport));
+  ASSERT_TRUE(establish_feedback(system, transport, true));
   const std::vector<std::string> claim{
       std::string("motor1_joint/") + command_interface};
   ASSERT_EQ(system.prepare_command_mode_switch(claim, {}),
@@ -437,8 +443,12 @@ TEST_P(Ak30SubModeSystemTest, RoundTripsThroughTheSubModeCommandInterface) {
 
   // Feedback decodes into the exported state interfaces; Torque's B4 gate
   // means position/velocity are zero-filled and only effort is evidenced.
-  ASSERT_EQ(transport.inject_receive(feedback_frame(clock.now().nanoseconds())),
-            TransportResult::Ok);
+  auto feedback = feedback_frame(clock.now().nanoseconds());
+  if (sub_mode == mech::mech_protocol_cubemars::ForceControlSubMode::Torque) {
+    feedback.payload[2] = 0U;
+    feedback.payload[3] = 0U;
+  }
+  ASSERT_EQ(transport.inject_receive(feedback), TransportResult::Ok);
   clock.set(6000000);
   EXPECT_EQ(system.read(time, period), hardware_interface::return_type::OK);
   if (sub_mode == mech::mech_protocol_cubemars::ForceControlSubMode::Torque) {

@@ -136,6 +136,7 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
     const std::string& sub_mode) {
   auto params = valid_params();
   params["sub_mode"] = sub_mode;
+  if (sub_mode == "torque") params["torque_max_abs_erpm"] = "300";
   return params;
 }
 
@@ -567,9 +568,12 @@ TEST_F(Ak30SystemPluginTest, TelemetryIsEmittedOncePerNewFeedbackFrame) {
     EXPECT_EQ(records[0].kind, FeedbackTelemetryKind::StatusTransition);
     EXPECT_EQ(records[0].quality,
               mech::mech_control_core::SampleQuality::Unknown);
+    EXPECT_FALSE(records[0].raw_erpm_available);
     EXPECT_EQ(records[1].kind, FeedbackTelemetryKind::FeedbackFrame);
     EXPECT_EQ(records[1].host_receive_sequence, 1U);
     EXPECT_TRUE(records[1].host_rx_nanoseconds != 0);
+    EXPECT_TRUE(records[1].raw_erpm_available);
+    EXPECT_DOUBLE_EQ(records[1].raw_erpm, 10000.0);
     EXPECT_EQ(records[2].kind, FeedbackTelemetryKind::StatusTransition);
   }
 

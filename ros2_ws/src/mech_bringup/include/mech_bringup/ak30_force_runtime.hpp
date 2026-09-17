@@ -30,6 +30,8 @@ enum class FeedbackTelemetryReason : std::uint8_t {
   Deactivate,
   Error,
   Cleanup,
+  TorqueOverspeed,
+  TorqueSpeedUnavailable,
 };
 
 struct FeedbackTelemetryEvent final {
@@ -43,10 +45,14 @@ struct FeedbackTelemetryEvent final {
   std::uint64_t pass_through_frames{0U};
   std::uint64_t diagnostic_loss_count{0U};
   std::uint32_t raw_fault_code{0U};
+  double raw_erpm{0.0};
   mech::mech_control_core::SampleQuality quality{};
   mech::mech_control_core::DeviceState device_state{};
   bool host_rx_available{false};
   bool age_available{false};
+  // Present only when this event's sequence/time identify an accepted frame.
+  // Freshness and fault usability remain explicit in quality/age/fault.
+  bool raw_erpm_available{false};
 };
 
 class FeedbackTelemetryCapture {
@@ -89,6 +95,9 @@ struct Ak30RuntimeConfig final {
   // protection is 1000 ms with zero brake current). This window is about
   // knowing the device went quiet, not about braking.
   std::int64_t feedback_ttl_nanoseconds{60000000};
+  // Device-native electrical RPM, independent of unsupported Torque SI velocity.
+  // Deployments must explicitly provide this positive limit.
+  double torque_max_abs_erpm{300.0};
 };
 
 // The first production consumer of Ak30ForceControlSession::command_stage()
@@ -96,8 +105,8 @@ struct Ak30RuntimeConfig final {
 // force-control adapter into CompositeSystem. It borrows an injected
 // Transport (UsbCdcTransport in production, FakeTransport in tests) and an
 // injected clock, and follows the per-cycle shape the device probes proved:
-// submit the stored command, drain received frames into the session, publish
-// the snapshot. It never opens a channel and never synthesizes a command -
+// drain received frames, validate feedback, publish the snapshot, then submit
+// the stored command. It never synthesizes a command -
 // in particular it never resolves "no fresh command" to 0.0, which on the
 // position interface would be a commanded move to the zero position.
 class Ak30ForceControlRuntime final
@@ -114,8 +123,8 @@ class Ak30ForceControlRuntime final
   [[nodiscard]] bool configure(std::size_t resource_count) noexcept override;
   [[nodiscard]] bool start() noexcept override;
   void stop() noexcept override;
-  // Submit the stored command per the staged watchdog, drain feedback, and
-  // publish the snapshot. Returns false on watchdog expiry or a latched
+  // Drain feedback and publish the snapshot before submitting the stored
+  // command per the staged watchdog. Returns false on expiry or a latched
   // fault, which routes through CompositeSystem's ERROR path.
   [[nodiscard]] bool read(mech_hardware_ros2_control::CanonicalState* states,
                           std::size_t count) noexcept override;
@@ -204,6 +213,10 @@ class Ak30ForceControlRuntime final
   FeedbackTelemetryCapture* telemetry_{nullptr};
   mech::mech_control_core::StatusSnapshot observed_status_{};
   bool has_observed_status_{false};
+  double raw_erpm_{0.0};
+  mech::mech_control_core::StatusSnapshot raw_erpm_status_{};
+  bool raw_erpm_available_{false};
+  bool torque_overspeed_latched_{false};
 };
 
 }  // namespace mech::mech_bringup

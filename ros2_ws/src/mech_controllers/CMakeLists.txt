@@ -22,6 +22,7 @@ add_library(${PROJECT_NAME} SHARED
   src/position_command_controller.cpp
   src/single_joint_command_controller.cpp
   src/velocity_command_controller.cpp
+  src/effort_command_controller.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -39,6 +40,7 @@ ament_target_dependencies(${PROJECT_NAME}
 add_library(${PROJECT_NAME}_plugin SHARED
   src/position_command_controller_plugin.cpp
   src/velocity_command_controller_plugin.cpp
+  src/effort_command_controller_plugin.cpp
 )
 target_link_libraries(${PROJECT_NAME}_plugin ${PROJECT_NAME})
 ament_target_dependencies(${PROJECT_NAME}_plugin controller_interface pluginlib)
@@ -66,6 +68,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_position_command_controller.cpp
     test/test_velocity_command_controller.cpp
+    test/test_effort_command_controller.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})

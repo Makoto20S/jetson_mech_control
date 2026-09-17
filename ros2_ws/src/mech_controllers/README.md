@@ -66,5 +66,26 @@ Recovery requires reactivation and new targets; stale targets are not replayed.
 The motor1 example is `motor1_velocity_controllers.yaml`, paired with the
 velocity URDF and `motor1_velocity_bringup.launch.py` in `mech_bringup`. It loads
 the controller inactive, with ±0.5 rad/s bounds and 0.5 rad/s² acceleration.
-There is no runtime mode switch. EffortCommandController (T9) and full impedance
-control remain future work.
+There is no runtime mode switch. Full impedance control remains future work.
+
+## EffortCommandController (T9)
+
+The independent plugin `mech_controllers/EffortCommandController` claims `effort`
+and `command_generation`, accepts `std_msgs/msg/Float64` on `~/target_effort`
+in N*m, and claims no state interfaces. It uses the same bounded target pipeline
+as Position and Velocity. Bounds must contain zero; `max_slew_per_second` is
+the commanded effort slew in N*m/s. Activation seeds the internal ramp at zero
+and requires a fresh target before refreshing generation.
+
+An explicit fresh zero target ramps commanded effort to zero. **Zero effort is
+not a stop or brake**: a free shaft may coast. Observe actual rest separately
+before deactivation. Target expiry and deactivation stop refreshing commands;
+they do not synthesize braking torque. Reactivation discards previous targets
+and restarts the ramp from zero. Hardware feedback validity still gates claims.
+
+The motor1 example uses `motor1_effort_controllers.yaml` and
+`motor1_effort_bringup.launch.py`, loads inactive, and bounds effort to +/-0.1 N*m
+with 0.2 N*m/s slew. In AK3.0 Torque mode the effort feedback is an Iq-derived
+equivalent estimate; standard position/velocity fields are unsupported. The
+vendor runtime's raw ERPM guard is separate from this generic controller and
+must be checked alongside fresh feedback in the bench procedure.
