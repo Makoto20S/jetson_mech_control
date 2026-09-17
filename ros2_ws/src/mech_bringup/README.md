@@ -42,6 +42,76 @@ all three deployment xacro examples load it.
   commented out: uncommenting it arms position commands, which stay
   gated by ADR-006 and per-test owner authorization.
 
+## Position deployment envelope (ADR-019)
+
+`config/motor1.urdf.xacro` requires three hardware parameters in Position
+sub-mode: `position_min_rad` and `position_max_rad` (motor1 example: `-12.0`
+and `6.0`) bound where the shaft may be commanded to go, and
+`position_max_error_rad` (motor1 example: `0.5`) bounds how far a command may
+sit from the latest usable feedback position. The second one is a force limit,
+not a travel limit: in Position sub-mode the applied torque is
+`Kp * (command - measured)`, so with motor1's `Kp = 1 N*m/rad` a `0.5 rad`
+error bound is a `0.5 N*m` ceiling on the torque any controller can request.
+For scale, static friction on the unloaded shaft is about `0.2 N*m`. Missing,
+non-finite, `min >= max` or non-positive values reject the hardware at
+initialization (`on_init`), before any device I/O. The other sub-modes do not
+require these parameters, but the set is all-or-nothing everywhere: once any
+one of the three appears, all three must be present and valid or `on_init`
+rejects the hardware.
+
+The check runs in the AK3.0 runtime before submission and never clamps. The
+absolute bounds are inclusive and are checked on every Position command; the
+error bound is evaluated only on cycles where the feedback sample was judged
+usable, so a command is never compared against a stale or absent number. A
+violation drops the command — no frame carrying that value is transmitted —
+latches the runtime, emits the `PositionEnvelope` telemetry reason, and makes
+`read()` fail every cycle until `configure()`/`start()` runs. Claim
+cancellation does not clear the latch. Because the gate sits in the shared
+hardware layer, it binds **every** controller that claims the joint, including
+upstream `ros2_control` controllers that the project did not write; that is the
+point of it. The post-latch behaviour is the same one the T9 overspeed latch
+showed (see [T9 effort deployment](#t9-effort-deployment)): ros2_control moves
+the hardware into its error state and rejects STRICT deactivation there, so
+bench tooling must take post-latch rest evidence from a fresh passive
+observation. See
+[ADR-019](../../../docs/adr/ADR-019-hardware-position-envelope.md); its status
+is Proposed and no bench evidence for the envelope exists yet.
+
+### What the error bound costs this deployment
+
+The absolute bounds are unchanged from what the controller YAML already
+enforced. The error bound is new, and at motor1's shipped `Kp = 1` it is a real
+limit on how far a bench move may reach, not a formality:
+
+- At `Kp = 1` the shaft lags far behind the command. On the 2026-09-05
+  progressive bench route a `+10 deg` target moved the shaft `0.2 deg` while
+  the command itself completed, and the move settled at `9.8 deg` of error
+  (`0.171 rad`); the `+30 deg` run settled at `15.7 deg` (`0.274 rad`). Source:
+  `docs/planning/README.md` §3, 阶段 2 ("位置步进 +2°/+5° 与 +30° 全程
+  （Kp=1 摩擦稳态误差）").
+- `PositionCommandController` ramps its command open-loop at
+  `max_slew_per_second: 2.0 rad/s`, regardless of where the shaft actually is.
+  It does not wait for the shaft to catch up.
+
+Neither settled error above would trip the bound on its own — both are under
+`0.5 rad`. The transient is what does: while the ramp is in flight the command
+runs away from a shaft that has barely moved, so command-minus-measured error
+peaks well above the error the move eventually settles at. Under the shipped
+`position_max_error_rad = 0.5`, a single target much farther than `0.5 rad`
+(`29 deg`) from the current position is therefore expected to exceed the bound
+part way through the ramp and latch the hardware before the shaft reaches the
+target, after which STRICT deactivation will be refused until the controller
+manager is restarted (the T9 finding above). This is a prediction from the ramp
+shape and the `Kp = 1` bench numbers, not an observed latch: no bench run of
+the envelope exists. The `2.0 rad/s` slew rate is likewise not reachable under
+this envelope at `Kp = 1`: with `Kd = 1` and zero commanded velocity, holding
+`2 rad/s` would need more than `2 rad` of error.
+
+The `0.5 rad` value is the owner-approved one and is kept, because it is the
+torque ceiling (`0.5 N*m` at `Kp = 1`), not a travel budget. Bench procedures
+must still plan each move as if it were one: treat `29 deg` as the ceiling on a
+single target displacement — the T10 trajectory's `0.1745 rad` step is inside.
+
 ## T8 velocity deployment
 
 Use the separate `launch/motor1_velocity_bringup.launch.py` with
