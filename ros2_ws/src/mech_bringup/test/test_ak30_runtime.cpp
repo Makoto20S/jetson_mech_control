@@ -1023,7 +1023,8 @@ TEST_F(Ak30RuntimeTest, PositionEnvelopeNonFiniteTargetIsRefusedBeforeTheGate) {
   }
 }
 
-TEST_F(Ak30RuntimeTest, PositionEnvelopeLatchSurvivesCancelAndInRangeCommand) {  auto config = runtime_config();
+TEST_F(Ak30RuntimeTest, PositionEnvelopeLatchSurvivesCancelAndInRangeCommand) {
+  auto config = runtime_config();
   config.position_max_error_rad = 0.5;
   RecordingTelemetry telemetry;
   Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },

@@ -138,23 +138,33 @@ number means a different N*m at a different `Kp`.
   the bound trades reach against the torque ceiling; there is no value that
   avoids both failure modes.
 - **The shipped deployment's reach is materially reduced, and the numbers say
-  by how much.** At `Kp = 1` the bench tracking error is roughly equal to the
-  commanded travel: on 2026-09-15 a `+10 deg` target moved the shaft `0.2 deg`
-  and settled at `9.8 deg` of error (`0.171 rad`), and the `+30 deg` run
-  settled at `15.7 deg`. `PositionCommandController` meanwhile ramps its
-  command open-loop at `max_slew_per_second: 2.0 rad/s` regardless of where the
-  shaft is. Under the shipped `position_max_error_rad = 0.5`, therefore, a
-  single target farther than about `0.5 rad` (`29 deg`) from the current
-  position latches the hardware mid-travel, after which STRICT deactivation is
-  refused until the controller manager restarts (the T9 finding below). The
-  `2.0 rad/s` slew is not reachable under this envelope at `Kp = 1` at all:
-  with `Kd = 1` and zero commanded velocity, sustaining `2 rad/s` would need
-  more than `2 rad` of error. The absolute bounds are unchanged; this is the
-  error bound alone, and it is a new, deliberate limit on the shipped
-  deployment rather than a restatement of what the controller YAML already did.
-  The owner-approved `0.5` is kept because it is the torque ceiling
-  (`0.5 N*m`), not a travel budget — bench procedures must plan each move to
-  stay inside it, and the T10 trajectory's `0.1745 rad` step does.
+  by roughly how much.** At `Kp = 1` the shaft lags far behind the command: on
+  the 2026-09-05 progressive bench route a `+10 deg` target moved the shaft
+  `0.2 deg` while the command itself completed, and the move settled at
+  `9.8 deg` of error (`0.171 rad`); the `+30 deg` run settled at `15.7 deg`
+  (`0.274 rad`). Those figures are recorded in `docs/planning/README.md` §3,
+  阶段 2 ("位置步进 +2°/+5° 与 +30° 全程（Kp=1 摩擦稳态误差）").
+  `PositionCommandController` meanwhile ramps its command open-loop at
+  `max_slew_per_second: 2.0 rad/s` regardless of where the shaft is. Neither
+  settled error would trip `position_max_error_rad = 0.5` by itself; the
+  transient is what is expected to. While the ramp is in flight the command
+  runs away from a shaft that has barely moved, so command-minus-measured error
+  peaks well above the error the move finally settles at. A single target much
+  farther than `0.5 rad` (`29 deg`) from the current position will therefore
+  exceed the bound part way through the ramp and latch the hardware before the
+  shaft reaches the target, after which STRICT deactivation will be refused
+  until the controller manager restarts (the T9 finding below). This is a
+  prediction from the ramp shape and the `Kp = 1` bench numbers, not an
+  observed latch — no bench run of the envelope exists. The `2.0 rad/s` slew is
+  likewise not reachable under this envelope at `Kp = 1` at all: with `Kd = 1`
+  and zero commanded velocity, sustaining `2 rad/s` would need more than
+  `2 rad` of error. The absolute bounds are unchanged; this is the error bound
+  alone, and it is a new, deliberate limit on the shipped deployment rather
+  than a restatement of what the controller YAML already did. The
+  owner-approved `0.5` is kept because it is the torque ceiling (`0.5 N*m`),
+  not a travel budget — bench procedures must still plan each move as if it
+  were one, treating `29 deg` as the ceiling on a single target displacement,
+  and the T10 trajectory's `0.1745 rad` step is inside it.
 - Once the latch fails `read()` closed, ros2_control moves the hardware into
   its error state and **refuses STRICT deactivation** (observed on the T9 bench
   and recorded in `mech_bringup`'s README). Bench tooling must take its

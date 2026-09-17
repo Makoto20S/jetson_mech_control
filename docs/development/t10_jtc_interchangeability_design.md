@@ -84,7 +84,8 @@ the fresh-command gate and before `session_.submit()`:
 
 `config/motor1.urdf.xacro` gains the three params with defaults
 `-12.0`, `6.0`, `0.5`. The absolute bounds match the existing controller YAML
-so PositionCommandController behaviour is unchanged; the error bound is the
+so PositionCommandController behaviour is unchanged (the error bound is a new
+limit on that deployment; see ADR-019 Consequences); the error bound is the
 new hardware ceiling. The persistent Jetson position release is not
 re-deployed by this PR.
 
