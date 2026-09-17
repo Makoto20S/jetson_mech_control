@@ -46,6 +46,17 @@ constexpr std::size_t kReceiveBudget = 8U;
        config.torque_max_abs_erpm <= 0.0)) {
     return false;
   }
+  // ADR-019: checked in every sub-mode, because an envelope that cannot be
+  // evaluated is not an envelope. The error bound is the ceiling on the
+  // torque the device's own Kp term may develop, so zero would forbid every
+  // command while a non-finite or unordered bound would forbid none.
+  if (!std::isfinite(config.position_min_rad) ||
+      !std::isfinite(config.position_max_rad) ||
+      !std::isfinite(config.position_max_error_rad) ||
+      config.position_min_rad >= config.position_max_rad ||
+      config.position_max_error_rad <= 0.0) {
+    return false;
+  }
   if (config.drive_id > 255U || config.logical_bus == 0U ||
       config.control_period_nanoseconds <= 0 ||
       config.command_ttl_nanoseconds <= 0 ||
@@ -154,6 +165,7 @@ bool Ak30ForceControlRuntime::configure(
   has_observed_status_ = false;
   raw_erpm_available_ = false;
   torque_overspeed_latched_ = false;
+  position_envelope_latched_ = false;
   configured_ = true;
   return true;
 }
@@ -170,6 +182,7 @@ bool Ak30ForceControlRuntime::start() noexcept {
   }
   raw_erpm_available_ = false;
   torque_overspeed_latched_ = false;
+  position_envelope_latched_ = false;
   started_ = true;
   return true;
 }
@@ -368,6 +381,33 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
     fresh_write_ = false;
     return false;
   }
+  // ADR-019: the hardware-side envelope. Absolute bounds are checked
+  // unconditionally; the error bound needs a usable feedback sample, and
+  // ADR-016 already refuses to reach this point on stale feedback, so the
+  // only sample-less path is the never-sampled startup transient, where no
+  // claim can exist. Nothing is clamped: a violating target is dropped, the
+  // runtime latches, and read() keeps failing until the lifecycle restarts.
+  if (config_.sub_mode ==
+      mech::mech_protocol_cubemars::ForceControlSubMode::Position) {
+    const double target = pending_[0].position;
+    const auto state = session_.snapshot(now);
+    const bool usable = state.status.quality == SampleQuality::Valid ||
+                        state.status.quality == SampleQuality::Degraded;
+    const bool outside_bounds = target < config_.position_min_rad ||
+                                target > config_.position_max_rad;
+    const bool outside_error = usable &&
+        std::abs(target - state.position) > config_.position_max_error_rad;
+    if (outside_bounds || outside_error) {
+      position_envelope_latched_ = true;
+      has_valid_sample_ = false;
+      pending_[0] = CanonicalCommand{};
+      pending_deadline_ = MonotonicTime{};
+      have_pending_ = false;
+      fresh_write_ = false;
+      capture_error(FeedbackTelemetryReason::PositionEnvelope, now);
+      return false;
+    }
+  }
   // Reaching here means a FRESH command is in hand, so a Holding stage must
   // not block it. The stage describes the age of the session's last ACCEPTED
   // command - a fact about the past - while the freeze that stage calls for is
@@ -473,6 +513,11 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
     capture_error(FeedbackTelemetryReason::TorqueOverspeed, clock_());
     return false;
   }
+  if (position_envelope_latched_) {
+    has_valid_sample_ = false;
+    capture_error(FeedbackTelemetryReason::PositionEnvelope, clock_());
+    return false;
+  }
   // Drain received frames into the session. Receiving WouldBlock (no frame
   // this cycle) is the steady state, not an error.
   for (std::size_t index = 0; index < kReceiveBudget; ++index) {
@@ -565,7 +610,11 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
     }
   }
   if (!submit_stored(submission_now)) {
-    capture_error(FeedbackTelemetryReason::CommandSubmission, submission_now);
+    // The envelope already named the reason; a generic one on top of it would
+    // point the reader at the transport instead of at the target.
+    if (!position_envelope_latched_) {
+      capture_error(FeedbackTelemetryReason::CommandSubmission, submission_now);
+    }
     return false;
   }
   return true;

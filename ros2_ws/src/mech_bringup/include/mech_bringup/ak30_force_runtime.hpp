@@ -32,6 +32,7 @@ enum class FeedbackTelemetryReason : std::uint8_t {
   Cleanup,
   TorqueOverspeed,
   TorqueSpeedUnavailable,
+  PositionEnvelope,
 };
 
 struct FeedbackTelemetryEvent final {
@@ -227,6 +228,9 @@ class Ak30ForceControlRuntime final
   mech::mech_control_core::StatusSnapshot raw_erpm_status_{};
   bool raw_erpm_available_{false};
   bool torque_overspeed_latched_{false};
+  // ADR-019: set when a Position command left the envelope; cleared only by
+  // configure()/start(), like the torque overspeed latch.
+  bool position_envelope_latched_{false};
 };
 
 }  // namespace mech::mech_bringup

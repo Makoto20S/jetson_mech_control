@@ -121,6 +121,12 @@ TEST(Ak30RuntimeParams, OtherSubModesAcceptButDoNotRequireTheEnvelope) {
   EXPECT_TRUE(Ak30RuntimeParams::parse(velocity).has_value());
   velocity["position_max_error_rad"] = "0";  // still validated when present
   EXPECT_FALSE(Ak30RuntimeParams::parse(velocity).has_value());
+
+  // A half-written envelope is a typo, not a choice: the two keys left behind
+  // would silently keep the code defaults instead of the intended bound.
+  Params partial{{"device_path", "/dev/ttyACM0"}, {"sub_mode", "velocity"},
+                 {"position_min_rad", "-1.0"}};
+  EXPECT_FALSE(Ak30RuntimeParams::parse(partial).has_value());
 }
 
 // Since ADR-014 the sub-mode is an explicit parameter; the default stays
