@@ -53,10 +53,11 @@ not a travel limit: in Position sub-mode the applied torque is
 `Kp * (command - measured)`, so with motor1's `Kp = 1 N*m/rad` a `0.5 rad`
 error bound is a `0.5 N*m` ceiling on the torque any controller can request.
 For scale, static friction on the unloaded shaft is about `0.2 N*m`. Missing,
-non-finite, `min >= max` or non-positive values reject configure before any
-device I/O. The other sub-modes do not require these parameters, but the set is
-all-or-nothing everywhere: once any one of the three appears, all three must be
-present and valid or configure fails.
+non-finite, `min >= max` or non-positive values reject the hardware at
+initialization (`on_init`), before any device I/O. The other sub-modes do not
+require these parameters, but the set is all-or-nothing everywhere: once any
+one of the three appears, all three must be present and valid or `on_init`
+rejects the hardware.
 
 The check runs in the AK3.0 runtime before submission and never clamps. The
 absolute bounds are inclusive and are checked on every Position command; the

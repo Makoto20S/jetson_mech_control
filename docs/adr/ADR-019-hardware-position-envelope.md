@@ -25,9 +25,10 @@ keeps that door open with its weak tier: a controller that claims only the
 motion interface makes every authorized manager cycle look like a refresh, so
 the hardware can never observe that it went silent. ADR-017 Decision 4 accepted
 that gap deliberately and required it to be registered as a risk; the entry in
-`03_mvp_delivery_plan.md` §12 was never made, and §6's "命令 watchdog"
-acceptance row reads as if it covered every controller when it only covers the
-strong tier.
+`03_mvp_delivery_plan.md` §12 was never made. §6's "命令 watchdog" acceptance
+row is not wrong about a stalled manager — the hard TTL expires in both tiers —
+but it is silent about the case the weak tier actually leaves open: a
+controller that stays active while it no longer produces new targets.
 
 Nothing at the hardware layer bounds a Position target today.
 `single_joint_command_controller` bounds it controller-side, which a
@@ -133,9 +134,10 @@ number means a different N*m at a different `Kp`.
   and recorded in `mech_bringup`'s README). Bench tooling must take its
   post-latch rest evidence from a fresh passive observation, not from a
   deactivation acknowledgement.
-- `03_mvp_delivery_plan.md` §6's "命令 watchdog" criterion applies to the
-  strong tier only: it does not cover a weak-tier controller that stays active
-  while no longer producing new targets. That case is R23.
+- `03_mvp_delivery_plan.md` §6's "命令 watchdog" criterion still holds in both
+  tiers for a stalled manager, whose hard TTL expires either way. What it does
+  not cover is a weak-tier controller that stays active while no longer
+  producing new targets; the row is annotated to say so and that case is R23.
 - This bounds the consequence, not the cause. A silent-but-active weak-tier
   controller still holds its last command; the envelope limits how hard, not
   how long.
@@ -146,7 +148,8 @@ number means a different N*m at a different `Kp`.
 ## Validation / 验证
 
 Offline coverage delivered with this decision: parameter rules
-(required/finite/ordering/positive, other sub-modes unaffected); inclusive
+(required/finite/ordering/positive, other sub-modes accept-but-validate the set
+as all-or-nothing); inclusive
 bounds at both ends; the error bound in both signs; no error-bound evaluation
 without a usable sample; the latch surviving claim cancellation and a
 subsequent in-range command; the telemetry reason; a weak-tier controller
