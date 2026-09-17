@@ -64,11 +64,14 @@ no silent ignore). Missing or invalid values fail `on_init`.
 In `Ak30ForceControlRuntime::submit_stored()`, Position sub-mode only, after
 the fresh-command gate and before `session_.submit()`:
 
-1. Take `state = session_.snapshot(now)`. If `state.status.quality` is not
-   Valid or Degraded, do not evaluate the envelope (ADR-016 already fails
-   closed elsewhere; never compare against a stale number).
-2. Let `p = pending_[0].position`. Violation if `p < min`, `p > max`
-   (bounds inclusive), or `|p - state.position| > position_max_error_rad`.
+1. Let `p = pending_[0].position`. The absolute bounds are checked
+   unconditionally: violation if `p < min` or `p > max` (bounds inclusive).
+2. Take `state = session_.snapshot(now)`. Only if `state.status.quality` is
+   Valid or Degraded, also treat `|p - state.position| >
+   position_max_error_rad` as a violation. Never compare against a stale or
+   absent number; ADR-016 already fails closed on stale feedback before this
+   point, so the only sample-less path is the never-sampled startup
+   transient, in which no claim can exist.
 3. On violation: set `position_envelope_latched_ = true`, drop the pending
    command, `capture_error(FeedbackTelemetryReason::PositionEnvelope, now)`,
    return `false`. `read()` keeps returning `false` while latched, exactly as
