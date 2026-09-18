@@ -2,7 +2,7 @@
 
 > 规划基线：2026-07-28
 > 最近收敛：2026-09-17（T8 现场功能认可并合并 PR #17；T9 力矩控制器完成实机验收）
-> 当前状态：Foundation RC2 已完成；PositionCommandController 已随 PR #16 合并，tag `position-controller-complete` 标记位置控制器收口。T8 VelocityCommandController 已获用户现场功能认可并随 PR #17 合并；T9 EffortCommandController 完成零力矩与 +0.2 N·m 实机试验，用户认可功能收口，待 PR #18 合并。三个自研控制器（位置/速度/力矩）均已在 motor1 空载台架实机验证；设备操作仍逐次授权。
+> 当前状态：Foundation RC2 已完成；PositionCommandController 已随 PR #16 合并，tag `position-controller-complete` 标记位置控制器收口。T8 VelocityCommandController 已获用户现场功能认可并随 PR #17 合并；T9 EffortCommandController 完成零力矩与 +0.2 N·m 实机试验，用户认可功能收口，已随 PR #18 合并。三个自研控制器（位置/速度/力矩）均已在 motor1 空载台架实机验证；设备操作仍逐次授权。
 
 Foundation 及早期 AK3.0 软件/探针阶段的记录保留在 §3；当前实现包含
 ADR-014 子模式映射、ADR-015 发送授权、ADR-016 反馈质量、ADR-017 两档刷新
@@ -30,7 +30,7 @@ ADR-001/002/003/004/005/009/012/013 为 Accepted；[ADR-006](../adr/ADR-006-cond
 - 当前设备背景：两台基于 AKE60-8 的定制双编码器电机和两台 HI12；实际固件、配置、协议、节点和物理拓扑仍需逐台取证。
 - 实际目标机背景：NVIDIA Orin NX 16GB 模组（`P3767-0000`）+ **合众恒跃 HZHY HYAI-311UAV 第三方载板**（2026-08-23 实物照片核验；软件设备树报 `p3768-0000` 是厂商基于 devkit 配置构建镜像的产物）。**2026-08-23 已完成平台迁移**：JetPack 6.2 / L4T R36.4.3 / Ubuntu 22.04.5 / 内核 5.15.148-tegra，`nvidia-l4t-*` 已锁定、ROS 2 Humble 已安装——FND-004A 的原生 Jammy/Humble 前置条件**已满足**。
 - CAN 拓扑意向（2026-08-23 用户确认）：电机接入高擎通用盒子（7路CAN功率板）的电源+CAN 通道，Jetson 经 USB CDC 收发；HI12 接入方案待定。激活仍受 ADR-006 证据闸门约束。
-- 当前阶段：T8 已合并；T9 实机验收完成、待合并。T10 标准控制器互换（JTC）+ ADR-019 硬件位置包络进行中：PR-1 的包络实现已离线完成，JTC 部署与实机台架为下一步；其余候选（第二台电机与共总线 / HI12 接入）待定。Foundation 已完成。
+- 当前阶段：T8 已合并；T9 实机验收完成且已合并。T10 标准控制器互换（JTC）+ ADR-019 硬件位置包络进行中：PR-1 的包络实现已离线完成，JTC 部署、真实插件及弱档位置接管已完成离线验证，实机台架为下一步；其余候选（第二台电机与共总线 / HI12 接入）待定。Foundation 已完成。
 - 当前安全边界：任何新的实机运行仍需当次授权与现场确认；力矩模式空载无阻尼没有稳态速度，超速锁存是终止手段而非速度控制。
 - 当前实现入口：[Foundation v0.1 控制框架搭建计划](07_framework_bootstrap_plan.md)。
 - 完整 MVP 与硬件验收入口：[MVP 执行、验证与项目治理计划](03_mvp_delivery_plan.md)。
@@ -49,8 +49,8 @@ ADR-001/002/003/004/005/009/012/013 为 Accepted；[ADR-006](../adr/ADR-006-cond
 | Torque/Velocity 命令接口切片（ADR-014） | **ADR Accepted + 已合并（PR #12）** | [ADR-014](../adr/ADR-014-ak30-submode-command-interfaces.md)：`CanonicalCommand` 扩展三字段、CompositeSystem 每关节恰好一个命令接口 ∈ {position, velocity, effort}；runtime 按子模式映射（Velocity 强制 effort=0 防前馈叠加）+ `sub_mode` 部署参数 + 三套 URDF 变体（position/torque/velocity）与接口名匹配结构校验；离线测试全绿；真机运行仍逐次授权（ADR-006 Decision 7） |
 | 位置控制器里程碑 | **已合并/发布（2026-09-16）** | 独立 `PositionCommandController`，PR #16 与 `position-controller-complete`；位置功能收口不代表精度或实时性认证 |
 | T8 速度控制器 | **用户确认现场功能测试完成，PR #17 已合并（2026-09-16）** | 独立 `VelocityCommandController`；velocity+command_generation、速度/加速度限制、目标有效期；共享有界目标机制，默认 inactive 的独立部署入口；离线验收包含实际 manager 到 FakeTransport 帧、过期/停用/重新激活静默；功能认可不等于精度认证 |
-| T9 力矩控制器 | **实机功能验收完成（2026-09-17），待 PR #18 合并** | 独立 `EffortCommandController`；effort+command_generation、力矩限幅/斜坡/目标有效期；默认 inactive 的固定 Torque 部署；raw ERPM 超速锁存及发送前新鲜度保护；标准 velocity/position 不作静止依据。实机：零力矩 1 s 全生命周期通过；+0.2 N·m 试验电流回显 0.21–0.22 N·m、挣脱后约 28 rad/s² 加速、0.2 s 内 5000 ERPM 锁存生效并滑行停止。功能认可不等于力矩计量精度认证 |
-| T10 标准控制器互换（JTC）+ ADR-019 硬件位置包络 | **进行中：PR-1 包络实现完成（离线 398 项测试），[ADR-019](../adr/ADR-019-hardware-position-envelope.md) Proposed；JTC 部署与实机验收待做** | 硬件层对 Position 命令做失效关闭式包络（绝对区间 + 与反馈的最大偏差），任何控制器（含第三方）都受同一道闸门约束；越界不裁剪、不发送、锁存；`motor1.urdf.xacro` 默认 `[-12, 6] rad` / `0.5 rad`（Kp=1 时即 0.5 N·m 力矩上限） |
+| T9 力矩控制器 | **实机功能验收完成（2026-09-17），已随 PR #18 合并** | 独立 `EffortCommandController`；effort+command_generation、力矩限幅/斜坡/目标有效期；默认 inactive 的固定 Torque 部署；raw ERPM 超速锁存及发送前新鲜度保护；标准 velocity/position 不作静止依据。实机：零力矩 1 s 全生命周期通过；+0.2 N·m 试验电流回显 0.21–0.22 N·m、挣脱后约 28 rad/s² 加速、0.2 s 内 5000 ERPM 锁存生效并滑行停止。功能认可不等于力矩计量精度认证 |
+| T10 标准控制器互换（JTC）+ ADR-019 硬件位置包络 | **进行中：PR-1 包络实现完成（PR-1 离线 399 项测试），[ADR-019](../adr/ADR-019-hardware-position-envelope.md) Proposed；JTC 部署及真实插件离线验证完成（本地 / ASan+UBSan / ARM64 各 412 项通过；ARM64 首次旧激活脚本 DDS 发现超时，原样重跑通过），PR #19 暂不合并，实机验收待做** | 硬件层对 Position 命令做失效关闭式包络（绝对区间 + 与反馈的最大偏差），任何控制器（含第三方）都受同一道闸门约束；越界不裁剪、不发送、锁存；`motor1.urdf.xacro` 默认 `[-12, 6] rad` / `0.5 rad`（Kp=1 时即 0.5 N·m 力矩上限） |
 
 T8/T9 的接口和启动/停止策略见 [mech_controllers](../../ros2_ws/src/mech_controllers/README.md)、
 [速度部署说明](../../ros2_ws/src/mech_bringup/README.md#t8-velocity-deployment)
