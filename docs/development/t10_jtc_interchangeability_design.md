@@ -1,8 +1,8 @@
 # T10: Standard Controller Interchangeability and Hardware Position Envelope
 
-- **Status:** Approved design (owner, 2026-09-17); implementation not started
+- **Status:** Approved design (owner, 2026-09-17); PR-1 implemented; PR-2 offline verification complete (412 tests each on local, ASan/UBSan and native ARM64), bench pending
 - **Date:** 2026-09-17
-- **Scope:** `mech_bringup` runtime/deployment, `docs/adr`, `docs/planning`; bench tools stay ignored under `tmp/`
+- **Scope:** `mech_bringup` runtime/deployment, `mech_hardware_ros2_control` weak-position takeover, `docs/adr`, `docs/planning`; bench tools stay ignored under `tmp/`
 - **Owner decisions recorded here:** validate `joint_trajectory_controller` first; add a fail-closed hardware position envelope before any standard controller drives the motor; envelope defaults `[-12, 6] rad` / `0.5 rad`, bench overlay `+/-20 deg` / `0.3 rad`, first trajectory `+10 deg` legs of 4 s; two stacked PRs.
 
 ## 1. Purpose
@@ -21,11 +21,11 @@ the same time, implements the hardware-side final bound that
 | Fact | Evidence |
 |---|---|
 | A controller that claims only the motion interface runs in ADR-017's weak tier: every authorized manager cycle counts as a refresh, so the hardware watchdog never sees "the controller went silent". | ADR-017 Decision 4; `composite_system.cpp` `bool fresh = authorized;`; `WeakTierControllerKeepsSendingWhileSilent` |
-| The hardware path applies no clamp and no slew to position targets. Only the wire codec's `+/-12.56 rad` range is checked, and it fails closed rather than clamping. | `single_joint_command_controller.cpp:39,61` (controller-side only); `ak30_force_wire.hpp:81-83` |
+| The hardware path applies no clamp or slew to position targets. ADR-019 rejects absolute-position/error-bound violations before the wire codec also checks its `+/-12.56 rad` range. | `Ak30ForceControlRuntime::submit_stored()`; `ak30_force_wire.hpp` |
 | In Position sub-mode the applied torque is `Kp * (command - position)` with `Kp = 1 N*m/rad`, `Kd = 1`; static friction is about `0.2 N*m`; `0.2 N*m` produced about `28 rad/s^2` after breakaway on 2026-09-17. | `motor1.urdf.xacro:37-38`; T9 bench README in `tmp/t9_effort/physical-runs/` |
-| `submit_stored()` holds both the pending canonical command and, via `session_.snapshot(now)`, the latest feedback; ADR-016 already validates feedback freshness in `read()` before `submit_stored()` runs. | `ak30_force_runtime.cpp:336-422,567` |
-| JTC in Humble commands the current position on activation (hold), interpolates between points, and writes every update cycle while active. | upstream `joint_trajectory_controller` behaviour; to be confirmed by the offline integration test |
-| Neither the workstation nor the Jetson has `ros-humble-joint-trajectory-controller` installed; CI resolves ROS packages through `rosdep` from `package.xml`. | `dpkg -l` on both hosts; `docker/ros_humble_jammy/Dockerfile:27-31` |
+| `submit_stored()` checks the pending command against the feedback sample already accepted by `read()` this cycle; ADR-016 validates feedback freshness before submission. | `Ak30ForceControlRuntime::submit_stored()` and `read()` |
+| JTC 2.54 queues a measured hold in `on_activate()` but first writes the command interface in the next `update()`. The manager switch cycle writes hardware before that update. | upstream source and failing real-plugin integration test; ADR-017 takeover amendment below |
+| JTC 2.54.0 is installed on both development hosts; CI resolves ROS packages through `rosdep` from `package.xml`. | 2026-09-18 package verification; `docker/ros_humble_jammy/Dockerfile` |
 
 ## 3. Deliverable 1 (PR-1): hardware position envelope
 
@@ -66,12 +66,10 @@ the fresh-command gate and before `session_.submit()`:
 
 1. Let `p = pending_[0].position`. The absolute bounds are checked
    unconditionally: violation if `p < min` or `p > max` (bounds inclusive).
-2. Take `state = session_.snapshot(now)`. Only if `state.status.quality` is
-   Valid or Degraded, also treat `|p - state.position| >
-   position_max_error_rad` as a violation. Never compare against a stale or
-   absent number; ADR-016 already fails closed on stale feedback before this
-   point, so the only sample-less path is the never-sampled startup
-   transient, in which no claim can exist.
+2. Use the feedback sample already accepted by `read()` this cycle, never a
+   second snapshot that could become stale between checks. Treat
+   `|p - accepted_position| > position_max_error_rad` as a violation.
+   ADR-016 fails closed on stale or absent feedback before submission.
 3. On violation: set `position_envelope_latched_ = true`, drop the pending
    command, `capture_error(FeedbackTelemetryReason::PositionEnvelope, now)`,
    return `false`. `read()` keeps returning `false` while latched, exactly as
@@ -123,6 +121,24 @@ re-deployed by this PR.
 - The URDF is the position variant from PR-1; no new xacro.
 - `mech_bringup/package.xml`: `exec_depend` and `test_depend` on
   `joint_trajectory_controller` so rosdep installs it in CI and on hosts.
+
+### 4.1a Weak-position takeover (owner approved 2026-09-18)
+
+The real JTC test exposed a switch-cycle gap: JTC activation queues a hold but
+has not yet written the command interface when hardware `write()` runs.
+`CompositeSystem::perform_command_mode_switch()` therefore seeds every newly
+started weak position claim from `states_[index].position`, the feedback
+already accepted by the current cycle. The full switch is validated before
+any seed; first activation and release/reclaim both use this rule. Strong
+claims, velocity, effort, release-only and rejected switches do not seed.
+Generation baselines, cancellation, feedback validity, and weak-tier silence
+refresh remain unchanged (ADR-017 Decision 4).
+
+The deployment also sets
+`set_last_command_interface_value_as_state_on_activation: false`, so JTC's
+own internal trajectory starts from measured state. That parameter alone
+cannot fill the switch-cycle gap. The seed is a measured hold, not a new
+upstream target or a physical stop guarantee.
 
 ### 4.2 Offline integration test (real upstream plugin)
 

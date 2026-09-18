@@ -186,6 +186,48 @@ has already stopped and the shaft coasts. Bench tooling must therefore obtain
 its post-latch rest evidence from a fresh passive observation instead of from
 the deactivation acknowledgement. Physical force accuracy still needs metrology.
 
+## Standard controller deployment (JTC)
+
+`motor1_trajectory_bringup.launch.py` loads the upstream
+`joint_trajectory_controller/JointTrajectoryController` using
+`config/motor1_trajectory_controllers.yaml` and the Position hardware xacro.
+Install `ros-humble-joint-trajectory-controller` on the target host first.
+The state broadcaster spawns first; JTC then loads **inactive**. Starting the
+launch still opens the physical transport and requires the bench gates below.
+
+JTC claims only `motor1_joint/position`, with position-only state feedback;
+it does not claim `command_generation`. This is ADR-017's weak tier: at the
+configured 500 Hz, every authorized manager cycle refreshes the hardware
+command and can produce a frame. A controller that stays active but stops
+writing fresh targets is invisible to that freshness check and may keep its
+last target indefinitely. A stalled manager still expires the hardware lease.
+This is the accepted weak-tier risk recorded as R23 in the MVP plan.
+
+ADR-019's hardware envelope checks the absolute target and its error from
+usable feedback before submission; it applies regardless of controller type.
+An offending command is dropped and latched, never clipped into range. The
+shipped bounds are `[-12, 6] rad` and a `0.5 rad` maximum error. This is a
+command boundary, not a physical stop guarantee or an upstream-target watchdog.
+After a latch, obtain fresh passive rest evidence: STRICT deactivation can be
+refused while the hardware is in its error state.
+
+The offline integration test loads the actual upstream plugin through
+`ControllerManager`, with `CompositeSystem`, the AK3 runtime, and
+`FakeTransport`; no serial port is opened. It covers measured-position hold,
+a bounded out-and-back trajectory, continued hardware cycling after
+controller deactivation, and the envelope's frame rejection and latch.
+Humble JTC 2.54 queues a hold in `on_activate()` and writes its command
+interface on the next `update()`. To cover the intervening hardware write,
+CompositeSystem initializes each new weak position claim from the feedback
+already accepted in that cycle (ADR-017). This applies again after release
+and reacquisition; it never seeds strong claims, velocity, effort, release-only
+or rejected switches. The shipped JTC parameter
+`set_last_command_interface_value_as_state_on_activation: false` also makes
+JTC's internal trajectory use measured state. Neither mechanism strengthens
+the weak-tier silence watchdog or guarantees a physical stop.
+Bench acceptance pending. ADR-019 remains Proposed until owner acceptance of
+standard-controller bench evidence.
+
 ## Safety boundary
 
 No default build or test opens a serial device or sends a CAN frame. All

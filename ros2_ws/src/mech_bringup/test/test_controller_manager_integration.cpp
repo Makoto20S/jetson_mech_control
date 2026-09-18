@@ -605,8 +605,8 @@ TEST_F(WeakTierIntegrationTest, WeakTierControllerKeepsSendingWhileSilent) {
 // so the bound has to live in the hardware, below anything a controller can
 // reach. The tightened error bound here is what the fixture's own numbers
 // demand - the feedback frame decodes to about -4.19 rad and WriterController
-// targets 0.25, so 0.5 rad of allowed error puts the very first authorized
-// write outside the envelope.
+// targets 0.25, so 0.5 rad of allowed error rejects its first target after
+// the measured-hold switch-cycle seed (ADR-017).
 class WeakTierEnvelopeTest : public WeakTierIntegrationTest {
  protected:
   [[nodiscard]] Ak30RuntimeConfig fixture_runtime_config() const override {
@@ -628,8 +628,9 @@ class WeakTierEnvelopeTest : public WeakTierIntegrationTest {
 // The controller writes throughout, and asserting that it did is half the
 // claim: without it, zero transmissions would equally describe a controller
 // that never commanded anything. What this test says is that the target WAS
-// written into the command interface and the hardware still put no frame on
-// the wire, and that nothing was clamped down to a reachable value instead.
+// written into the command interface and the hardware put no offending frame
+// on the wire. Only the preceding switch-cycle measured hold may be sent;
+// nothing is clamped down to a reachable value instead.
 //
 // The refused deactivation is the observable for "the component latched".
 // Humble's ControllerManager exposes no resource-manager accessor, so the
@@ -651,6 +652,17 @@ TEST_F(WeakTierEnvelopeTest, WeakTierControllerCannotEscapeTheEnvelope) {
   controller_->allow_writes(kWritesUntilSilenced);
   activate_controller();
   cycle(20);
+  ASSERT_EQ(transmitted(), 1U);
+  RawCanFrame hold{};
+  ASSERT_TRUE(transport_->take_transmit(hold));
+  // The only frame is the takeover seed at the 90-degree device feedback,
+  // not the controller's rejected 0.25-rad canonical target or a clamp.
+  const auto raw_position = (static_cast<std::uint32_t>(hold.payload[3]) << 8U) |
+                            static_cast<std::uint32_t>(hold.payload[4]);
+  EXPECT_NEAR(mech::mech_protocol_cubemars::dequantize(
+                  raw_position, -12.56, 12.56, 16U),
+              1.5707963267948966, 25.12 / 65535.0);
+  cycle(10);
   EXPECT_EQ(transmitted(), 0U);
   EXPECT_GT(controller_->writes(), 0U);
   EXPECT_NE(drive_switch({}, {kControllerName}),

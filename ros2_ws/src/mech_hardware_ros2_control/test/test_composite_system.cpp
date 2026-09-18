@@ -138,6 +138,7 @@ class RecordingRuntime final : public RuntimePort {
     if (!running_ || states == nullptr || count != count_) return false;
     for (std::size_t index = 0U; index < count; ++index) {
       states[index] = CanonicalState{};
+      states[index].position = measured_position;
     }
     return true;
   }
@@ -157,6 +158,8 @@ class RecordingRuntime final : public RuntimePort {
     }
     return true;
   }
+
+  double measured_position{0.0};
 
   void cancel_pending(std::size_t index) noexcept override {
     if (index < count_) ++cancels_[index];
@@ -250,6 +253,83 @@ struct ActiveSystem final {
     }
   }
 };
+
+// Exercise the switch-cycle write before the incoming controller updates.
+TEST(CompositeSystem, WeakPositionTakeoverHoldsAcceptedNonzeroPosition) {
+  ActiveSystem fixture(1U);
+  fixture.recorder->measured_position = -4.2;
+  ASSERT_EQ(fixture.system.read(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  // Changing the runtime's next sample must not replace the accepted sample.
+  fixture.recorder->measured_position = -3.9;
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.write(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(fixture.recorder->last_command(0U).position, -4.2);
+  EXPECT_EQ(fixture.recorder->fresh_writes(0U), 1U);
+}
+
+TEST(CompositeSystem, WeakPositionReclaimHoldsNewFeedbackInsteadOfOldTarget) {
+  ActiveSystem fixture(1U);
+  fixture.recorder->measured_position = -4.2;
+  fixture.cycle(1);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  fixture.commands[0].set_value(-4.0);
+  fixture.cycle(1);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({}, {"joint_1/position"}),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(fixture.commands[0].get_value(), -4.0);
+  EXPECT_EQ(fixture.recorder->cancels(0U), 1U);
+  fixture.recorder->measured_position = -3.0;
+  fixture.cycle(2);
+  EXPECT_EQ(fixture.recorder->fresh_writes(0U), 1U);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.write(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(fixture.recorder->last_command(0U).position, -3.0);
+  EXPECT_EQ(fixture.recorder->fresh_writes(0U), 2U);
+}
+
+TEST(CompositeSystem, RejectedTakeoverDoesNotSeedAnyCommand) {
+  ActiveSystem fixture(2U);
+  fixture.recorder->measured_position = -4.2;
+  fixture.cycle(1);
+  fixture.commands[0].set_value(0.7);
+  fixture.commands[1].set_value(0.8);
+  // The first start is valid, but the complete transaction is not.
+  EXPECT_EQ(fixture.system.perform_command_mode_switch(
+                {"joint_1/position", "joint_2/position", "joint_2/position"}, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_DOUBLE_EQ(fixture.commands[0].get_value(), 0.7);
+  EXPECT_DOUBLE_EQ(fixture.commands[1].get_value(), 0.8);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+  fixture.recorder->set_has_valid_sample(false);
+  EXPECT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_DOUBLE_EQ(fixture.commands[0].get_value(), 0.7);
+}
+
+TEST(CompositeSystem, StrongPositionTakeoverPreservesTargetAndRequiresGeneration) {
+  ActiveSystem fixture(1U);
+  fixture.recorder->measured_position = -4.2;
+  fixture.cycle(1);
+  fixture.commands[0].set_value(0.7);
+  const std::string generation = "joint_1/command_generation";
+  command_by_name(fixture.commands, generation).set_value(8.0);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(
+                {generation, "joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  fixture.cycle(1);
+  EXPECT_DOUBLE_EQ(fixture.commands[0].get_value(), 0.7);
+  EXPECT_EQ(fixture.recorder->fresh_writes(0U), 0U);
+  command_by_name(fixture.commands, generation).set_value(9.0);
+  fixture.cycle(1);
+  EXPECT_EQ(fixture.recorder->fresh_writes(0U), 1U);
+  EXPECT_DOUBLE_EQ(fixture.recorder->last_command(0U).position, 0.7);
+}
 
 // ADR-016 Decision 3: a joint whose feedback has never arrived must not be
 // claimable. This is the shared choke point that keeps a controller from ever
@@ -476,6 +556,33 @@ TEST(CompositeSystem, ExportsEffortAndVelocityCommandInterfaces) {
               hardware_interface::return_type::OK);
     EXPECT_EQ(system.perform_command_mode_switch({}, {claim}),
               hardware_interface::return_type::OK);
+  }
+}
+
+TEST(CompositeSystem, WeakVelocityAndEffortTakeoverPreserveCommandBuffers) {
+  for (const char* mode :
+       {hardware_interface::HW_IF_VELOCITY, hardware_interface::HW_IF_EFFORT}) {
+    SCOPED_TRACE(mode);
+    CompositeSystem system;
+    auto runtime = std::make_unique<RecordingRuntime>();
+    auto* recorder = runtime.get();
+    recorder->measured_position = -4.2;
+    ASSERT_TRUE(system.set_runtime(std::move(runtime)));
+    ASSERT_EQ(system.on_init(info_with_command_interface(mode)),
+              hardware_interface::CallbackReturn::SUCCESS);
+    auto commands = system.export_command_interfaces();
+    ASSERT_EQ(system.on_configure(state()), hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system.read(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+              hardware_interface::return_type::OK);
+    commands[0].set_value(0.7);
+    ASSERT_EQ(system.perform_command_mode_switch({std::string("joint_1/") + mode}, {}),
+              hardware_interface::return_type::OK);
+    EXPECT_DOUBLE_EQ(commands[0].get_value(), 0.7);
+    ASSERT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_DOUBLE_EQ(recorder->last_command(0U).position, 0.0);
+    EXPECT_EQ(recorder->fresh_writes(0U), 1U);
   }
 }
 

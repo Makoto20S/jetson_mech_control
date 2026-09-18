@@ -50,8 +50,14 @@ class DeploymentFilesTest : public ::testing::Test {
     const std::string root = MECH_BRINGUP_SOURCE_DIR;
     controllers_ = read_file(root + "/config/motor1_controllers.yaml");
     launch_ = read_file(root + "/launch/motor1_bringup.launch.py");
+    trajectory_controllers_ =
+        read_file(root + "/config/motor1_trajectory_controllers.yaml");
+    trajectory_launch_ =
+        read_file(root + "/launch/motor1_trajectory_bringup.launch.py");
     ASSERT_FALSE(controllers_.empty());
     ASSERT_FALSE(launch_.empty());
+    ASSERT_FALSE(trajectory_controllers_.empty());
+    ASSERT_FALSE(trajectory_launch_.empty());
     for (const auto& [name, sub_mode] : urdf_variants()) {
       const std::string urdf = read_file(root + "/config/" + name);
       ASSERT_FALSE(urdf.empty()) << name;
@@ -73,6 +79,8 @@ class DeploymentFilesTest : public ::testing::Test {
   std::vector<Variant> variants_;
   std::string controllers_;
   std::string launch_;
+  std::string trajectory_controllers_;
+  std::string trajectory_launch_;
 
   [[nodiscard]] static const std::vector<
       std::pair<std::string,
@@ -224,6 +232,25 @@ TEST_F(DeploymentFilesTest, ControllersYamlUsesTheRegisteredPluginName) {
             std::string::npos);
   EXPECT_NE(controllers_.find("joint_state_broadcaster/JointStateBroadcaster"),
             std::string::npos);
+}
+
+TEST_F(DeploymentFilesTest, TrajectoryVariantLoadsUpstreamJtcInactive) {
+  EXPECT_NE(trajectory_controllers_.find(
+                "type: joint_trajectory_controller/JointTrajectoryController"),
+            std::string::npos);
+  EXPECT_NE(trajectory_controllers_.find("command_interfaces:"),
+            std::string::npos);
+  EXPECT_NE(trajectory_controllers_.find("- position"), std::string::npos);
+  EXPECT_EQ(trajectory_controllers_.find("- velocity"), std::string::npos);
+  EXPECT_NE(trajectory_controllers_.find("allow_partial_joints_goal: false"),
+            std::string::npos);
+  EXPECT_NE(trajectory_controllers_.find(
+                "allow_nonzero_velocity_at_trajectory_end: false"),
+            std::string::npos);
+  EXPECT_NE(trajectory_launch_.find("motor1.urdf.xacro"), std::string::npos);
+  EXPECT_NE(trajectory_launch_.find("motor1_trajectory_controllers.yaml"),
+            std::string::npos);
+  EXPECT_NE(trajectory_launch_.find("'--inactive'"), std::string::npos);
 }
 
 TEST_F(DeploymentFilesTest, LaunchFileReferencesExistingFilesAndStaysSafe) {
