@@ -19,6 +19,7 @@
   <exec_depend>xacro</exec_depend>
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_test</test_depend>
   <test_depend>ament_cmake_lint_cmake</test_depend>
@@ -27,11 +28,14 @@
   <test_depend>builtin_interfaces</test_depend>
   <test_depend>controller_manager_msgs</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>joint_trajectory_controller</test_depend>
   <test_depend>rclpy</test_depend>
   <test_depend>rclcpp</test_depend>
+  <test_depend>rclcpp_action</test_depend>
   <test_depend>sensor_msgs</test_depend>
   <test_depend>std_msgs</test_depend>
   <test_depend>std_srvs</test_depend>
+  <test_depend>trajectory_msgs</test_depend>
   <export>
     <build_type>ament_cmake</build_type>
     <hardware_interface plugin="${prefix}/mech_bringup_plugins.xml"/>
