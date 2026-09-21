@@ -92,8 +92,10 @@ if(BUILD_TESTING)
   find_package(ament_cmake_xmllint REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   find_package(rclcpp REQUIRED)
+  find_package(rclcpp_action REQUIRED)
   find_package(std_msgs REQUIRED)
   find_package(std_srvs REQUIRED)
+  find_package(trajectory_msgs REQUIRED)
 
   # Process-test-only hardware plugin. It exercises the production composite
   # system and AK3 runtime over FakeTransport, and is absent from production
@@ -165,6 +167,22 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION
       "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
 
+  # T10's standard-controller proof: load the installed upstream JTC plugin against
+  # CompositeSystem using the shipped trajectory-controller YAML.
+  ament_add_gtest(${PROJECT_NAME}_jtc_manager_test
+    test/test_jtc_controller_manager.cpp)
+  target_compile_definitions(${PROJECT_NAME}_jtc_manager_test PRIVATE
+    MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(${PROJECT_NAME}_jtc_manager_test ${PROJECT_NAME})
+  ament_target_dependencies(${PROJECT_NAME}_jtc_manager_test
+    controller_manager
+    controller_interface
+    rclcpp_action
+    trajectory_msgs)
+  set_tests_properties(${PROJECT_NAME}_jtc_manager_test PROPERTIES
+    ENVIRONMENT_MODIFICATION
+      "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
+
   ament_add_test(${PROJECT_NAME}_activate_position_controller
     COMMAND bash
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/bench/test_activate_position_controller.sh
@@ -180,6 +198,12 @@ if(BUILD_TESTING)
   ament_add_test(${PROJECT_NAME}_effort_launch
     COMMAND "${Python3_EXECUTABLE}"
       ${CMAKE_CURRENT_SOURCE_DIR}/test/test_effort_launch.py
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_trajectory_launch
+    COMMAND "${Python3_EXECUTABLE}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/test_trajectory_launch.py
     TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 

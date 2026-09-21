@@ -186,6 +186,96 @@ has already stopped and the shaft coasts. Bench tooling must therefore obtain
 its post-latch rest evidence from a fresh passive observation instead of from
 the deactivation acknowledgement. Physical force accuracy still needs metrology.
 
+## Standard controller deployment (JTC)
+
+`motor1_trajectory_bringup.launch.py` loads the upstream
+`joint_trajectory_controller/JointTrajectoryController` using
+`config/motor1_trajectory_controllers.yaml` and the Position hardware xacro.
+Install `ros-humble-joint-trajectory-controller` on the target host first.
+The state broadcaster spawns first; JTC then loads **inactive**. Starting the
+launch still opens the physical transport and requires the bench gates below.
+
+JTC claims only `motor1_joint/position`, with position-only state feedback;
+it does not claim `command_generation`. This is ADR-017's weak tier: at the
+configured 500 Hz, every authorized manager cycle refreshes the hardware
+command and can produce a frame. A controller that stays active but stops
+writing fresh targets is invisible to that freshness check and may keep its
+last target indefinitely. A stalled manager still expires the hardware lease.
+This is the accepted weak-tier risk recorded as R23 in the MVP plan.
+
+ADR-019's hardware envelope checks the absolute target and its error from
+usable feedback before submission; it applies regardless of controller type.
+An offending command is dropped and latched, never clipped into range. The
+shipped bounds are `[-12, 6] rad` and a `0.5 rad` maximum error. This is a
+command boundary, not a physical stop guarantee or an upstream-target watchdog.
+After a latch, obtain fresh passive rest evidence: STRICT deactivation can be
+refused while the hardware is in its error state.
+
+The offline integration test loads the actual upstream plugin through
+`ControllerManager`, with `CompositeSystem`, the AK3 runtime, and
+`FakeTransport`; no serial port is opened. It covers measured-position hold,
+a bounded out-and-back trajectory, continued hardware cycling after
+controller deactivation, and the envelope's frame rejection and latch.
+Humble JTC 2.54 queues a hold in `on_activate()` and writes its command
+interface on the next `update()`. To cover the intervening hardware write,
+CompositeSystem initializes each new weak position claim from the feedback
+already accepted in that cycle (ADR-017). This applies again after release
+and reacquisition; it never seeds strong claims, velocity, effort, release-only
+or rejected switches. The shipped JTC parameter
+`set_last_command_interface_value_as_state_on_activation: false` also makes
+JTC's internal trajectory use measured state. Neither mechanism strengthens
+the weak-tier silence watchdog or guarantees a physical stop.
+A separate persistent Jetson bench operator now exposes
+`./trajectory run [Kp=6] [Kd=1]`, plus `check` and `observe`, from the deployment
+root. It observes a fresh center per run, keeps the same trajectory timing, and
+accepts Kp 0..18 / Kd 0..5. The tuning error envelope is 0.3 rad for Kp <= 10
+and 1.8/Kp rad above 10 (0.1 rad at Kp=18). This bounds only the nominal
+proportional term, not total torque. Deployment validation is not physical
+Kp=6 tracking evidence. See the deployed Chinese operating guide.
+
+Follow-up gain trial (2026-09-18): the owner authorized Kp=4/Kd=1 with the same
+trajectory. The temporary candidate tightened position error to 0.075 rad,
+retaining a nominal 0.3 N*m proportional-term ceiling (not a total torque bound).
+At about 2 s, reference displacement was 5.0 degrees but feedback displacement
+was 0.7 degrees. PositionEnvelope (reason 12) latched; the round trip did not
+complete. STRICT deactivation was refused after the latch, as described above.
+A fresh passive run confirmed rest, zero motor commands, and port release.
+
+Motor1 bench evidence (2026-09-18): an owner-authorized JTC action completed
++0.1745 rad in 4 s, held its target for 1 s, and returned the target in 4 s;
+STRICT deactivation, fresh post-stop rest, fault-free feedback and port release
+passed. Actual feedback moved only about 0.6 degrees from the start and ended
+about 0.5 degrees above it: action success is functional interchangeability
+evidence, not accurate trajectory tracking. Two earlier strict zero-motion
+hold attempts aborted on 40 ERPM; the owner waived that prerequisite to proceed,
+so a successful two-second zero-motion hold is not claimed. ADR-019 remains
+Proposed pending owner acceptance; the follow-up Kp=4 trial above observed a
+physical position-error envelope latch.
+
+Later diagnostic trials used Kp=18/Kd=5 and the same 10-degree displacement,
+with two repeats each of 4 s and 2 s legs. Outbound speed coefficient of
+variation fell from 0.453–0.461 to 0.245–0.260 with faster motion, while absolute
+speed standard deviation increased from about 17–18 to 21–22 ERPM. An
+angle-correlated current/voltage component near a 3.214-degree output period
+persisted. Cross-speed voltage/angle fits with a roughly 26 ms relative lag
+reached R² 0.960–0.979; neither the fit nor the period identifies a unique
+sensor, commutation, encoder or mechanical root cause. Host writes were near
+2 ms apart; this does not establish actual CAN delivery or device timing.
+
+All four diagnostic actions completed, but their immediate post-deactivation
+rest checks failed; separate fresh passive checks subsequently confirmed rest,
+zero motor commands and port release. UART telemetry changed mode about 3 s
+after the last host transmission, so deactivation is not proof of immediate
+rest or torque disable. Precise tracking and full stopping behavior remain
+unqualified.
+
+On 2026-09-21 the owner deferred further jerk/root-cause investigation until
+it recurs in practical use, and authorized committing the lifecycle fix and
+updating PR #20. This deferral does not claim that jerk is fixed, that stopping
+is qualified, or that ADR-019 is accepted. Historical lifecycle validation ran
+414 tests each on local Humble, native ARM64 and ASan/UBSan with no failures.
+Diagnostic tools and raw captures remain local and are not part of this PR.
+
 ## Safety boundary
 
 No default build or test opens a serial device or sends a CAN frame. All

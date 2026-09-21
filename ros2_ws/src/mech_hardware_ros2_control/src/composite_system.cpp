@@ -425,6 +425,26 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
     if (ledger[*index] != 0U) return hardware_interface::return_type::ERROR;
     ledger[*index] = 1U;
   }
+  // A standard position controller may claim only the motion interface.  Its
+  // on_activate() can queue a hold internally without writing the exported
+  // command before this manager switch cycle reaches hardware write().  Seed
+  // only a newly started weak position claim from the feedback sample accepted
+  // by read() above, so that first write is a measured hold rather than the
+  // command buffer's finite zero or a previous controller's target.  The
+  // complete switch has already been validated and reduced to `next`, so a
+  // rejected transaction cannot mutate the command buffer.  Strong claims,
+  // non-position modes, and release-only switches deliberately keep their
+  // existing semantics.
+  for (const auto& name : start_interfaces) {
+    const auto index = resolve_joint_index(name);
+    if (!index.has_value() || is_generation_interface(name) ||
+        joint_command_interface_name(*index) != hardware_interface::HW_IF_POSITION ||
+        next_generation[*index] != 0U) {
+      continue;
+    }
+    commands_[*index].position = states_[*index].position;
+  }
+
   authorized_ = std::move(next);
   generation_claimed_ = std::move(next_generation);
   // ADR-017 Decision 3.4: every joint whose claim just changed hands starts
@@ -452,6 +472,12 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
 
 hardware_interface::return_type CompositeSystem::read(
     const rclcpp::Time&, const rclcpp::Duration&) {
+  // Humble cycles INACTIVE hardware too. configure/deactivate leave the
+  // runtime stopped: retain the last state without inventing a new sample or
+  // turning an ordinary stop into on_error(). A pre-existing fault still fails.
+  if (configured_ && !active_ && !fault_latched_) {
+    return hardware_interface::return_type::OK;
+  }
   if (!active_ || fault_latched_ || !runtime_->read(states_.data(), states_.size())) {
     fault_latched_ = true;
     return hardware_interface::return_type::ERROR;
@@ -470,6 +496,11 @@ hardware_interface::return_type CompositeSystem::read(
 
 hardware_interface::return_type CompositeSystem::write(
     const rclcpp::Time&, const rclcpp::Duration&) {
+  // Do not validate or forward stale command buffers while normally inactive.
+  // Authorization was revoked on deactivate; reactivation requires a new claim.
+  if (configured_ && !active_ && !fault_latched_) {
+    return hardware_interface::return_type::OK;
+  }
   if (!active_ || fault_latched_) return hardware_interface::return_type::ERROR;
   // Every element of commands_ is validated, including unauthorized ones: a
   // controller that wrote a non-finite value into an interface it does not
