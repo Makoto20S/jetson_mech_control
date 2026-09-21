@@ -55,6 +55,15 @@ ADR-015 之所以能把「控制器崩溃/被停用」这条路关掉，正是�
 
 ## Decision / 决策
 
+> **2026-09-21 组合命令修订：** [ADR-014](ADR-014-ak30-submode-command-interfaces.md)
+> 开放 Position 的可选 velocity/effort。下文的“运动接口”对组合部署表示完整运动集合；
+> 一组使用一个 generation、一个授权和一个 pending 租约。开始/释放须包含完整集合，
+> generation 开始时须与完整集合同行；不得留下孤立 generation。新 Position claim
+> 清除旧速度/前馈；弱档同时以已接受反馈初始化位置，强档等新 generation 才提交。
+> 撤销整组 pending 每关节仅一次。弱档无法检测控制器静默的限制继续存在；组合接口
+> 不能解决该缺口。控制器须独占整组，硬件汇总回调不能验证控制器身份。
+
+
 1. **每关节始终导出一个名为 `command_generation` 的命令接口。** 它与运动命令接口（`position`/`velocity`/`effort` 三者之一）并列，属于同一关节。**始终导出、是否 claim 由控制器决定**——把「导出」和「使用」分开，是本 ADR 与其被否决的第一版之间唯一但决定性的差别。
 
 2. **保护等级由 claim 的内容决定，而不是由部署配置决定。** 硬件在 `perform_command_mode_switch()` 时已经拿到完整的 `start_interfaces` 列表（探针实测：两个名字在同一次调用里一起到达），因此它能够观测到该关节进入的是哪一档，无需任何额外配置项，也无需信任任何声明。

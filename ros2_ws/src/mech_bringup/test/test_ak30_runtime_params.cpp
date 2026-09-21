@@ -45,10 +45,53 @@ TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   EXPECT_EQ(parsed->config.command_hard_ttl_nanoseconds, 6000000);
   EXPECT_EQ(parsed->config.feedback_period_nanoseconds, 20000000);
   EXPECT_EQ(parsed->config.feedback_ttl_nanoseconds, 60000000);
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_abs_velocity_rad_s, 0.0);
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_abs_feedforward_nm, 0.0);
   EXPECT_DOUBLE_EQ(parsed->config.mapping.zero_offset_rad.value,
                    5.760604931781636);
   EXPECT_TRUE(parsed->config.mapping.position_is_output_shaft);
   EXPECT_EQ(parsed->device_path, "/dev/ttyACM0");
+}
+
+// Position's optional desired-velocity and torque-feedforward fields are
+// deployment opt-ins.  The parser must accept their exact names and preserve
+// the positive limits so the runtime can reject a whole unsafe tuple instead
+// of silently clipping either auxiliary field.
+TEST(Ak30RuntimeParams, ParsesPositionAuxiliaryLimits) {
+  Params params{{"device_path", "/dev/ttyACM0"},
+                {"sub_mode", "position"},
+                {"position_min_rad", "-12.0"},
+                {"position_max_rad", "6.0"},
+                {"position_max_error_rad", "0.5"},
+                {"position_max_abs_velocity_rad_s", "3.5"},
+                {"position_max_abs_feedforward_nm", "1.25"}};
+
+  const auto parsed = Ak30RuntimeParams::parse(params);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_abs_velocity_rad_s, 3.5);
+  EXPECT_DOUBLE_EQ(parsed->config.position_max_abs_feedforward_nm, 1.25);
+}
+
+TEST(Ak30RuntimeParams, PositionAuxiliaryLimitsRejectNegativeAndWireOverflow) {
+  const Params base{{"device_path", "/dev/ttyACM0"},
+                    {"sub_mode", "position"},
+                    {"position_min_rad", "-12.0"},
+                    {"position_max_rad", "6.0"},
+                    {"position_max_error_rad", "0.5"}};
+  for (const auto* bad : {"-1", "nan", "inf", "40.001"}) {
+    auto params = base;
+    params["position_max_abs_velocity_rad_s"] = bad;
+    EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value()) << bad;
+  }
+  for (const auto* bad : {"-1", "nan", "inf", "15.001"}) {
+    auto params = base;
+    params["position_max_abs_feedforward_nm"] = bad;
+    EXPECT_FALSE(Ak30RuntimeParams::parse(params).has_value()) << bad;
+  }
+  auto disabled = base;
+  disabled["position_max_abs_velocity_rad_s"] = "0";
+  disabled["position_max_abs_feedforward_nm"] = "0";
+  EXPECT_TRUE(Ak30RuntimeParams::parse(disabled).has_value());
 }
 
 TEST(Ak30RuntimeParams, TorqueRequiresExplicitPositiveRawErpmLimit) {

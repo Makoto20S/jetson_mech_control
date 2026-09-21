@@ -52,11 +52,14 @@ class DeploymentFilesTest : public ::testing::Test {
     launch_ = read_file(root + "/launch/motor1_bringup.launch.py");
     trajectory_controllers_ =
         read_file(root + "/config/motor1_trajectory_controllers.yaml");
+    position_velocity_controllers_ = read_file(
+        root + "/config/motor1_position_velocity_trajectory_controllers.yaml");
     trajectory_launch_ =
         read_file(root + "/launch/motor1_trajectory_bringup.launch.py");
     ASSERT_FALSE(controllers_.empty());
     ASSERT_FALSE(launch_.empty());
     ASSERT_FALSE(trajectory_controllers_.empty());
+    ASSERT_FALSE(position_velocity_controllers_.empty());
     ASSERT_FALSE(trajectory_launch_.empty());
     for (const auto& [name, sub_mode] : urdf_variants()) {
       const std::string urdf = read_file(root + "/config/" + name);
@@ -80,6 +83,7 @@ class DeploymentFilesTest : public ::testing::Test {
   std::string controllers_;
   std::string launch_;
   std::string trajectory_controllers_;
+  std::string position_velocity_controllers_;
   std::string trajectory_launch_;
 
   [[nodiscard]] static const std::vector<
@@ -93,6 +97,10 @@ class DeploymentFilesTest : public ::testing::Test {
             {"motor1.urdf.xacro", ForceControlSubMode::Position},
             {"motor1_torque.urdf.xacro", ForceControlSubMode::Torque},
             {"motor1_velocity.urdf.xacro", ForceControlSubMode::Velocity},
+            {"motor1_position_velocity.urdf.xacro",
+             ForceControlSubMode::Position},
+            {"motor1_position_velocity_effort.urdf.xacro",
+             ForceControlSubMode::Position},
         };
     return variants;
   }
@@ -202,7 +210,12 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
       }
       position = close;
     }
-    EXPECT_EQ(command_tags, 2U);
+    const bool position_velocity =
+        variant.file == "motor1_position_velocity.urdf.xacro";
+    const bool position_velocity_effort =
+        variant.file == "motor1_position_velocity_effort.urdf.xacro";
+    EXPECT_EQ(command_tags,
+              position_velocity_effort ? 4U : (position_velocity ? 3U : 2U));
     EXPECT_EQ(generation_tags, 1U);
     for (const auto& states :
          {std::string("position"), std::string("velocity"),
@@ -211,6 +224,38 @@ TEST_F(DeploymentFilesTest, UrdfCommandInterfaceMatchesSubMode) {
                 std::string::npos);
     }
   }
+}
+
+TEST_F(DeploymentFilesTest, PositionVelocityJtcClaimsTheCompleteDeclaredBundle) {
+  const auto& urdf = urdfs_["motor1_position_velocity.urdf.xacro"];
+  EXPECT_NE(urdf.find("<command_interface name=\"position\"/>"),
+            std::string::npos);
+  EXPECT_NE(urdf.find("<command_interface name=\"velocity\"/>"),
+            std::string::npos);
+  EXPECT_EQ(urdf.find("<command_interface name=\"effort\"/>"),
+            std::string::npos);
+  EXPECT_NE(position_velocity_controllers_.find(
+                "type: joint_trajectory_controller/JointTrajectoryController"),
+            std::string::npos);
+  const auto position = position_velocity_controllers_.find("- position");
+  const auto velocity = position_velocity_controllers_.find("- velocity");
+  ASSERT_NE(position, std::string::npos);
+  ASSERT_NE(velocity, std::string::npos);
+  EXPECT_LT(position, velocity);
+  EXPECT_EQ(position_velocity_controllers_.find("- effort"), std::string::npos);
+}
+
+TEST_F(DeploymentFilesTest, FullTupleTemplateDeclaresOneCompleteBundle) {
+  const auto& urdf = urdfs_["motor1_position_velocity_effort.urdf.xacro"];
+  for (const auto* interface : {"position", "velocity", "effort"}) {
+    EXPECT_NE(urdf.find(std::string("<command_interface name=\"") + interface +
+                        "\"/>"),
+              std::string::npos);
+  }
+  EXPECT_NE(urdf.find("position_max_abs_velocity_rad_s\">1.0"),
+            std::string::npos);
+  EXPECT_NE(urdf.find("position_max_abs_feedforward_nm\">0.1"),
+            std::string::npos);
 }
 
 // The hardware plugin in every variant must be the Ak30System composition

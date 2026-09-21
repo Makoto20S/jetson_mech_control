@@ -515,9 +515,9 @@ TEST_F(Ak30SystemPluginTest, RejectedShapeNeverRequestsASerialPort) {
       Rejected{"sub-mode mismatch", "torque",
                {hardware_interface::HW_IF_POSITION}},
       Rejected{"no motion command interface", "position", {}},
-      Rejected{"two motion command interfaces",
-               "position",
-               {hardware_interface::HW_IF_POSITION,
+      Rejected{"velocity singleton with an extra interface",
+               "velocity",
+               {hardware_interface::HW_IF_VELOCITY,
                 hardware_interface::HW_IF_EFFORT}},
       Rejected{"unknown interface name", "position", {"temperature"}}};
 
@@ -569,6 +569,32 @@ TEST_F(Ak30SystemPluginTest, MatchingSubModeAndInterfaceAreAccepted) {
     EXPECT_EQ(system.on_init(hardware_info(
                   params_with_sub_mode(match.sub_mode),
                   {match.declared_interface})),
+              hardware_interface::CallbackReturn::SUCCESS);
+  }
+}
+
+TEST_F(Ak30SystemPluginTest, PositionBundlesRequireExplicitAuxiliaryLimits) {
+  {
+    auto params = params_with_sub_mode("position");
+    EXPECT_EQ(system_.on_init(hardware_info(
+                  params, {hardware_interface::HW_IF_POSITION,
+                           hardware_interface::HW_IF_VELOCITY})),
+              hardware_interface::CallbackReturn::ERROR);
+  }
+  {
+    Ak30System system;
+    auto serial = std::make_shared<FakeSerial>(4096U);
+    system.set_serial_port_factory_for_testing(
+        [owned = serial](const std::string&) {
+          return std::shared_ptr<mech::mech_control_core::CdcSerialPort>(owned);
+        });
+    auto params = params_with_sub_mode("position");
+    params["position_max_abs_velocity_rad_s"] = "3.5";
+    params["position_max_abs_feedforward_nm"] = "1.25";
+    EXPECT_EQ(system.on_init(hardware_info(
+                  params, {hardware_interface::HW_IF_POSITION,
+                           hardware_interface::HW_IF_VELOCITY,
+                           hardware_interface::HW_IF_EFFORT})),
               hardware_interface::CallbackReturn::SUCCESS);
   }
 }

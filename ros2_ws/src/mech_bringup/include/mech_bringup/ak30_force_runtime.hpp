@@ -33,6 +33,7 @@ enum class FeedbackTelemetryReason : std::uint8_t {
   TorqueOverspeed,
   TorqueSpeedUnavailable,
   PositionEnvelope,
+  PositionTuple,
 };
 
 struct FeedbackTelemetryEvent final {
@@ -109,6 +110,11 @@ struct Ak30RuntimeConfig final {
   double position_min_rad{-12.56};
   double position_max_rad{12.56};
   double position_max_error_rad{25.12};
+  // Position's optional desired-velocity and torque-feedforward fields are
+  // disabled by default for legacy position-only deployments. A deployed
+  // auxiliary command interface requires its matching positive limit.
+  double position_max_abs_velocity_rad_s{0.0};
+  double position_max_abs_feedforward_nm{0.0};
 };
 
 // The first production consumer of Ak30ForceControlSession::command_stage()
@@ -231,6 +237,9 @@ class Ak30ForceControlRuntime final
   // ADR-019: set when a Position command left the envelope; cleared only by
   // configure()/start(), like the torque overspeed latch.
   bool position_envelope_latched_{false};
+  // A rejected Position tuple clears all pending fields and remains latched,
+  // so an older tuple cannot transmit after a failed update.
+  bool position_tuple_latched_{false};
 };
 
 }  // namespace mech::mech_bringup

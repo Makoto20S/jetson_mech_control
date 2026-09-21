@@ -48,14 +48,16 @@ constexpr std::uint16_t kDriveId = 104U;
 constexpr std::uint32_t kLogicalBus = 1U;
 constexpr char kHardwareName[] = "ak30_bench";
 constexpr char kJointName[] = "motor1_joint";
-constexpr char kControllerName[] = "motor1_trajectory_controller";
+constexpr char kPositionControllerName[] = "motor1_trajectory_controller";
+constexpr char kPositionVelocityControllerName[] =
+    "motor1_position_velocity_trajectory_controller";
 constexpr std::int64_t kPeriodNanoseconds = 2000000;
 constexpr std::int64_t kFeedbackPeriodNs = 20000000;
 constexpr double kFixtureFeedbackPosition =
     1.5707963267948966 - 5.760604931781636;
 constexpr double kPositionQuantum = 25.12 / 65535.0;
 
-[[nodiscard]] Ak30RuntimeConfig runtime_config() {
+[[nodiscard]] Ak30RuntimeConfig runtime_config(bool position_velocity) {
   Ak30RuntimeConfig config{};
   config.drive_id = kDriveId;
   config.logical_bus = kLogicalBus;
@@ -71,10 +73,12 @@ constexpr double kPositionQuantum = 25.12 / 65535.0;
   config.position_min_rad = -12.0;
   config.position_max_rad = 6.0;
   config.position_max_error_rad = 0.5;
+  if (position_velocity) config.position_max_abs_velocity_rad_s = 1.0;
   return config;
 }
 
-[[nodiscard]] hardware_interface::HardwareInfo hardware_info() {
+[[nodiscard]] hardware_interface::HardwareInfo hardware_info(
+    bool position_velocity) {
   hardware_interface::HardwareInfo info;
   info.name = kHardwareName;
   info.type = "system";
@@ -92,6 +96,10 @@ constexpr double kPositionQuantum = 25.12 / 65535.0;
   joint.command_interfaces = {
       interface(hardware_interface::HW_IF_POSITION),
       interface(mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
+  if (position_velocity) {
+    joint.command_interfaces.insert(joint.command_interfaces.begin() + 1,
+                                    interface(hardware_interface::HW_IF_VELOCITY));
+  }
   joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                             interface(hardware_interface::HW_IF_VELOCITY),
                             interface(hardware_interface::HW_IF_EFFORT)};
@@ -103,8 +111,12 @@ constexpr double kPositionQuantum = 25.12 / 65535.0;
   std::array<std::uint8_t, 64U> payload{};
   payload[0] = static_cast<std::uint8_t>(position_decidegrees >> 8U);
   payload[1] = static_cast<std::uint8_t>(position_decidegrees & 0xFFU);
-  payload[2] = 0x03;
-  payload[3] = 0xE8;
+  // The P+V JTC seeds its interpolation from measured velocity. Keep this
+  // trajectory fixture at rest; the former 10,000 eRPM fixture made JTC
+  // correctly preserve a large initial velocity that immediately exceeded
+  // this deployment's explicit 1 rad/s command bound.
+  payload[2] = 0x00;
+  payload[3] = 0x00;
   payload[4] = 0x00;
   payload[5] = 0xC8;
   payload[6] = 0x28;
@@ -128,14 +140,19 @@ class RecordingTelemetry final : public FeedbackTelemetryCapture {
   std::vector<FeedbackTelemetryEvent> events;
 };
 
-class JtcIntegrationTest : public ::testing::Test {
+class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
  protected:
   static void SetUpTestSuite() {
     if (!rclcpp::ok()) {
-      const std::string params = std::string(MECH_BRINGUP_SOURCE_DIR) +
-                                 "/config/motor1_trajectory_controllers.yaml";
+      const std::string position_params =
+          std::string(MECH_BRINGUP_SOURCE_DIR) +
+          "/config/motor1_trajectory_controllers.yaml";
+      const std::string position_velocity_params =
+          std::string(MECH_BRINGUP_SOURCE_DIR) +
+          "/config/motor1_position_velocity_trajectory_controllers.yaml";
       std::vector<std::string> args{"jtc_manager_test", "--ros-args",
-                                    "--params-file", params};
+                                    "--params-file", position_params,
+                                    "--params-file", position_velocity_params};
       std::vector<char*> argv;
       argv.reserve(args.size());
       for (auto& arg : args) {
@@ -152,14 +169,19 @@ class JtcIntegrationTest : public ::testing::Test {
   }
 
   void SetUp() override {
+    position_velocity_ = GetParam();
+    controller_name_ = position_velocity_ ? kPositionVelocityControllerName
+                                          : kPositionControllerName;
     transport_ = std::make_unique<FakeTransport>(64U);
     auto system =
         std::make_unique<mech::mech_hardware_ros2_control::CompositeSystem>();
     ASSERT_TRUE(system->set_runtime(std::make_unique<Ak30ForceControlRuntime>(
-        *transport_, []() { return steady_now(); }, runtime_config(),
+        *transport_, []() { return steady_now(); },
+        runtime_config(position_velocity_),
         &telemetry_)));
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
-    resources->import_component(std::move(system), hardware_info());
+    resources->import_component(std::move(system),
+                                hardware_info(position_velocity_));
     rclcpp_lifecycle::State active{
         lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
         hardware_interface::lifecycle_state_names::ACTIVE};
@@ -170,15 +192,15 @@ class JtcIntegrationTest : public ::testing::Test {
     rclcpp::NodeOptions options = controller_manager::get_cm_node_options();
     manager_ = std::make_shared<controller_manager::ControllerManager>(
         std::move(resources), executor_, "controller_manager", "", options);
-    controller_ = manager_->load_controller(kControllerName);
+    controller_ = manager_->load_controller(controller_name_);
     ASSERT_NE(controller_, nullptr)
         << "is ros-humble-joint-trajectory-controller installed?";
-    ASSERT_EQ(manager_->configure_controller(kControllerName),
+    ASSERT_EQ(manager_->configure_controller(controller_name_),
               controller_interface::return_type::OK);
     publisher_node_ = std::make_shared<rclcpp::Node>("trajectory_publisher");
     publisher_ = publisher_node_->create_publisher<
         trajectory_msgs::msg::JointTrajectory>(
-        std::string("/") + kControllerName + "/joint_trajectory", 1);
+        std::string("/") + controller_name_ + "/joint_trajectory", 1);
     executor_->add_node(publisher_node_);
     next_cycle_ = std::chrono::steady_clock::now();
     last_feedback_ = next_cycle_ - std::chrono::nanoseconds(kFeedbackPeriodNs);
@@ -187,7 +209,7 @@ class JtcIntegrationTest : public ::testing::Test {
   void TearDown() override {
     if (controller_ && controller_->get_state().id() ==
                            lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
-      (void)drive_switch({}, {kControllerName});
+      (void)drive_switch({}, {controller_name_});
     }
     publisher_.reset();
     publisher_node_.reset();
@@ -276,12 +298,34 @@ class JtcIntegrationTest : public ::testing::Test {
       const double device = mech::mech_protocol_cubemars::dequantize(
           raw, -12.56, 12.56, 16U);
       positions_.push_back(device - Ak30Mapping{}.zero_offset_rad.value);
+      const std::uint32_t raw_velocity =
+          (static_cast<std::uint32_t>(frame.payload[5]) << 4U) |
+          (static_cast<std::uint32_t>(frame.payload[6]) >> 4U);
+      velocities_.push_back(mech::mech_protocol_cubemars::dequantize(
+          raw_velocity, -40.0, 40.0, 12U));
+      const std::uint32_t raw_effort =
+          ((static_cast<std::uint32_t>(frame.payload[6]) & 0x0FU) << 8U) |
+          static_cast<std::uint32_t>(frame.payload[7]);
+      efforts_.push_back(mech::mech_protocol_cubemars::dequantize(
+          raw_effort, -15.0, 15.0, 12U));
     }
   }
 
   [[nodiscard]] std::vector<double> take_positions() {
     std::vector<double> result;
     result.swap(positions_);
+    return result;
+  }
+
+  [[nodiscard]] std::vector<double> take_velocities() {
+    std::vector<double> result;
+    result.swap(velocities_);
+    return result;
+  }
+
+  [[nodiscard]] std::vector<double> take_efforts() {
+    std::vector<double> result;
+    result.swap(efforts_);
     return result;
   }
 
@@ -293,7 +337,17 @@ class JtcIntegrationTest : public ::testing::Test {
                        });
   }
 
+  [[nodiscard]] bool saw_position_tuple_rejection() const {
+    return std::any_of(telemetry_.events.begin(), telemetry_.events.end(),
+                       [](const FeedbackTelemetryEvent& event) {
+                         return event.reason ==
+                                FeedbackTelemetryReason::PositionTuple;
+                       });
+  }
+
   std::uint16_t feedback_position_decidegrees_{900U};
+  bool position_velocity_{false};
+  std::string controller_name_;
   std::unique_ptr<FakeTransport> transport_;
   RecordingTelemetry telemetry_;
   std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
@@ -302,13 +356,15 @@ class JtcIntegrationTest : public ::testing::Test {
   std::shared_ptr<rclcpp::Node> publisher_node_;
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr publisher_;
   std::vector<double> positions_;
+  std::vector<double> velocities_;
+  std::vector<double> efforts_;
   std::chrono::steady_clock::time_point next_cycle_;
   std::chrono::steady_clock::time_point last_feedback_;
 };
 
-TEST_F(JtcIntegrationTest, ActivationAndReactivationHoldMeasuredPosition) {
+TEST_P(JtcIntegrationTest, ActivationAndReactivationHoldMeasuredPosition) {
   establish_feedback();
-  ASSERT_EQ(drive_switch({kControllerName}, {}),
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
             controller_interface::return_type::OK);
   cycle(10);
   auto positions = take_positions();
@@ -317,13 +373,13 @@ TEST_F(JtcIntegrationTest, ActivationAndReactivationHoldMeasuredPosition) {
     EXPECT_NEAR(position, kFixtureFeedbackPosition, kPositionQuantum);
   }
 
-  ASSERT_EQ(drive_switch({}, {kControllerName}),
+  ASSERT_EQ(drive_switch({}, {controller_name_}),
             controller_interface::return_type::OK);
   (void)take_positions();
   feedback_position_decidegrees_ = 1200U;
   establish_feedback();
   EXPECT_TRUE(take_positions().empty());
-  ASSERT_EQ(drive_switch({kControllerName}, {}),
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
             controller_interface::return_type::OK);
   cycle(10);
   positions = take_positions();
@@ -334,9 +390,9 @@ TEST_F(JtcIntegrationTest, ActivationAndReactivationHoldMeasuredPosition) {
   }
 }
 
-TEST_F(JtcIntegrationTest, TrajectoryProducesBoundedMonotoneLegs) {
+TEST_P(JtcIntegrationTest, TrajectoryProducesBoundedMonotoneLegs) {
   establish_feedback();
-  ASSERT_EQ(drive_switch({kControllerName}, {}),
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
             controller_interface::return_type::OK);
   cycle(5);
   (void)take_positions();
@@ -372,23 +428,70 @@ TEST_F(JtcIntegrationTest, TrajectoryProducesBoundedMonotoneLegs) {
   EXPECT_NEAR(positions.back(), kFixtureFeedbackPosition, kPositionQuantum);
 }
 
-TEST_F(JtcIntegrationTest, DeactivationStopsFramesWhileHardwareKeepsCycling) {
+TEST_P(JtcIntegrationTest, PositionVelocityTrajectoryReachesBothWireFields) {
+  if (!position_velocity_) GTEST_SKIP() << "position-only compatibility case";
   establish_feedback();
-  ASSERT_EQ(drive_switch({kControllerName}, {}),
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
+            controller_interface::return_type::OK);
+  cycle(5);
+  (void)take_positions();
+  (void)take_velocities();
+  (void)take_efforts();
+
+  trajectory_msgs::msg::JointTrajectory message;
+  message.joint_names = {kJointName};
+  trajectory_msgs::msg::JointTrajectoryPoint target;
+  target.positions = {kFixtureFeedbackPosition + 0.1};
+  target.velocities = {0.05};
+  target.time_from_start = rclcpp::Duration(1, 0);
+  trajectory_msgs::msg::JointTrajectoryPoint stop;
+  stop.positions = {kFixtureFeedbackPosition + 0.15};
+  stop.velocities = {0.0};
+  stop.time_from_start = rclcpp::Duration(2, 0);
+  message.points = {target, stop};
+  ASSERT_NO_FATAL_FAILURE(wait_for_trajectory_subscription());
+  publisher_->publish(message);
+  cycle(1100);
+
+  const auto positions = take_positions();
+  const auto velocities = take_velocities();
+  const auto efforts = take_efforts();
+  ASSERT_EQ(positions.size(), velocities.size());
+  ASSERT_EQ(positions.size(), efforts.size());
+  EXPECT_TRUE(std::any_of(positions.begin(), positions.end(), [](double value) {
+    return value > kFixtureFeedbackPosition + 0.02;
+  }));
+  EXPECT_TRUE(std::any_of(velocities.begin(), velocities.end(),
+                          [](double value) {
+                            return std::abs(value) > 0.02;
+                          }));
+  double maximum_abs_velocity = 0.0;
+  for (const double velocity : velocities) {
+    maximum_abs_velocity = std::max(maximum_abs_velocity, std::abs(velocity));
+  }
+  EXPECT_LT(maximum_abs_velocity, 1.0);
+  for (const double effort : efforts) {
+    EXPECT_NEAR(effort, 0.0, 30.0 / 4095.0);
+  }
+}
+
+TEST_P(JtcIntegrationTest, DeactivationStopsFramesWhileHardwareKeepsCycling) {
+  establish_feedback();
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
             controller_interface::return_type::OK);
   (void)take_positions();
   cycle(10);
   ASSERT_EQ(take_positions().size(), 10U);
-  ASSERT_EQ(drive_switch({}, {kControllerName}),
+  ASSERT_EQ(drive_switch({}, {controller_name_}),
             controller_interface::return_type::OK);
   (void)take_positions();
   cycle(20);
   EXPECT_TRUE(take_positions().empty());
 }
 
-TEST_F(JtcIntegrationTest, OutOfEnvelopeGoalLatchesAndStopsTransmission) {
+TEST_P(JtcIntegrationTest, OutOfEnvelopeGoalLatchesAndStopsTransmission) {
   establish_feedback();
-  ASSERT_EQ(drive_switch({kControllerName}, {}),
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
             controller_interface::return_type::OK);
   cycle(5);
   (void)take_positions();
@@ -408,12 +511,23 @@ TEST_F(JtcIntegrationTest, OutOfEnvelopeGoalLatchesAndStopsTransmission) {
     EXPECT_LE(std::abs(position - kFixtureFeedbackPosition),
               0.5 + kPositionQuantum);
   }
-  EXPECT_TRUE(saw_position_envelope());
+  // In the P+V deployment the steep 2 rad / 20 ms trajectory can trip the
+  // desired-velocity tuple bound before its position reaches the envelope.
+  // Both are whole-command fail-closed gates; position-only reaches the
+  // envelope directly.
+  if (position_velocity_) {
+    EXPECT_TRUE(saw_position_tuple_rejection());
+  } else {
+    EXPECT_TRUE(saw_position_envelope());
+  }
   cycle(20);
   EXPECT_TRUE(take_positions().empty());
-  EXPECT_NE(drive_switch({}, {kControllerName}),
+  EXPECT_NE(drive_switch({}, {controller_name_}),
             controller_interface::return_type::OK);
 }
+
+INSTANTIATE_TEST_SUITE_P(PositionAndPositionVelocity, JtcIntegrationTest,
+                         ::testing::Values(false, true));
 
 }  // namespace
 }  // namespace mech::mech_bringup

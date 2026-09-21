@@ -47,14 +47,24 @@ constexpr std::size_t kReceiveBudget = 8U;
     return false;
   }
   // ADR-019: checked in every sub-mode, because an envelope that cannot be
-  // evaluated is not an envelope. The error bound is the ceiling on the
-  // torque the device's own Kp term may develop, so zero would forbid every
-  // command while a non-finite or unordered bound would forbid none.
+  // evaluated is not an envelope. The error bound limits the proportional
+  // position term only; zero would forbid every command while a non-finite or
+  // unordered bound would forbid none.
   if (!std::isfinite(config.position_min_rad) ||
       !std::isfinite(config.position_max_rad) ||
       !std::isfinite(config.position_max_error_rad) ||
       config.position_min_rad >= config.position_max_rad ||
       config.position_max_error_rad <= 0.0) {
+    return false;
+  }
+  if (!std::isfinite(config.position_max_abs_velocity_rad_s) ||
+      config.position_max_abs_velocity_rad_s < 0.0 ||
+      config.position_max_abs_velocity_rad_s >
+          config.mapping.ranges.velocity_max_rad_s ||
+      !std::isfinite(config.position_max_abs_feedforward_nm) ||
+      config.position_max_abs_feedforward_nm < 0.0 ||
+      config.position_max_abs_feedforward_nm >
+          config.mapping.ranges.torque_max_nm) {
     return false;
   }
   if (config.drive_id > 255U || config.logical_bus == 0U ||
@@ -92,6 +102,14 @@ constexpr std::size_t kReceiveBudget = 8U;
       break;
   }
   return command.position;
+}
+
+[[nodiscard]] bool position_tuple_is_valid(
+    const Ak30RuntimeConfig& config, const CanonicalCommand& command) noexcept {
+  return std::isfinite(command.position) && std::isfinite(command.velocity) &&
+      std::isfinite(command.effort) &&
+      std::abs(command.velocity) <= config.position_max_abs_velocity_rad_s &&
+      std::abs(command.effort) <= config.position_max_abs_feedforward_nm;
 }
 
 [[nodiscard]] Ak30SessionConfig session_config_from(
@@ -166,6 +184,7 @@ bool Ak30ForceControlRuntime::configure(
   raw_erpm_available_ = false;
   torque_overspeed_latched_ = false;
   position_envelope_latched_ = false;
+  position_tuple_latched_ = false;
   configured_ = true;
   return true;
 }
@@ -183,6 +202,7 @@ bool Ak30ForceControlRuntime::start() noexcept {
   raw_erpm_available_ = false;
   torque_overspeed_latched_ = false;
   position_envelope_latched_ = false;
+  position_tuple_latched_ = false;
   started_ = true;
   return true;
 }
@@ -269,11 +289,25 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
     // cycle it appears, stale or not, and skipping the check here would make
     // the amount of validation depend on how talkative the controller is.
     if (commands[index].fresh) fresh_any = true;
-    // Validate the field(s) the sub-mode consumes (ADR-014): a Torque-mode
-    // device reads effort, a Velocity-mode device reads velocity, and a
-    // Position-mode device reads position. The other members stay at their
-    // constructed zeros and are never mapped into the device command.
-    if (!std::isfinite(consumed_command_value(config_, commands[index].command))) {
+    // Position now consumes an atomic p/v/e tuple. Validate it before the
+    // freshness return too: an invalid stale dispatch must not leave an older
+    // pending tuple eligible for the next read().
+    if (config_.sub_mode ==
+            mech::mech_protocol_cubemars::ForceControlSubMode::Position &&
+        !position_tuple_is_valid(config_, commands[index].command)) {
+      pending_[index] = CanonicalCommand{};
+      pending_deadline_ = MonotonicTime{};
+      have_pending_ = false;
+      fresh_write_ = false;
+      position_tuple_latched_ = true;
+      has_valid_sample_ = false;
+      capture_error(FeedbackTelemetryReason::PositionTuple, clock_());
+      return false;
+    }
+    // Velocity and Torque retain their singleton consumption contracts.
+    if (config_.sub_mode !=
+            mech::mech_protocol_cubemars::ForceControlSubMode::Position &&
+        !std::isfinite(consumed_command_value(config_, commands[index].command))) {
       return false;
     }
   }
@@ -432,14 +466,11 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
   // The session's Expired stage before the first submit only means "no command
   // yet" and was already separated from the real failure above.
   mech::mech_control_core::CanonicalDeviceCommand command{};
-  // ADR-014: map only the member the sub-mode consumes into the device
-  // command; the others keep CanonicalDeviceCommand's zeros, so a Torque
-  // device never sees a position/velocity and a Position device never sees
-  // an effort. Velocity forces effort = 0: the wire's effort field rides
-  // along as feedforward t_ff in every sub-mode, and the bench-proven Kd
-  // bound (torque <= Kd * velocity command) only holds without feedforward
-  // - the probe discipline, now enforced by the runtime instead of trusting
-  // the caller.
+  // Position maps its complete p/v/e tuple. Torque retains effort-only
+  // mapping, while Velocity maps velocity and forces effort = 0 because the
+  // wire's effort field is feedforward in every sub-mode. Kd contributes
+  // through the drive's velocity-error path; it is not a physical total-torque
+  // bound, so disabling Velocity feedforward is a deliberate mode policy.
   switch (config_.sub_mode) {
     case mech::mech_protocol_cubemars::ForceControlSubMode::Velocity:
       command.velocity = pending_[0].velocity;
@@ -449,6 +480,8 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
       break;
     case mech::mech_protocol_cubemars::ForceControlSubMode::Position:
       command.position = pending_[0].position;
+      command.velocity = pending_[0].velocity;
+      command.effort = pending_[0].effort;
       break;
   }
   command.deadline = pending_deadline_;
@@ -527,6 +560,11 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
   if (position_envelope_latched_) {
     has_valid_sample_ = false;
     capture_error(FeedbackTelemetryReason::PositionEnvelope, clock_());
+    return false;
+  }
+  if (position_tuple_latched_) {
+    has_valid_sample_ = false;
+    capture_error(FeedbackTelemetryReason::PositionTuple, clock_());
     return false;
   }
   // Drain received frames into the session. Receiving WouldBlock (no frame

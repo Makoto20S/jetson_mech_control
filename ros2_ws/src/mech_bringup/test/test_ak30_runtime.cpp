@@ -913,6 +913,166 @@ TEST_F(Ak30RuntimeTest, Ak30RuntimeConfigDefaultsSpanTheWireRange) {
   EXPECT_DOUBLE_EQ(config.position_max_error_rad, 25.12);
 }
 
+TEST_F(Ak30RuntimeTest, PositionTupleMapsDesiredVelocityAndFeedforward) {
+  auto config = runtime_config();
+  config.position_max_abs_velocity_rad_s = 3.5;
+  config.position_max_abs_feedforward_nm = 1.25;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); }, config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(runtime.read(states, 1U));
+
+  mech_hardware_ros2_control::CanonicalCommand tuple{};
+  tuple.position = states[0].position;
+  tuple.velocity = 0.3;
+  tuple.effort = 0.2;
+  ASSERT_TRUE(write_authorized(runtime, tuple));
+  ASSERT_TRUE(runtime.read(states, 1U));
+  RawCanFrame sent{};
+  ASSERT_TRUE(transport_->take_transmit(sent));
+
+  mech::mech_control_core::CanonicalDeviceCommand device{};
+  device.position = tuple.position;
+  device.velocity = tuple.velocity;
+  device.effort = tuple.effort;
+  mech::mech_protocol_cubemars::ForceControlCommand expected_command{};
+  mech::mech_protocol_cubemars::to_device_command(
+      config.mapping, ForceControlSubMode::Position, config.gains, device,
+      expected_command);
+  mech::mech_protocol_cubemars::ForceControlPayload expected{};
+  ASSERT_TRUE(mech::mech_protocol_cubemars::encode_force_control(
+      expected_command, config.mapping.ranges, expected));
+  for (std::size_t index = 0U; index < expected.size(); ++index) {
+    EXPECT_EQ(sent.payload[index], expected[index]) << "byte " << index;
+  }
+}
+
+TEST_F(Ak30RuntimeTest, InvalidPositionTupleDropsOlderPendingTupleAndLatches) {
+  auto config = runtime_config();
+  config.position_max_abs_velocity_rad_s = 1.0;
+  config.position_max_abs_feedforward_nm = 0.5;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); }, config);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(runtime.read(states, 1U));
+
+  mech_hardware_ros2_control::CanonicalCommand valid{};
+  valid.position = states[0].position;
+  valid.velocity = 0.2;
+  valid.effort = 0.1;
+  ASSERT_TRUE(write_authorized(runtime, valid));
+
+  // The invalid update is deliberately stale. Validation must still clear the
+  // earlier fresh pending tuple; otherwise the next read could transmit it.
+  auto invalid = valid;
+  invalid.velocity = 1.01;
+  EXPECT_FALSE(write_authorized_stale(runtime, invalid));
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(runtime.motor_command_frames(), 0U);
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+
+  // A later good tuple cannot re-arm this lifecycle's safety latch.
+  EXPECT_TRUE(write_authorized(runtime, valid));
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(runtime.motor_command_frames(), 0U);
+
+  // Only lifecycle recovery clears the latch, and it must not revive either
+  // the previously valid tuple or the rejected tuple.
+  runtime.stop();
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states, 1U));
+  EXPECT_TRUE(runtime.read(states, 1U));
+  EXPECT_EQ(runtime.motor_command_frames(), 0U);
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+}
+
+TEST_F(Ak30RuntimeTest, PositionTupleRejectsEveryNonFiniteMemberWithoutOldPendingLeak) {
+  enum class Field { Position, Velocity, Effort };
+  const std::array<Field, 3U> fields{Field::Position, Field::Velocity, Field::Effort};
+  const std::array<double, 3U> invalid_values{
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::infinity(),
+      -std::numeric_limits<double>::infinity()};
+  for (const auto field : fields) {
+    for (const double invalid_value : invalid_values) {
+      FakeTransport transport{16U};
+      auto config = runtime_config();
+      config.position_max_abs_velocity_rad_s = 1.0;
+      config.position_max_abs_feedforward_nm = 0.5;
+      Ak30ForceControlRuntime runtime(
+          transport, [this]() { return clock_.now(); }, config);
+      ASSERT_TRUE(runtime.configure(1U));
+      ASSERT_TRUE(runtime.start());
+      ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+      mech_hardware_ros2_control::CanonicalState states[1]{};
+      ASSERT_TRUE(runtime.read(states, 1U));
+      mech_hardware_ros2_control::CanonicalCommand valid{};
+      valid.position = states[0].position;
+      valid.velocity = 0.2;
+      valid.effort = 0.1;
+      ASSERT_TRUE(write_authorized(runtime, valid));
+      auto invalid = valid;
+      switch (field) {
+        case Field::Position: invalid.position = invalid_value; break;
+        case Field::Velocity: invalid.velocity = invalid_value; break;
+        case Field::Effort: invalid.effort = invalid_value; break;
+      }
+      EXPECT_FALSE(write_authorized(runtime, invalid));
+      EXPECT_FALSE(runtime.read(states, 1U));
+      EXPECT_EQ(runtime.motor_command_frames(), 0U);
+      EXPECT_EQ(transport.pending_transmit(), 0U);
+    }
+  }
+}
+
+TEST_F(Ak30RuntimeTest, PositionTupleAuxiliaryBoundsAreInclusiveAndDefaultsDisableAuxiliaries) {
+  struct Tuple { double velocity; double effort; bool accepted; };
+  const std::array<Tuple, 7U> cases{
+      Tuple{-1.0, -0.5, true}, Tuple{1.0, 0.5, true},
+      Tuple{-1.001, 0.0, false}, Tuple{1.001, 0.0, false},
+      Tuple{0.0, -0.501, false}, Tuple{0.0, 0.501, false},
+      Tuple{0.0, 0.0, true}};
+  for (const auto test : cases) {
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.position_max_abs_velocity_rad_s = 1.0;
+    config.position_max_abs_feedforward_nm = 0.5;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); }, config);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    mech_hardware_ros2_control::CanonicalCommand tuple{};
+    tuple.position = states[0].position;
+    tuple.velocity = test.velocity;
+    tuple.effort = test.effort;
+    EXPECT_EQ(write_authorized(runtime, tuple), test.accepted);
+    EXPECT_EQ(runtime.read(states, 1U), test.accepted);
+    EXPECT_EQ(transport.pending_transmit(), test.accepted ? 1U : 0U);
+  }
+
+  FakeTransport transport{16U};
+  Ak30ForceControlRuntime defaults(
+      transport, [this]() { return clock_.now(); }, runtime_config());
+  ASSERT_TRUE(defaults.configure(1U));
+  ASSERT_TRUE(defaults.start());
+  ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(defaults.read(states, 1U));
+  mech_hardware_ros2_control::CanonicalCommand nonzero_aux{};
+  nonzero_aux.position = states[0].position;
+  nonzero_aux.velocity = 0.001;
+  EXPECT_FALSE(write_authorized(defaults, nonzero_aux));
+  EXPECT_FALSE(defaults.read(states, 1U));
+  EXPECT_EQ(transport.pending_transmit(), 0U);
+}
+
 // Canonical position the fixture feedback frame decodes to in Position mode:
 // 90 deg minus the provisional zero offset carried by Ak30Mapping{}.
 constexpr double kFixtureFeedbackPosition = 1.5707963267948966 - 5.760604931781636;
@@ -980,16 +1140,10 @@ TEST_F(Ak30RuntimeTest, PositionEnvelopeErrorBoundBothSigns) {
   }
 }
 
-// ADR-019, the unevaluable target. The envelope's own comparisons are both
-// false for a NaN target, so the gate now treats "cannot evaluate" as a
-// violation. This test pins the FIRST wall, not that branch: write() validates
-// the sub-mode's consumed field, so a non-finite position is refused before it
-// can ever become a pending command. The envelope's isfinite() guard is
-// therefore defence in depth against a future path into pending_, and cannot
-// be reached through the public interface - keeping this test at the write()
-// level records which layer actually holds today, instead of asserting a
-// branch no caller can exercise.
-TEST_F(Ak30RuntimeTest, PositionEnvelopeNonFiniteTargetIsRefusedBeforeTheGate) {
+// A non-finite Position member is a tuple safety violation. It must latch at
+// write time, before the envelope comparisons, and a later good target may
+// not make an older pending command transmissible.
+TEST_F(Ak30RuntimeTest, PositionTupleNonFiniteTargetLatchesBeforeEnvelopeGate) {
   for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
                            std::numeric_limits<double>::infinity(),
                            -std::numeric_limits<double>::infinity()}) {
@@ -1010,13 +1164,13 @@ TEST_F(Ak30RuntimeTest, PositionEnvelopeNonFiniteTargetIsRefusedBeforeTheGate) {
     EXPECT_FALSE(write_authorized(runtime, command));
     EXPECT_EQ(transport.pending_transmit(), 0U);
     EXPECT_EQ(runtime.motor_command_frames(), 0U);
-    // No latch: the value was rejected as a command, not as an envelope
-    // violation, so a later in-range target must still be accepted.
+    // A later in-range target cannot clear the tuple latch.
     mech_hardware_ros2_control::CanonicalCommand good{};
     good.position = states[0].position + 0.1;
-    ASSERT_TRUE(write_authorized(runtime, good));
-    EXPECT_TRUE(runtime.read(states, 1U));
-    EXPECT_EQ(runtime.motor_command_frames(), 1U);
+    EXPECT_TRUE(write_authorized(runtime, good));
+    EXPECT_FALSE(runtime.read(states, 1U));
+    EXPECT_EQ(runtime.motor_command_frames(), 0U);
+    EXPECT_EQ(transport.pending_transmit(), 0U);
     for (const auto& event : telemetry.events) {
       EXPECT_NE(event.reason, FeedbackTelemetryReason::PositionEnvelope);
     }

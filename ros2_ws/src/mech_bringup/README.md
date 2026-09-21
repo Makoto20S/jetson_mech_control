@@ -15,8 +15,9 @@ all three deployment xacro examples load it.
   command is frozen through Holding, and Expired faults the system within
   the 3-cycle budget. It never resolves a missing command to `0.0`. Since
   [ADR-014](../../../docs/adr/ADR-014-ak30-submode-command-interfaces.md)
-  it maps commands per sub-mode (Position reads position, Velocity reads
-  velocity with effort forced to 0, Torque reads effort).
+  it maps commands per sub-mode (Position reads position and optional desired
+  velocity/feedforward effort, Velocity reads velocity with effort forced to 0,
+  Torque reads effort).
 - **`Ak30System`** — the production composition point as a pluginlib
   plugin (`mech_bringup/Ak30System`): it injects the serial→transport→runtime
   chain (`PosixCdcSerialPort` -> `UsbCdcTransport` ->
@@ -48,10 +49,10 @@ all three deployment xacro examples load it.
 sub-mode: `position_min_rad` and `position_max_rad` (motor1 example: `-12.0`
 and `6.0`) bound where the shaft may be commanded to go, and
 `position_max_error_rad` (motor1 example: `0.5`) bounds how far a command may
-sit from the latest usable feedback position. The second one is a force limit,
-not a travel limit: in Position sub-mode the applied torque is
-`Kp * (command - measured)`, so with motor1's `Kp = 1 N*m/rad` a `0.5 rad`
-error bound is a `0.5 N*m` ceiling on the torque any controller can request.
+sit from the latest usable feedback position. This bounds the nominal
+proportional term `Kp * (command - measured)`: with motor1's `Kp = 1 N*m/rad`,
+0.5 rad means a 0.5 N*m proportional-term budget. It does not bound total
+torque, which also includes the Kd velocity-error term and optional feedforward.
 For scale, static friction on the unloaded shaft is about `0.2 N*m`. Missing,
 non-finite, `min >= max` or non-positive values reject the hardware at
 initialization (`on_init`), before any device I/O. The other sub-modes do not
@@ -75,7 +76,8 @@ the hardware into its error state and rejects STRICT deactivation there, so
 bench tooling must take post-latch rest evidence from a fresh passive
 observation. See
 [ADR-019](../../../docs/adr/ADR-019-hardware-position-envelope.md); its status
-is Proposed and no bench evidence for the envelope exists yet.
+remains Proposed; the historical Kp4 latch is recorded below, and no new
+combined-command hardware acceptance is claimed.
 
 ### What the error bound costs this deployment
 
@@ -102,13 +104,13 @@ peaks well above the error the move eventually settles at. Under the shipped
 part way through the ramp and latch the hardware before the shaft reaches the
 target, after which STRICT deactivation will be refused until the controller
 manager is restarted (the T9 finding above). This is a prediction from the ramp
-shape and the `Kp = 1` bench numbers, not an observed latch: no bench run of
-the envelope exists. The `2.0 rad/s` slew rate is likewise not reachable under
+shape and the `Kp = 1` bench numbers; the distinct Kp4 trial below later
+observed an envelope latch. The `2.0 rad/s` slew rate is likewise not reachable under
 this envelope at `Kp = 1`: with `Kd = 1` and zero commanded velocity, holding
 `2 rad/s` would need more than `2 rad` of error.
 
 The `0.5 rad` value is the owner-approved one and is kept, because it is the
-torque ceiling (`0.5 N*m` at `Kp = 1`), not a travel budget. Bench procedures
+proportional-term budget (`0.5 N*m` at `Kp = 1`), not a travel budget. Bench procedures
 must still plan each move as if it were one: treat `29 deg` as the ceiling on a
 single target displacement — the T10 trajectory's `0.1745 rad` step is inside.
 
@@ -275,6 +277,41 @@ updating PR #20. This deferral does not claim that jerk is fixed, that stopping
 is qualified, or that ADR-019 is accepted. Historical lifecycle validation ran
 414 tests each on local Humble, native ARM64 and ASan/UBSan with no failures.
 Diagnostic tools and raw captures remain local and are not part of this PR.
+
+## Position desired velocity and feedforward extension
+
+The hardware Position path accepts explicitly declared `position+velocity`,
+`position+effort`, and `position+velocity+effort` bundles. The owning controller
+writes position [rad], desired velocity [rad/s] and feedforward effort [N*m]
+together before each hardware update; configured Kp/Kd are appended by the
+adapter. This does not implement a gravity model or change drive calibration.
+
+`position_max_abs_velocity_rad_s` and `position_max_abs_feedforward_nm` default
+to zero. A declared auxiliary interface requires its explicit positive bound;
+both must be finite and within wire ranges. An invalid auxiliary command
+rejects/latches the whole tuple without transmitting an earlier pending target.
+This emits `PositionTuple` (reason 13); existing reason numbers are unchanged.
+Existing position envelope, feedback freshness and command deadlines still
+apply. These limits do not bound total drive torque or physical speed.
+
+Examples (software-only; values are not approved hardware settings):
+
+- `config/motor1_position_velocity.urdf.xacro` with
+  `config/motor1_position_velocity_trajectory_controllers.yaml` exposes P+V for
+  the installed upstream Humble JTC. Existing position-only files are unchanged.
+- `config/motor1_position_velocity_effort.urdf.xacro` exposes the full P+V+E
+  bundle for a compatible single controller. **Humble JTC cannot command this
+  bundle** because its effort interface must be used alone. No production
+  full-tuple controller is shipped by this extension. Offline controller-manager
+  tests exercise it through a test controller and decode actual fake frames.
+
+Whole bundles must be claimed/released together. Deploy one owner per tuple;
+aggregate hardware switch callbacks cannot identify controller ownership.
+New claims clear old auxiliary values, and weak Position takeover seeds the
+accepted position. Strong generation applies to the whole tuple; weak owners
+remain unable to signal target staleness. Change declared bundles only through
+inactive reconfiguration. No new real experiment or persistent deployment is
+authorized by these examples; await owner approval after the PR.
 
 ## Safety boundary
 

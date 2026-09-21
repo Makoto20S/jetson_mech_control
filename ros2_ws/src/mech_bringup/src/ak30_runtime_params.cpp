@@ -26,6 +26,8 @@ const std::set<std::string>& known_keys() noexcept {
       "position_min_rad",
       "position_max_rad",
       "position_max_error_rad",
+      "position_max_abs_velocity_rad_s",
+      "position_max_abs_feedforward_nm",
       "kp",
       "kd",
       "control_period_ns",
@@ -192,6 +194,24 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
       config.position_max_rad = max_value;
       config.position_max_error_rad = error_value;
     }
+  }
+  if (const auto it = params.find("position_max_abs_velocity_rad_s");
+      it != params.end()) {
+    double value = 0.0;
+    if (!parse_double(it->second, value) || value < 0.0 ||
+        value > config.mapping.ranges.velocity_max_rad_s) {
+      return std::nullopt;
+    }
+    config.position_max_abs_velocity_rad_s = value;
+  }
+  if (const auto it = params.find("position_max_abs_feedforward_nm");
+      it != params.end()) {
+    double value = 0.0;
+    if (!parse_double(it->second, value) || value < 0.0 ||
+        value > config.mapping.ranges.torque_max_nm) {
+      return std::nullopt;
+    }
+    config.position_max_abs_feedforward_nm = value;
   }
   if (const auto it = params.find("kp"); it != params.end()) {
     double value = 0.0;

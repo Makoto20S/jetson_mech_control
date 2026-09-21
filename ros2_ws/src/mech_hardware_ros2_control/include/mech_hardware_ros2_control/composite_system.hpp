@@ -157,15 +157,15 @@ class CompositeSystem : public hardware_interface::SystemInterface {
   // right; returns std::nullopt if no known joint matches the resolved prefix.
   [[nodiscard]] std::optional<std::size_t> resolve_joint_index(
       const std::string& name) const noexcept;
-  // The command-interface name each joint's URDF declared, one of
-  // position/velocity/effort (ADR-014). Decides which CanonicalCommand member
-  // the exported CommandInterface writes into.
-  [[nodiscard]] const std::string& joint_command_interface_name(
+  [[nodiscard]] unsigned char joint_command_interface_mask(
       std::size_t index) const noexcept;
 
   std::unique_ptr<RuntimePort> runtime_;
   std::vector<std::string> joint_names_;
-  std::vector<std::string> joint_command_interface_names_;
+  // Immutable configured motion bundle. Bits identify position, velocity and
+  // effort; the legal bundles are the three singletons and position combined
+  // with either or both auxiliary fields.
+  std::vector<unsigned char> joint_command_interface_masks_;
   std::vector<CanonicalCommand> commands_;
   std::vector<CanonicalState> states_;
   // ADR-017: the storage behind each joint's exported command_generation
@@ -178,6 +178,9 @@ class CompositeSystem : public hardware_interface::SystemInterface {
   // lands on padding bits inside the same word, so it neither crashes nor
   // trips AddressSanitizer.
   std::vector<unsigned char> authorized_;
+  // The motion interfaces currently claimed for each joint. Authorization is
+  // granted only when this equals the joint's complete configured bundle.
+  std::vector<unsigned char> motion_claimed_;
   // ADR-017 Decision 2: whether each joint's controller also claimed the
   // generation interface, i.e. which protection tier that joint is in. Set
   // from the start_interfaces list the manager passes to
