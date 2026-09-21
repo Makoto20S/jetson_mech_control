@@ -107,6 +107,12 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
           {"command_hard_ttl_ns", "6000000"},
           {"feedback_ttl_ns", "20000000"},
           {"zero_offset_rad", "5.760604931781636"},
+          // ADR-019: this map has no sub_mode, so it is the implicit Position
+          // deployment, and Position has no default envelope - the shipped
+          // motor1 values are spelled out here or on_init refuses the map.
+          {"position_min_rad", "-12.0"},
+          {"position_max_rad", "6.0"},
+          {"position_max_error_rad", "0.5"},
           {"position_is_output_shaft", "true"}};
 }
 

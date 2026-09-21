@@ -903,6 +903,208 @@ TEST_F(Ak30RuntimeTest, TorqueFaultBlocksCommandAndOutOfOrderFrameCannotRefreshS
   }
 }
 
+// The code defaults must span the wire's own +/-12.56 rad range, so every
+// test written before ADR-019 keeps exercising the watchdog rather than
+// tripping an envelope it never asked for. Deployments still state theirs.
+TEST_F(Ak30RuntimeTest, Ak30RuntimeConfigDefaultsSpanTheWireRange) {
+  const Ak30RuntimeConfig config{};
+  EXPECT_DOUBLE_EQ(config.position_min_rad, -12.56);
+  EXPECT_DOUBLE_EQ(config.position_max_rad, 12.56);
+  EXPECT_DOUBLE_EQ(config.position_max_error_rad, 25.12);
+}
+
+// Canonical position the fixture feedback frame decodes to in Position mode:
+// 90 deg minus the provisional zero offset carried by Ak30Mapping{}.
+constexpr double kFixtureFeedbackPosition = 1.5707963267948966 - 5.760604931781636;
+
+// ADR-019: the absolute bounds are inclusive on both ends and are checked even
+// before the first feedback sample; the error bound needs a usable sample.
+TEST_F(Ak30RuntimeTest, PositionEnvelopeBoundsAreInclusive) {
+  for (const double target : {-4.6, -4.501, -4.5, -4.25, -4.0, -3.999, -4.001}) {
+    SCOPED_TRACE(target);
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.position_min_rad = -4.5;
+    config.position_max_rad = -4.0;
+    config.position_max_error_rad = 10.0;  // not under test here
+    RecordingTelemetry telemetry;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); },
+                                    config, &telemetry);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.position = target;
+    ASSERT_TRUE(write_authorized(runtime, command));
+    const bool inside = target >= -4.5 && target <= -4.0;
+    EXPECT_EQ(runtime.read(states, 1U), inside);
+    EXPECT_EQ(transport.pending_transmit(), inside ? 1U : 0U);
+    EXPECT_EQ(runtime.motor_command_frames(), inside ? 1U : 0U);
+    if (!inside) {
+      const auto& last = telemetry.events.back();
+      EXPECT_EQ(last.kind, FeedbackTelemetryKind::RuntimeError);
+      EXPECT_EQ(last.reason, FeedbackTelemetryReason::PositionEnvelope);
+    }
+  }
+}
+
+TEST_F(Ak30RuntimeTest, PositionEnvelopeErrorBoundBothSigns) {
+  for (const double delta : {0.4, -0.4, 0.5, -0.5, 0.6, -0.6}) {
+    SCOPED_TRACE(delta);
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.position_min_rad = -12.56;
+    config.position_max_rad = 12.56;
+    config.position_max_error_rad = 0.5;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); }, config);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    ASSERT_NEAR(states[0].position, kFixtureFeedbackPosition, 1e-9);
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    // Built from the measured value the runtime just published, not from the
+    // constant above: the exact +/-0.5 rows assert the bound is inclusive, and
+    // that claim only holds if the subtraction the runtime performs is exact.
+    // At this magnitude (p ~ -4.19) the double (p + 0.5) - p is exact, so the
+    // comparison lands on the bound rather than one ulp past it; against a
+    // constant that merely rounds to the decoded position it would not.
+    command.position = states[0].position + delta;
+    ASSERT_TRUE(write_authorized(runtime, command));
+    const bool inside = std::abs(delta) <= 0.5;
+    EXPECT_EQ(runtime.read(states, 1U), inside);
+    EXPECT_EQ(transport.pending_transmit(), inside ? 1U : 0U);
+  }
+}
+
+// ADR-019, the unevaluable target. The envelope's own comparisons are both
+// false for a NaN target, so the gate now treats "cannot evaluate" as a
+// violation. This test pins the FIRST wall, not that branch: write() validates
+// the sub-mode's consumed field, so a non-finite position is refused before it
+// can ever become a pending command. The envelope's isfinite() guard is
+// therefore defence in depth against a future path into pending_, and cannot
+// be reached through the public interface - keeping this test at the write()
+// level records which layer actually holds today, instead of asserting a
+// branch no caller can exercise.
+TEST_F(Ak30RuntimeTest, PositionEnvelopeNonFiniteTargetIsRefusedBeforeTheGate) {
+  for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+    SCOPED_TRACE(bad);
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.position_max_error_rad = 0.5;
+    RecordingTelemetry telemetry;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); },
+                                    config, &telemetry);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_EQ(transport.inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.position = bad;
+    EXPECT_FALSE(write_authorized(runtime, command));
+    EXPECT_EQ(transport.pending_transmit(), 0U);
+    EXPECT_EQ(runtime.motor_command_frames(), 0U);
+    // No latch: the value was rejected as a command, not as an envelope
+    // violation, so a later in-range target must still be accepted.
+    mech_hardware_ros2_control::CanonicalCommand good{};
+    good.position = states[0].position + 0.1;
+    ASSERT_TRUE(write_authorized(runtime, good));
+    EXPECT_TRUE(runtime.read(states, 1U));
+    EXPECT_EQ(runtime.motor_command_frames(), 1U);
+    for (const auto& event : telemetry.events) {
+      EXPECT_NE(event.reason, FeedbackTelemetryReason::PositionEnvelope);
+    }
+  }
+}
+
+TEST_F(Ak30RuntimeTest, PositionEnvelopeLatchSurvivesCancelAndInRangeCommand) {
+  auto config = runtime_config();
+  config.position_max_error_rad = 0.5;
+  RecordingTelemetry telemetry;
+  Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); },
+                                  config, &telemetry);
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  mech_hardware_ros2_control::CanonicalState states[1]{};
+  ASSERT_TRUE(runtime.read(states, 1U));
+  mech_hardware_ros2_control::CanonicalCommand far{};
+  far.position = kFixtureFeedbackPosition + 2.0;
+  ASSERT_TRUE(write_authorized(runtime, far));
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_FALSE(runtime.has_valid_sample());
+  // Claim cancellation and a perfectly good command do not clear the latch.
+  runtime.cancel_pending(0U);
+  mech_hardware_ros2_control::CanonicalCommand near{};
+  near.position = kFixtureFeedbackPosition;
+  ASSERT_TRUE(write_authorized(runtime, near));
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  EXPECT_FALSE(runtime.read(states, 1U));
+  EXPECT_EQ(runtime.motor_command_frames(), 0U);
+  EXPECT_EQ(transport_->pending_transmit(), 0U);
+  std::size_t envelope_errors = 0U;
+  for (const auto& event : telemetry.events) {
+    if (event.kind == FeedbackTelemetryKind::RuntimeError &&
+        event.reason == FeedbackTelemetryReason::PositionEnvelope) ++envelope_errors;
+  }
+  EXPECT_GE(envelope_errors, 2U);
+  // Only the lifecycle clears it, and a fresh sample is still required first.
+  runtime.stop();
+  ASSERT_TRUE(runtime.start());
+  ASSERT_EQ(transport_->inject_receive(feedback_frame(clock_)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states, 1U));
+  ASSERT_TRUE(write_authorized(runtime, near));
+  EXPECT_TRUE(runtime.read(states, 1U));
+  EXPECT_EQ(transport_->pending_transmit(), 1U);
+}
+
+TEST_F(Ak30RuntimeTest, PositionEnvelopeRejectsInvalidConfiguration) {
+  struct Case { double min; double max; double error; };
+  for (const Case c : {Case{1.0, 1.0, 0.5}, Case{2.0, 1.0, 0.5}, Case{-1.0, 1.0, 0.0},
+                       Case{-1.0, 1.0, -0.1}, Case{std::nan(""), 1.0, 0.5},
+                       Case{-1.0, std::numeric_limits<double>::infinity(), 0.5},
+                       Case{-1.0, 1.0, std::nan("")}}) {
+    auto config = runtime_config();
+    config.position_min_rad = c.min;
+    config.position_max_rad = c.max;
+    config.position_max_error_rad = c.error;
+    Ak30ForceControlRuntime runtime(*transport_, [this]() { return clock_.now(); }, config);
+    EXPECT_FALSE(runtime.configure(1U));
+  }
+}
+
+// The envelope belongs to Position mode; a Velocity or Torque runtime must
+// not evaluate the ignored position member of its commands.
+TEST_F(Ak30RuntimeTest, PositionEnvelopeDoesNotApplyToOtherSubModes) {
+  for (const auto sub_mode : {ForceControlSubMode::Velocity, ForceControlSubMode::Torque}) {
+    FakeTransport transport{16U};
+    auto config = runtime_config();
+    config.sub_mode = sub_mode;
+    config.position_min_rad = -0.1;
+    config.position_max_rad = 0.1;
+    config.position_max_error_rad = 0.01;
+    Ak30ForceControlRuntime runtime(transport, [this]() { return clock_.now(); }, config);
+    ASSERT_TRUE(runtime.configure(1U));
+    ASSERT_TRUE(runtime.start());
+    ASSERT_EQ(transport.inject_receive(speed_feedback(clock_, 0)), TransportResult::Ok);
+    mech_hardware_ros2_control::CanonicalState states[1]{};
+    ASSERT_TRUE(runtime.read(states, 1U));
+    mech_hardware_ros2_control::CanonicalCommand command{};
+    command.position = 9.0;  // ignored member, would violate the envelope
+    command.velocity = 0.1;
+    command.effort = 0.05;
+    ASSERT_TRUE(write_authorized(runtime, command));
+    EXPECT_TRUE(runtime.read(states, 1U));
+    EXPECT_EQ(transport.pending_transmit(), 1U);
+  }
+}
+
 // ADR-014: a Velocity-mode runtime maps only the velocity member and
 // FORCES effort to zero - the wire's effort field rides along as
 // feedforward t_ff in every sub-mode, and the bench-proven Kd bound only

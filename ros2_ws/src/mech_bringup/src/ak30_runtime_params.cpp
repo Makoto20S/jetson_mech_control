@@ -23,6 +23,9 @@ const std::set<std::string>& known_keys() noexcept {
       "device_id",
       "sub_mode",
       "torque_max_abs_erpm",
+      "position_min_rad",
+      "position_max_rad",
+      "position_max_error_rad",
       "kp",
       "kd",
       "control_period_ns",
@@ -160,6 +163,35 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
   } else if (config.sub_mode ==
              mech::mech_protocol_cubemars::ForceControlSubMode::Torque) {
     return std::nullopt;
+  }
+  // ADR-019: the hardware envelope is deployment configuration, never a
+  // code default, so Position deployments must spell out all three values.
+  {
+    const bool position_mode = config.sub_mode ==
+        mech::mech_protocol_cubemars::ForceControlSubMode::Position;
+    const auto minimum = params.find("position_min_rad");
+    const auto maximum = params.find("position_max_rad");
+    const auto error = params.find("position_max_error_rad");
+    const bool any_present = minimum != params.end() ||
+        maximum != params.end() || error != params.end();
+    const bool all_present = minimum != params.end() &&
+        maximum != params.end() && error != params.end();
+    if (position_mode && !all_present) return std::nullopt;
+    if (any_present && !all_present) return std::nullopt;
+    if (all_present) {
+      double min_value = 0.0;
+      double max_value = 0.0;
+      double error_value = 0.0;
+      if (!parse_double(minimum->second, min_value) ||
+          !parse_double(maximum->second, max_value) ||
+          !parse_double(error->second, error_value) ||
+          min_value >= max_value || error_value <= 0.0) {
+        return std::nullopt;
+      }
+      config.position_min_rad = min_value;
+      config.position_max_rad = max_value;
+      config.position_max_error_rad = error_value;
+    }
   }
   if (const auto it = params.find("kp"); it != params.end()) {
     double value = 0.0;
