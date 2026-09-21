@@ -29,6 +29,33 @@ AK3.0 力控（L07 §4.2）的三个子模式共用控制模式 ID `8` 与同一
 
 ## Decision / 决策
 
+### 2026-09-21 Position 组合命令修订
+
+项目负责人授权为 Position 同时开放目标速度和前馈力矩，完成离线验证后提交 PR；
+实机实验必须另获批准。本节取代下列历史 Decision 2–4 中“恰好一个运动接口”和
+“Position 只消费 position”的限制；Velocity/Torque 的单接口语义不变。
+
+- `CompositeSystem` 接受固定运动集合 `{position}`、`{velocity}`、`{effort}`、
+  `{position, velocity}`、`{position, effort}`、`{position, velocity, effort}`，
+  各加一个始终导出的 `command_generation`。重复、未知、`{velocity, effort}` 拒绝。
+- 组合必须整体 claim/release，不允许运行中独立追加辅助接口；一个控制器负责完整组合。
+  同一次 switch 中必须包含完整运动集合，generation 可选。硬件回调只收到汇总接口名，
+  无法证明同一次批量切换中的全部接口属于同一个控制器；部署必须满足单控制器所有权。
+- Position 把 position/velocity/effort 作为一组命令消费；effort 是驱动端的前馈力矩。
+  Kp/Kd 仍为配置值。未导出的辅助字段保持零，新 claim 与撤销清除旧辅助目标。
+- `position_max_abs_velocity_rad_s` 和 `position_max_abs_feedforward_nm` 是辅助命令
+  的独立绝对值边界，默认零（不启用）。导出对应辅助接口要求显式正数边界；边界不得
+  超出协议范围。非有限或超界辅助输入拒绝整组并锁存，不能继续发送此前 pending 命令。
+- 位置包络、新鲜度与租约作用于整组；速度/前馈边界只约束目标输入，不是实际速度或
+  总力矩的上限。实际力矩仍包含 Kp 位置项和 Kd 速度误差项。
+- 原位置单接口部署、自研三个控制器保持原用法。标准 Humble JTC 可使用
+  `{position, velocity}`，但不能同时输出 effort。完整三字段接口供兼容的单一控制器使用；
+  本修订不新增完整阻抗控制器，也不假称 JTC 已支持三字段组合。
+
+详细契约和离线验证见 [Position 组合命令设计](../development/position_feedforward_design.md)。
+下文保留最初决策的动机与验证历史，冲突处以本修订为准。
+
+
 1. **`CanonicalCommand` 扩展为 `{position, velocity, effort}` 三字段（默认 0.0）。** `RuntimePort` 的方法签名不变——端口本来就传递 `const CanonicalCommand*` 数组，这只是载荷扩容；既有实现（`LoopbackRuntime`、`FoundationHarness`、探针）语义兼容。
 
 2. **`CompositeSystem` 每个关节导出恰好一个命令接口，名称 ∈ {`position`, `velocity`, `effort`}**，由 URDF 声明，顺序敏感的精确形状校验保持（state 接口维持恰为 `[position, velocity, effort]` 不变）。命令接口名决定写入 `CanonicalCommand` 的哪个成员（成员指针映射），未导出的成员按构造保持 0.0。这保持 CompositeSystem 厂商中立：它不知道「子模式」，只知道通用接口名集合。

@@ -20,6 +20,26 @@ constexpr std::array<const char*, 3U> kCommandInterfaceNames{
     hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
     hardware_interface::HW_IF_EFFORT};
 
+constexpr unsigned char kPositionCommand = 1U;
+constexpr unsigned char kVelocityCommand = 2U;
+constexpr unsigned char kEffortCommand = 4U;
+
+[[nodiscard]] unsigned char command_interface_bit(
+    const std::string& name) noexcept {
+  if (name == hardware_interface::HW_IF_POSITION) return kPositionCommand;
+  if (name == hardware_interface::HW_IF_VELOCITY) return kVelocityCommand;
+  if (name == hardware_interface::HW_IF_EFFORT) return kEffortCommand;
+  return 0U;
+}
+
+[[nodiscard]] bool valid_command_bundle(unsigned char mask) noexcept {
+  return mask == kPositionCommand || mask == kVelocityCommand ||
+         mask == kEffortCommand ||
+         mask == (kPositionCommand | kVelocityCommand) ||
+         mask == (kPositionCommand | kEffortCommand) ||
+         mask == (kPositionCommand | kVelocityCommand | kEffortCommand);
+}
+
 [[nodiscard]] bool is_command_interface_name(const std::string& name) noexcept {
   for (const char* candidate : kCommandInterfaceNames) {
     if (name == candidate) return true;
@@ -69,10 +89,9 @@ class LoopbackRuntime final : public RuntimePort {
     for (std::size_t index = 0U; index < count; ++index) {
       // Loopback semantics (ADR-014): the position command ramps toward its
       // target as before, and velocity/effort commands feed straight through
-      // into the matching state field. A joint exports exactly one command
-      // interface, so at most one of these members is ever non-zero - the
-      // additive form is deterministic and value-independent without the
-      // runtime needing to know which kind each joint declared.
+      // into the matching state fields. Position deployments may expose both
+      // auxiliary members as one immutable bundle, so the additive form keeps
+      // the loopback deterministic without knowing the configured shape.
       const auto delta = commands_[index].position - states_[index].position;
       const auto step = std::clamp(delta, -0.01, 0.01);
       states_[index].position += step;
@@ -122,27 +141,27 @@ bool exactly_interfaces(const hardware_interface::ComponentInfo& joint,
   for (std::size_t index = 0U; index < expected_state.size(); ++index) {
     if (joint.state_interfaces[index].name != expected_state[index]) return false;
   }
-  // ADR-017 (revising ADR-014 Decision 2): exactly one MOTION command
-  // interface whose name is one of the three canonical kinds, plus exactly one
-  // command_generation interface. The motion name is per-joint configuration,
-  // so the order-sensitive exact list only applies to state interfaces here,
-  // and the generation interface may appear in either position.
+  // The immutable motion bundle is one of p, v, e, p+v, p+e or p+v+e, plus
+  // exactly one command_generation interface. Command-interface order is not
+  // semantic; exported motion members use the canonical p/v/e order.
   //
   // The URDF must declare both even though CLAIMING the generation interface
   // is the controller's choice: the hardware exports it unconditionally, and a
   // deployment that did not declare it would disagree with what is exported.
-  std::size_t motion = 0U;
+  unsigned char motion = 0U;
   std::size_t generation = 0U;
   for (const auto& command : joint.command_interfaces) {
     if (command.name == kCommandGenerationInterface) {
       ++generation;
     } else if (is_command_interface_name(command.name)) {
-      ++motion;
+      const unsigned char bit = command_interface_bit(command.name);
+      if ((motion & bit) != 0U) return false;
+      motion = static_cast<unsigned char>(motion | bit);
     } else {
       return false;
     }
   }
-  return motion == 1U && generation == 1U;
+  return valid_command_bundle(motion) && generation == 1U;
 }
 
 }  // namespace
@@ -186,24 +205,23 @@ hardware_interface::CallbackReturn CompositeSystem::on_init(
   }
   joint_names_.clear();
   joint_names_.reserve(info.joints.size());
-  joint_command_interface_names_.clear();
-  joint_command_interface_names_.reserve(info.joints.size());
+  joint_command_interface_masks_.clear();
+  joint_command_interface_masks_.reserve(info.joints.size());
   for (const auto& joint : info.joints) {
     joint_names_.push_back(joint.name);
-    // The motion interface, not command_interfaces[0]: ADR-017 lets the
-    // generation interface appear in either position, and validate_info has
-    // already established that exactly one of each is present.
+    unsigned char mask = 0U;
     for (const auto& command : joint.command_interfaces) {
       if (command.name != kCommandGenerationInterface) {
-        joint_command_interface_names_.push_back(command.name);
-        break;
+        mask = static_cast<unsigned char>(mask | command_interface_bit(command.name));
       }
     }
+    joint_command_interface_masks_.push_back(mask);
   }
   commands_.assign(info.joints.size(), CanonicalCommand{});
   states_.assign(info.joints.size(), CanonicalState{});
   generations_.assign(info.joints.size(), 0.0);
   authorized_.assign(info.joints.size(), 0U);
+  motion_claimed_.assign(info.joints.size(), 0U);
   generation_claimed_.assign(info.joints.size(), 0U);
   generation_baseline_.assign(info.joints.size(), 0.0);
   dispatch_.assign(info.joints.size(), CommandDispatch{});
@@ -229,12 +247,14 @@ CompositeSystem::export_state_interfaces() {
 std::vector<hardware_interface::CommandInterface>
 CompositeSystem::export_command_interfaces() {
   std::vector<hardware_interface::CommandInterface> result;
-  result.reserve(joint_names_.size() * 2U);
+  result.reserve(joint_names_.size() * 4U);
   for (std::size_t index = 0U; index < joint_names_.size(); ++index) {
-    const std::string& interface_name = joint_command_interface_names_[index];
-    result.emplace_back(
-        joint_names_[index], interface_name,
-        command_member(commands_[index], interface_name));
+    const unsigned char mask = joint_command_interface_mask(index);
+    for (const char* interface_name : kCommandInterfaceNames) {
+      if ((mask & command_interface_bit(interface_name)) == 0U) continue;
+      result.emplace_back(joint_names_[index], interface_name,
+                          command_member(commands_[index], interface_name));
+    }
     // ADR-017 Decision 1: always exported. Whether a controller claims it
     // decides the joint's protection tier, but that decision belongs to the
     // controller, not to the deployment - so the offer is unconditional.
@@ -250,10 +270,16 @@ void CompositeSystem::revoke_all_authorization() noexcept {
   // "the last command still has a few milliseconds of TTL left" - waiting for
   // the hard TTL to lapse leaves a window in which frames still go out.
   std::fill(authorized_.begin(), authorized_.end(), 0U);
+  std::fill(motion_claimed_.begin(), motion_claimed_.end(), 0U);
   // ADR-017: the tier is a property of the claim, so it dies with the claim.
   // A joint that comes back in the weak tier must not inherit the strong
   // tier's bookkeeping from whoever held it last.
   std::fill(generation_claimed_.begin(), generation_claimed_.end(), 0U);
+  for (std::size_t index = 0U; index < commands_.size(); ++index) {
+    if ((joint_command_interface_mask(index) & kPositionCommand) == 0U) continue;
+    commands_[index].velocity = 0.0;
+    commands_[index].effort = 0.0;
+  }
   // Decision 3.4: re-seed from the buffer rather than zeroing. Zero is a value
   // a controller could legitimately be sitting on, and treating it as "no
   // generation yet" would make that controller's next identical write look
@@ -330,19 +356,22 @@ std::optional<std::size_t> CompositeSystem::resolve_joint_index(
   return static_cast<std::size_t>(found - joint_names_.begin());
 }
 
-const std::string& CompositeSystem::joint_command_interface_name(
+unsigned char CompositeSystem::joint_command_interface_mask(
     std::size_t index) const noexcept {
-  return joint_command_interface_names_[index];
+  return joint_command_interface_masks_[index];
 }
 
 bool CompositeSystem::known_command_interface(const std::string& name) const noexcept {
   const auto index = resolve_joint_index(name);
   if (!index.has_value()) return false;
   const std::string prefix = joint_names_[*index] + "/";
-  // ADR-017: a joint now owns two command interfaces. Both are known names;
-  // whether claiming them together is legal is validate_switch's business.
-  return name == prefix + joint_command_interface_name(*index) ||
-         name == prefix + kCommandGenerationInterface;
+  // A joint owns its declared immutable motion bundle plus generation. All are
+  // known names; whether a switch claims them together is validated below.
+  if (name == prefix + kCommandGenerationInterface) return true;
+  const auto slash = name.rfind('/');
+  const std::string suffix = name.substr(slash + 1U);
+  const unsigned char bit = command_interface_bit(suffix);
+  return bit != 0U && (joint_command_interface_mask(*index) & bit) != 0U;
 }
 
 bool CompositeSystem::validate_switch(
@@ -372,20 +401,47 @@ bool CompositeSystem::validate_switch(
       return false;
     }
   }
-  // ADR-017 Decision 5: the generation interface modifies a motion command and
-  // means nothing on its own, so it may only be claimed alongside the motion
-  // interface of the same joint in the same switch. Holding it alone would
-  // occupy a joint without ever commanding it.
-  for (const auto& name : start_interfaces) {
-    if (!is_generation_interface(name)) continue;
+  auto next_motion = motion_claimed_;
+  auto next_generation = generation_claimed_;
+  for (const auto& name : stop_interfaces) {
     const auto index = resolve_joint_index(name);
     if (!index.has_value()) return false;
-    const std::string motion =
-        joint_names_[*index] + "/" + joint_command_interface_name(*index);
-    if (std::find(start_interfaces.begin(), start_interfaces.end(), motion) ==
-        start_interfaces.end()) {
-      return false;
+    if (is_generation_interface(name)) {
+      if (next_generation[*index] == 0U) return false;
+      next_generation[*index] = 0U;
+    } else {
+      const unsigned char bit = command_interface_bit(
+          name.substr(name.rfind('/') + 1U));
+      if ((next_motion[*index] & bit) == 0U) return false;
+      next_motion[*index] = static_cast<unsigned char>(next_motion[*index] & ~bit);
     }
+  }
+  for (const auto& name : start_interfaces) {
+    const auto index = resolve_joint_index(name);
+    if (!index.has_value()) return false;
+    if (is_generation_interface(name)) {
+      if (next_generation[*index] != 0U) return false;
+      next_generation[*index] = 1U;
+      const unsigned char configured = joint_command_interface_mask(*index);
+      unsigned char started = 0U;
+      for (const auto& candidate : start_interfaces) {
+        if (resolve_joint_index(candidate) != index ||
+            is_generation_interface(candidate)) continue;
+        started = static_cast<unsigned char>(started | command_interface_bit(
+            candidate.substr(candidate.rfind('/') + 1U)));
+      }
+      if (started != configured) return false;
+    } else {
+      const unsigned char bit = command_interface_bit(
+          name.substr(name.rfind('/') + 1U));
+      if ((next_motion[*index] & bit) != 0U) return false;
+      next_motion[*index] = static_cast<unsigned char>(next_motion[*index] | bit);
+    }
+  }
+  for (std::size_t index = 0U; index < next_motion.size(); ++index) {
+    const unsigned char configured = joint_command_interface_mask(index);
+    if (next_motion[index] != 0U && next_motion[index] != configured) return false;
+    if (next_generation[index] != 0U && next_motion[index] != configured) return false;
   }
   return true;
 }
@@ -407,23 +463,31 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
   // Motion and generation interfaces resolve to the SAME joint index, so they
   // need separate ledgers: booking both into authorized_ would make a
   // strong-tier controller look like it claimed one joint twice.
-  auto next = authorized_;
+  auto next_motion = motion_claimed_;
   auto next_generation = generation_claimed_;
   for (const auto& name : stop_interfaces) {
     const auto index = resolve_joint_index(name);
     // validate_switch() already checked known_command_interface(), but never
     // index using a value derived from a failed lookup -- defence in depth.
     if (!index.has_value()) return hardware_interface::return_type::ERROR;
-    auto& ledger = is_generation_interface(name) ? next_generation : next;
-    if (ledger[*index] == 0U) return hardware_interface::return_type::ERROR;
-    ledger[*index] = 0U;
+    if (is_generation_interface(name)) {
+      next_generation[*index] = 0U;
+    } else {
+      const unsigned char bit = command_interface_bit(
+          name.substr(name.rfind('/') + 1U));
+      next_motion[*index] = static_cast<unsigned char>(next_motion[*index] & ~bit);
+    }
   }
   for (const auto& name : start_interfaces) {
     const auto index = resolve_joint_index(name);
     if (!index.has_value()) return hardware_interface::return_type::ERROR;
-    auto& ledger = is_generation_interface(name) ? next_generation : next;
-    if (ledger[*index] != 0U) return hardware_interface::return_type::ERROR;
-    ledger[*index] = 1U;
+    if (is_generation_interface(name)) {
+      next_generation[*index] = 1U;
+    } else {
+      const unsigned char bit = command_interface_bit(
+          name.substr(name.rfind('/') + 1U));
+      next_motion[*index] = static_cast<unsigned char>(next_motion[*index] | bit);
+    }
   }
   // A standard position controller may claim only the motion interface.  Its
   // on_activate() can queue a hold internally without writing the exported
@@ -438,14 +502,29 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
   for (const auto& name : start_interfaces) {
     const auto index = resolve_joint_index(name);
     if (!index.has_value() || is_generation_interface(name) ||
-        joint_command_interface_name(*index) != hardware_interface::HW_IF_POSITION ||
+        (joint_command_interface_mask(*index) & kPositionCommand) == 0U ||
         next_generation[*index] != 0U) {
       continue;
     }
     commands_[*index].position = states_[*index].position;
+    commands_[*index].velocity = 0.0;
+    commands_[*index].effort = 0.0;
   }
 
-  authorized_ = std::move(next);
+  for (std::size_t index = 0U; index < next_motion.size(); ++index) {
+    if (motion_claimed_[index] == 0U && next_motion[index] != 0U &&
+        (joint_command_interface_mask(index) & kPositionCommand) != 0U) {
+      commands_[index].velocity = 0.0;
+      commands_[index].effort = 0.0;
+    }
+  }
+  motion_claimed_ = std::move(next_motion);
+  for (std::size_t index = 0U; index < authorized_.size(); ++index) {
+    authorized_[index] = motion_claimed_[index] ==
+                                 joint_command_interface_mask(index)
+                             ? 1U
+                             : 0U;
+  }
   generation_claimed_ = std::move(next_generation);
   // ADR-017 Decision 3.4: every joint whose claim just changed hands starts
   // from the buffer's current value. Without this, a re-claimed joint would
@@ -463,9 +542,17 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
   // switch cannot cancel a live command. A joint appearing in both lists ends
   // up authorized again but still loses its pre-switch command - re-claiming
   // does not inherit the previous controller's target.
+  std::vector<unsigned char> cancelled(joint_names_.size(), 0U);
   for (const auto& name : stop_interfaces) {
     const auto index = resolve_joint_index(name);
-    if (index.has_value()) runtime_->cancel_pending(*index);
+    if (index.has_value() && cancelled[*index] == 0U) {
+      runtime_->cancel_pending(*index);
+      if ((joint_command_interface_mask(*index) & kPositionCommand) != 0U) {
+        commands_[*index].velocity = 0.0;
+        commands_[*index].effort = 0.0;
+      }
+      cancelled[*index] = 1U;
+    }
   }
   return hardware_interface::return_type::OK;
 }

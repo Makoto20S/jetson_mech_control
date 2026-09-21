@@ -67,6 +67,23 @@ hardware_interface::HardwareInfo info_with_command_interface(
   return result;
 }
 
+hardware_interface::HardwareInfo info_with_command_bundle(
+    const std::vector<std::string>& command_interfaces) {
+  auto result = info(1U);
+  result.joints[0].command_interfaces.clear();
+  for (const auto& name : command_interfaces) {
+    hardware_interface::InterfaceInfo value;
+    value.name = name;
+    value.size = 1;
+    result.joints[0].command_interfaces.push_back(value);
+  }
+  hardware_interface::InterfaceInfo generation;
+  generation.name = kCommandGenerationInterface;
+  generation.size = 1;
+  result.joints[0].command_interfaces.push_back(generation);
+  return result;
+}
+
 // info() variant where the first joint's name itself contains a '/', to
 // exercise interface-name resolution that must split on the *last* slash.
 hardware_interface::HardwareInfo info_with_slash_joint_name() {
@@ -232,10 +249,19 @@ struct ActiveSystem final {
   std::vector<hardware_interface::CommandInterface> commands;
 
   explicit ActiveSystem(std::size_t joints) {
+    initialize(info(joints));
+  }
+
+  explicit ActiveSystem(hardware_interface::HardwareInfo hardware_info) {
+    initialize(std::move(hardware_info));
+  }
+
+ private:
+  void initialize(hardware_interface::HardwareInfo hardware_info) {
     auto runtime = std::make_unique<RecordingRuntime>();
     recorder = runtime.get();
     EXPECT_TRUE(system.set_runtime(std::move(runtime)));
-    EXPECT_EQ(system.on_init(info(joints)),
+    EXPECT_EQ(system.on_init(hardware_info),
               hardware_interface::CallbackReturn::SUCCESS);
     commands = system.export_command_interfaces();
     EXPECT_EQ(system.on_configure(state()),
@@ -243,6 +269,8 @@ struct ActiveSystem final {
     EXPECT_EQ(system.on_activate(state()),
               hardware_interface::CallbackReturn::SUCCESS);
   }
+
+ public:
 
   void cycle(int count) {
     for (int index = 0; index < count; ++index) {
@@ -253,6 +281,167 @@ struct ActiveSystem final {
     }
   }
 };
+
+TEST(CompositeSystem, ExportsEverySupportedImmutableMotionBundle) {
+  const std::vector<std::vector<std::string>> bundles{
+      {hardware_interface::HW_IF_POSITION},
+      {hardware_interface::HW_IF_VELOCITY},
+      {hardware_interface::HW_IF_EFFORT},
+      {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY},
+      {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_EFFORT},
+      {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
+       hardware_interface::HW_IF_EFFORT}};
+  for (const auto& bundle : bundles) {
+    CompositeSystem system;
+    ASSERT_EQ(system.on_init(info_with_command_bundle(bundle)),
+              hardware_interface::CallbackReturn::SUCCESS);
+    const auto commands = system.export_command_interfaces();
+    ASSERT_EQ(commands.size(), bundle.size() + 1U);
+    for (std::size_t index = 0U; index < bundle.size(); ++index) {
+      EXPECT_EQ(commands[index].get_interface_name(), bundle[index]);
+    }
+    EXPECT_EQ(commands.back().get_interface_name(), kCommandGenerationInterface);
+  }
+}
+
+TEST(CompositeSystem, BundleClaimsAndReleasesAreTransactional) {
+  ActiveSystem fixture(info_with_command_bundle(
+      {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
+       hardware_interface::HW_IF_EFFORT}));
+  const std::vector<std::string> bundle{
+      "joint_1/position", "joint_1/velocity", "joint_1/effort"};
+
+  EXPECT_EQ(fixture.system.prepare_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+  ASSERT_EQ(fixture.system.prepare_command_mode_switch(bundle, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(bundle, {}),
+            hardware_interface::return_type::OK);
+  EXPECT_TRUE(fixture.system.authorized(0U));
+  EXPECT_EQ(fixture.system.prepare_command_mode_switch({}, {"joint_1/effort"}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(fixture.system.perform_command_mode_switch({}, {"joint_1/effort"}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(fixture.system.authorized(0U));
+  EXPECT_EQ(fixture.recorder->cancels(0U), 0U);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({}, bundle),
+            hardware_interface::return_type::OK);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+  EXPECT_EQ(fixture.recorder->cancels(0U), 1U);
+
+  const std::string generation = "joint_1/command_generation";
+  auto strong_bundle = bundle;
+  strong_bundle.push_back(generation);
+  ASSERT_EQ(fixture.system.prepare_command_mode_switch(strong_bundle, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(strong_bundle, {}),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(fixture.system.prepare_command_mode_switch({}, bundle),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(fixture.system.perform_command_mode_switch({}, bundle),
+            hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(fixture.system.authorized(0U));
+  EXPECT_EQ(fixture.recorder->cancels(0U), 1U);
+  strong_bundle = {generation, "joint_1/effort", "joint_1/position",
+                   "joint_1/velocity"};
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({}, strong_bundle),
+            hardware_interface::return_type::OK);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+  EXPECT_EQ(fixture.recorder->cancels(0U), 2U);
+}
+
+TEST(CompositeSystem, PositionBundleTakeoverClearsAuxiliaryCommands) {
+  ActiveSystem fixture(info_with_command_bundle(
+      {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
+       hardware_interface::HW_IF_EFFORT}));
+  fixture.recorder->measured_position = -2.5;
+  ASSERT_EQ(fixture.system.read(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  command_by_name(fixture.commands, "joint_1/position").set_value(0.7);
+  command_by_name(fixture.commands, "joint_1/velocity").set_value(3.0);
+  command_by_name(fixture.commands, "joint_1/effort").set_value(4.0);
+  const std::vector<std::string> bundle{
+      "joint_1/position", "joint_1/velocity", "joint_1/effort"};
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(bundle, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.write(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  const auto first = fixture.recorder->last_command(0U);
+  EXPECT_DOUBLE_EQ(first.position, -2.5);
+  EXPECT_DOUBLE_EQ(first.velocity, 0.0);
+  EXPECT_DOUBLE_EQ(first.effort, 0.0);
+  command_by_name(fixture.commands, "joint_1/velocity").set_value(1.0);
+  command_by_name(fixture.commands, "joint_1/effort").set_value(2.0);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({}, bundle),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/velocity").get_value(),
+                   0.0);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/effort").get_value(),
+                   0.0);
+
+  command_by_name(fixture.commands, "joint_1/position").set_value(0.9);
+  command_by_name(fixture.commands, "joint_1/velocity").set_value(5.0);
+  command_by_name(fixture.commands, "joint_1/effort").set_value(6.0);
+  auto strong_bundle = bundle;
+  strong_bundle.push_back("joint_1/command_generation");
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(strong_bundle, {}),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/position").get_value(),
+                   0.9);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/velocity").get_value(),
+                   0.0);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/effort").get_value(),
+                   0.0);
+}
+
+TEST(CompositeSystem, GenerationOnlyReleaseCancelsOnlyItsJointExactlyOnce) {
+  ActiveSystem fixture(2U);
+  const std::vector<std::string> strong{
+      "joint_1/position", "joint_1/command_generation"};
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(strong, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_2/position"}, {}),
+            hardware_interface::return_type::OK);
+
+  ASSERT_EQ(fixture.system.perform_command_mode_switch(
+                {}, {"joint_1/command_generation"}),
+            hardware_interface::return_type::OK);
+  EXPECT_TRUE(fixture.system.authorized(0U));
+  EXPECT_TRUE(fixture.system.authorized(1U));
+  EXPECT_EQ(fixture.recorder->cancels(0U), 1U);
+  EXPECT_EQ(fixture.recorder->cancels(1U), 0U);
+}
+
+TEST(CompositeSystem, RejectedMultiJointBundleSwitchDoesNotMutateAnyJoint) {
+  auto hardware_info = info(2U);
+  hardware_info.joints[0] = info_with_command_bundle(
+      {hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
+       hardware_interface::HW_IF_EFFORT})
+                                .joints[0];
+  ActiveSystem fixture(std::move(hardware_info));
+  command_by_name(fixture.commands, "joint_1/position").set_value(0.7);
+  command_by_name(fixture.commands, "joint_1/velocity").set_value(3.0);
+  command_by_name(fixture.commands, "joint_1/effort").set_value(4.0);
+
+  EXPECT_EQ(fixture.system.perform_command_mode_switch(
+                {"joint_1/position", "joint_1/velocity", "joint_1/effort",
+                 "joint_2/position", "joint_2/position"},
+                {}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_FALSE(fixture.system.authorized(0U));
+  EXPECT_FALSE(fixture.system.authorized(1U));
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/position").get_value(),
+                   0.7);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/velocity").get_value(),
+                   3.0);
+  EXPECT_DOUBLE_EQ(command_by_name(fixture.commands, "joint_1/effort").get_value(),
+                   4.0);
+  EXPECT_EQ(fixture.recorder->cancels(0U), 0U);
+  EXPECT_EQ(fixture.recorder->cancels(1U), 0U);
+}
 
 // Exercise the switch-cycle write before the incoming controller updates.
 TEST(CompositeSystem, WeakPositionTakeoverHoldsAcceptedNonzeroPosition) {
@@ -559,7 +748,7 @@ TEST(CompositeSystem, ExportsEffortAndVelocityCommandInterfaces) {
   }
 }
 
-TEST(CompositeSystem, WeakVelocityAndEffortTakeoverPreserveCommandBuffers) {
+TEST(CompositeSystem, VelocityAndEffortClaimsPreserveBuffersAcrossLifecycle) {
   for (const char* mode :
        {hardware_interface::HW_IF_VELOCITY, hardware_interface::HW_IF_EFFORT}) {
     SCOPED_TRACE(mode);
@@ -583,6 +772,18 @@ TEST(CompositeSystem, WeakVelocityAndEffortTakeoverPreserveCommandBuffers) {
               hardware_interface::return_type::OK);
     EXPECT_DOUBLE_EQ(recorder->last_command(0U).position, 0.0);
     EXPECT_EQ(recorder->fresh_writes(0U), 1U);
+    ASSERT_EQ(system.perform_command_mode_switch(
+                  {}, {std::string("joint_1/") + mode}),
+              hardware_interface::return_type::OK);
+    EXPECT_DOUBLE_EQ(commands[0].get_value(), 0.7);
+    ASSERT_EQ(system.perform_command_mode_switch(
+                  {std::string("joint_1/") + mode}, {}),
+              hardware_interface::return_type::OK);
+    EXPECT_DOUBLE_EQ(commands[0].get_value(), 0.7);
+    ASSERT_EQ(system.on_deactivate(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    EXPECT_DOUBLE_EQ(commands[0].get_value(), 0.7);
+    EXPECT_EQ(recorder->cancels(0U), 2U);
   }
 }
 
@@ -840,12 +1041,10 @@ TEST(CompositeSystem, RejectsMalformedCommandInterfaceSets) {
   // Unknown motion-interface name.
   EXPECT_TRUE(rejects(info_with_command_interface("acceleration")));
 
-  // Two motion interfaces (position + effort), the shape a permissive subset
-  // would have let through.
-  auto two_motion = info(1U);
-  two_motion.joints[0].command_interfaces.push_back(
-      named(hardware_interface::HW_IF_EFFORT));
-  EXPECT_TRUE(rejects(two_motion));
+  // Velocity plus effort without position is not a supported immutable bundle.
+  auto velocity_effort = info_with_command_bundle(
+      {hardware_interface::HW_IF_VELOCITY, hardware_interface::HW_IF_EFFORT});
+  EXPECT_TRUE(rejects(velocity_effort));
 
   // No command interfaces at all.
   auto none = info(1U);

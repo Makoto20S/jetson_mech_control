@@ -100,7 +100,8 @@ class RecordingTelemetry final : public FeedbackTelemetryCapture {
   return config;
 }
 
-[[nodiscard]] hardware_interface::HardwareInfo hardware_info() {
+[[nodiscard]] hardware_interface::HardwareInfo hardware_info(
+    bool full_tuple = false) {
   hardware_interface::HardwareInfo info;
   info.name = kHardwareName;
   info.type = "system";
@@ -120,6 +121,12 @@ class RecordingTelemetry final : public FeedbackTelemetryCapture {
       interface(hardware_interface::HW_IF_POSITION),
       interface(
           mech::mech_hardware_ros2_control::kCommandGenerationInterface)};
+  if (full_tuple) {
+    joint.command_interfaces.insert(joint.command_interfaces.begin() + 1,
+                                    interface(hardware_interface::HW_IF_VELOCITY));
+    joint.command_interfaces.insert(joint.command_interfaces.begin() + 2,
+                                    interface(hardware_interface::HW_IF_EFFORT));
+  }
   joint.state_interfaces = {interface(hardware_interface::HW_IF_POSITION),
                             interface(hardware_interface::HW_IF_VELOCITY),
                             interface(hardware_interface::HW_IF_EFFORT)};
@@ -163,13 +170,19 @@ class RecordingTelemetry final : public FeedbackTelemetryCapture {
 // framework exists (02_architecture_and_interfaces.md).
 class WriterController final : public controller_interface::ControllerInterface {
  public:
-  explicit WriterController(bool strong_tier) noexcept
-      : strong_tier_(strong_tier) {}
+  explicit WriterController(bool strong_tier, bool full_tuple = false) noexcept
+      : strong_tier_(strong_tier), full_tuple_(full_tuple) {}
 
   controller_interface::InterfaceConfiguration
   command_interface_configuration() const override {
     std::vector<std::string> names{std::string(kJointName) + "/" +
                                    hardware_interface::HW_IF_POSITION};
+    if (full_tuple_) {
+      names.push_back(std::string(kJointName) + "/" +
+                      hardware_interface::HW_IF_VELOCITY);
+      names.push_back(std::string(kJointName) + "/" +
+                      hardware_interface::HW_IF_EFFORT);
+    }
     if (strong_tier_) {
       names.push_back(
           std::string(kJointName) + "/" +
@@ -191,16 +204,22 @@ class WriterController final : public controller_interface::ControllerInterface 
   controller_interface::return_type update(const rclcpp::Time&,
                                            const rclcpp::Duration&) override {
     ++updates_;
-    const std::size_t expected = strong_tier_ ? 2U : 1U;
+    const std::size_t expected = 1U + (full_tuple_ ? 2U : 0U) +
+                                 (strong_tier_ ? 1U : 0U);
     if (updates_ <= writes_allowed_ &&
         command_interfaces_.size() == expected) {
       command_interfaces_[0].set_value(target_);
+      if (full_tuple_) {
+        command_interfaces_[1].set_value(velocity_target_);
+        command_interfaces_[2].set_value(effort_target_);
+      }
       // ADR-017: the generation is what makes this write observable to the
       // hardware. It changes only when a real target is written, never on a
       // bare manager cycle. A weak-tier controller has nothing to bump, which
       // is precisely the gap it leaves open.
       if (strong_tier_) {
-        command_interfaces_[1].set_value(static_cast<double>(++generation_));
+        command_interfaces_[expected - 1U].set_value(
+            static_cast<double>(++generation_));
       }
       ++writes_;
     }
@@ -230,10 +249,18 @@ class WriterController final : public controller_interface::ControllerInterface 
   // change the outcome.
   void allow_writes(std::size_t count) noexcept { writes_allowed_ = count; }
   [[nodiscard]] std::size_t writes() const noexcept { return writes_; }
+  void set_tuple(double position, double velocity, double effort) noexcept {
+    target_ = position;
+    velocity_target_ = velocity;
+    effort_target_ = effort;
+  }
 
  private:
   bool strong_tier_;
+  bool full_tuple_;
   double target_{0.25};
+  double velocity_target_{0.0};
+  double effort_target_{0.0};
   std::size_t updates_{0U};
   std::size_t writes_{0U};
   std::size_t writes_allowed_{0U};
@@ -246,6 +273,7 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
   // cases below reuse this whole fixture by overriding one answer; SetUp() runs
   // after construction, so the override is in effect by the time it is read.
   [[nodiscard]] virtual bool strong_tier() const { return true; }
+  [[nodiscard]] virtual bool full_tuple() const { return false; }
 
   // Lets a derived fixture tighten the runtime configuration before the
   // component is imported; the default is the shared runtime_config().
@@ -279,7 +307,7 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
         telemetry())));
 
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
-    resources->import_component(std::move(system), hardware_info());
+    resources->import_component(std::move(system), hardware_info(full_tuple()));
     rclcpp_lifecycle::State active{
         lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
         hardware_interface::lifecycle_state_names::ACTIVE};
@@ -297,7 +325,8 @@ class ControllerManagerIntegrationTest : public ::testing::Test {
     manager_ = std::make_shared<controller_manager::ControllerManager>(
         std::move(resources), executor_, "test_controller_manager", "", options);
 
-    controller_ = std::make_shared<WriterController>(strong_tier());
+    controller_ =
+        std::make_shared<WriterController>(strong_tier(), full_tuple());
     ASSERT_NE(manager_->add_controller(controller_, kControllerName,
                                        kControllerType),
               nullptr);
@@ -678,6 +707,168 @@ TEST_F(WeakTierEnvelopeTest, WeakTierControllerCannotEscapeTheEnvelope) {
     }
   }
   EXPECT_GT(envelope_errors, 0U);
+}
+
+class FullTupleManagerTest : public ControllerManagerIntegrationTest {
+ protected:
+  [[nodiscard]] bool strong_tier() const override { return false; }
+  [[nodiscard]] bool full_tuple() const override { return true; }
+  [[nodiscard]] Ak30RuntimeConfig fixture_runtime_config() const override {
+    auto config = runtime_config();
+    config.position_max_abs_velocity_rad_s = 1.0;
+    config.position_max_abs_feedforward_nm = 0.5;
+    return config;
+  }
+
+  struct DecodedTuple {
+    double kp;
+    double kd;
+    double position;
+    double velocity;
+    double effort;
+  };
+
+  [[nodiscard]] DecodedTuple take_last_tuple() {
+    RawCanFrame frame{};
+    RawCanFrame last{};
+    bool found = false;
+    while (transport_->take_transmit(frame)) {
+      last = frame;
+      found = true;
+    }
+    EXPECT_TRUE(found);
+    EXPECT_EQ(last.id.value, 0x0868U);
+    EXPECT_EQ(last.id.format, CanFrameFormat::Extended);
+    EXPECT_EQ(last.type, CanFrameType::Classic);
+    EXPECT_EQ(last.payload_size, 8U);
+    const auto raw_position =
+        (static_cast<std::uint32_t>(last.payload[3]) << 8U) |
+        static_cast<std::uint32_t>(last.payload[4]);
+    const auto raw_velocity =
+        (static_cast<std::uint32_t>(last.payload[5]) << 4U) |
+        (static_cast<std::uint32_t>(last.payload[6]) >> 4U);
+    const auto raw_effort =
+        ((static_cast<std::uint32_t>(last.payload[6]) & 0x0FU) << 8U) |
+        static_cast<std::uint32_t>(last.payload[7]);
+    const auto raw_kp =
+        (static_cast<std::uint32_t>(last.payload[0]) << 4U) |
+        (static_cast<std::uint32_t>(last.payload[1]) >> 4U);
+    const auto raw_kd =
+        ((static_cast<std::uint32_t>(last.payload[1]) & 0x0FU) << 8U) |
+        static_cast<std::uint32_t>(last.payload[2]);
+    return {mech::mech_protocol_cubemars::dequantize(raw_kp, 0.0, 500.0,
+                                                      12U),
+            mech::mech_protocol_cubemars::dequantize(raw_kd, 0.0, 5.0, 12U),
+            mech::mech_protocol_cubemars::dequantize(
+                raw_position, -12.56, 12.56, 16U),
+            mech::mech_protocol_cubemars::dequantize(
+                raw_velocity, -40.0, 40.0, 12U),
+            mech::mech_protocol_cubemars::dequantize(
+                raw_effort, -15.0, 15.0, 12U)};
+  }
+
+  void drain_transmit() {
+    RawCanFrame frame{};
+    while (transport_->take_transmit(frame)) {
+    }
+  }
+};
+
+TEST_F(FullTupleManagerTest,
+       FullTupleReclaimClearsAuxiliariesAndDoesNotReplayStaleValues) {
+  establish_feedback();
+  controller_->allow_writes(0U);
+  activate_controller();
+  cycle(1);
+  const auto takeover = take_last_tuple();
+  EXPECT_NEAR(takeover.velocity, 0.0, 80.0 / 4095.0);
+  EXPECT_NEAR(takeover.effort, 0.0, 30.0 / 4095.0);
+
+  controller_->set_tuple(-4.0, 0.4, 0.2);
+  controller_->allow_writes(kWritesUntilSilenced);
+  cycle(2);
+  const auto commanded = take_last_tuple();
+  EXPECT_NEAR(commanded.position,
+              -4.0 + Ak30Mapping{}.zero_offset_rad.value,
+              25.12 / 65535.0);
+  EXPECT_NEAR(commanded.kp, 1.0, 500.0 / 4095.0);
+  EXPECT_NEAR(commanded.kd, 1.0, 5.0 / 4095.0);
+  EXPECT_NEAR(commanded.velocity, 0.4, 80.0 / 4095.0);
+  EXPECT_NEAR(commanded.effort, 0.2, 30.0 / 4095.0);
+
+  deactivate_controller();
+  drain_transmit();
+  cycle(10);
+  EXPECT_EQ(transmitted(), 0U);
+
+  controller_->allow_writes(0U);
+  activate_controller();
+  cycle(1);
+  const auto reclaimed = take_last_tuple();
+  EXPECT_NEAR(reclaimed.velocity, 0.0, 80.0 / 4095.0);
+  EXPECT_NEAR(reclaimed.effort, 0.0, 30.0 / 4095.0);
+}
+
+TEST_F(FullTupleManagerTest, InvalidAuxiliaryRejectsWholeTupleAndLatches) {
+  establish_feedback();
+  controller_->allow_writes(0U);
+  activate_controller();
+  cycle(1);
+  drain_transmit();
+
+  controller_->set_tuple(-4.0, 1.5, 0.2);
+  controller_->allow_writes(kWritesUntilSilenced);
+  // read() precedes update()/write(): this first cycle submits the valid
+  // zero-auxiliary hold stored by the preceding weak-tier manager write, then
+  // the controller writes the invalid tuple and the runtime rejects/latches it.
+  // Account for that already-pending frame explicitly; it is not any part of
+  // the rejected tuple.
+  cycle(1);
+  const auto preceding_hold = take_last_tuple();
+  EXPECT_NEAR(preceding_hold.velocity, 0.0, 80.0 / 4095.0);
+  EXPECT_NEAR(preceding_hold.effort, 0.0, 30.0 / 4095.0);
+  cycle(1);
+  EXPECT_EQ(transmitted(), 0U);
+  controller_->set_tuple(-4.0, 0.2, 0.1);
+  cycle(10);
+  EXPECT_EQ(transmitted(), 0U);
+  EXPECT_NE(drive_switch({}, {kControllerName}),
+            controller_interface::return_type::OK);
+}
+
+TEST_F(FullTupleManagerTest, PartialControllerCannotClaimAFullTupleBundle) {
+  constexpr char kPartialController[] = "partial_writer";
+  auto partial = std::make_shared<WriterController>(false, false);
+  ASSERT_NE(manager_->add_controller(partial, kPartialController,
+                                     kControllerType),
+            nullptr);
+  ASSERT_EQ(manager_->configure_controller(kPartialController),
+            controller_interface::return_type::OK);
+  establish_feedback();
+  EXPECT_NE(drive_switch({kPartialController}, {}),
+            controller_interface::return_type::OK);
+  EXPECT_EQ(partial->get_state().id(),
+            lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  EXPECT_EQ(transmitted(), 0U);
+}
+
+class StrongFullTupleManagerTest : public FullTupleManagerTest {
+ protected:
+  [[nodiscard]] bool strong_tier() const override { return true; }
+};
+
+TEST_F(StrongFullTupleManagerTest,
+       UnchangedGenerationExpiresWithoutRefreshingTheFullTuple) {
+  establish_feedback();
+  controller_->set_tuple(-4.0, 0.4, 0.2);
+  controller_->allow_writes(1U);
+  activate_controller();
+  cycle(2);
+  const auto after_command = transmitted();
+  ASSERT_GE(after_command, 1U);
+  cycle(20);
+  EXPECT_EQ(transmitted(), after_command);
+  EXPECT_EQ(controller_->writes(), 1U);
 }
 
 }  // namespace

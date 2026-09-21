@@ -14,6 +14,7 @@
 
 #include "mech_bringup/ak30_force_runtime.hpp"
 #include "mech_bringup/pass_through_init.hpp"
+#include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "mech_bringup/posix_cdc_serial_port.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -192,24 +193,47 @@ hardware_interface::CallbackReturn Ak30System::on_init(
   const char* const expected_command_interface =
       expected_command_interface_name(parsed->config.sub_mode);
   for (const auto& joint : info.joints) {
-    // ADR-017 revised the shape to one motion interface plus one
-    // command_generation interface, so this checks the MOTION interface by
-    // name instead of counting all of them. Re-counting here would duplicate
-    // CompositeSystem::validate_info() and have to be edited in lockstep with
-    // it; what only this class knows is which motion interface the sub_mode
-    // requires.
-    std::size_t motion_interfaces = 0U;
+    // CompositeSystem validates the generic bundle shape. This AK30 boundary
+    // adds the vendor sub-mode rule: Velocity and Torque remain singleton
+    // modes, while Position requires position and may export velocity and/or
+    // effort only with explicit positive runtime limits.
+    bool has_position = false;
+    bool has_velocity = false;
+    bool has_effort = false;
     for (const auto& command : joint.command_interfaces) {
       if (command.name ==
           mech::mech_hardware_ros2_control::kCommandGenerationInterface) {
         continue;
       }
-      ++motion_interfaces;
-      if (command.name != expected_command_interface) {
+      if (command.name == hardware_interface::HW_IF_POSITION) {
+        has_position = true;
+      } else if (command.name == hardware_interface::HW_IF_VELOCITY) {
+        has_velocity = true;
+      } else if (command.name == hardware_interface::HW_IF_EFFORT) {
+        has_effort = true;
+      } else {
         return hardware_interface::CallbackReturn::ERROR;
       }
     }
-    if (motion_interfaces != 1U) {
+    const std::size_t motion_interfaces =
+        (has_position ? 1U : 0U) + (has_velocity ? 1U : 0U) +
+        (has_effort ? 1U : 0U);
+    if (parsed->config.sub_mode !=
+        mech::mech_protocol_cubemars::ForceControlSubMode::Position) {
+      if (motion_interfaces != 1U ||
+          (has_position && expected_command_interface !=
+              std::string(hardware_interface::HW_IF_POSITION)) ||
+          (has_velocity && expected_command_interface !=
+              std::string(hardware_interface::HW_IF_VELOCITY)) ||
+          (has_effort && expected_command_interface !=
+              std::string(hardware_interface::HW_IF_EFFORT))) {
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+    } else if (!has_position ||
+               (has_velocity &&
+                parsed->config.position_max_abs_velocity_rad_s <= 0.0) ||
+               (has_effort &&
+                parsed->config.position_max_abs_feedforward_nm <= 0.0)) {
       return hardware_interface::CallbackReturn::ERROR;
     }
   }

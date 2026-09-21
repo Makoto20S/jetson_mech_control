@@ -1,4 +1,4 @@
-# ADR-019：硬件位置包络与命令力矩上限
+# ADR-019：硬件位置包络与比例项边界
 
 - **Decision ID:** ADR-019
 - **Status:** Proposed
@@ -12,8 +12,10 @@ The project owner approved this design on 2026-09-17, before implementation,
 as part of the T10 design document. It is therefore submitted `Proposed` on the
 approve-then-implement path used by ADR-015 through ADR-017. It moves to
 `Accepted` only after motor1 bench evidence taken with a standard
-`ros2_control` controller. **No bench evidence exists for the envelope itself
-and none is claimed here.** This decision authorizes no device operation;
+`ros2_control` controller and owner acceptance. The historical Kp4 trial later
+observed a position-error latch (planning index), but acceptance is still pending.
+The Position auxiliary-command extension has no real-device validation.
+This decision authorizes no device operation;
 [ADR-006](ADR-006-conditional-can0-deployment.md) Decision 7 per-run
 authorization and the G0-G3 gates still apply.
 
@@ -39,8 +41,8 @@ planned a hardware-side final bound on every command precisely so that a
 mis-initialized controller could not escape the boundary, and no slice
 delivered it.
 
-The physics make the missing bound concrete. In Position sub-mode the applied
-torque is `Kp * (command - measured)`, with motor1 shipping `Kp = 1 N*m/rad`
+The physics make the missing bound concrete. In Position sub-mode the proportional
+torque term is `Kp * (command - measured)`, with motor1 shipping `Kp = 1 N*m/rad`
 and `Kd = 1`. On the T9 bench (2026-09-17, unloaded shaft) static friction was
 about `0.2 N*m`, and `0.2 N*m` accelerated the shaft at roughly `28 rad/s^2`
 after breakaway. The distance between the commanded and the measured position
@@ -85,22 +87,25 @@ encodable value.
 
 ## Physical meaning / 物理含义
 
-Because the applied torque is `Kp * (command - measured)`,
-`position_max_error_rad * Kp` is the largest torque any controller can ask the
-hardware for. At motor1's `Kp = 1 N*m/rad` the shipped `0.5 rad` means
-`0.5 N*m`. For scale: static friction on the unloaded shaft is about
-`0.2 N*m`, and that torque produced roughly `28 rad/s^2` after breakaway.
+The position-error envelope bounds only the nominal proportional term:
+`|Kp * (position_target - position_feedback)| <= Kp * position_max_error_rad`
+at the accepted feedback sample. At Kp=1, 0.5 rad gives a 0.5 N*m proportional
+term budget. It is not a total torque limit, even when desired velocity and
+feedforward are zero: the Kd damping term remains.
 
-The ceiling bounds what a controller may **request**; it does not bound what
-the device does afterwards. Once a command is accepted the drive holds that
-target on its own, so if an external force displaces the shaft while no new
-frame is being accepted — the moments right after a latch, for instance — the
-device-side torque `Kp * (last_command - position)` can grow past the ceiling
-until the drive's own 1000 ms loss-of-control timeout releases it.
+With the 2026-09-21 Position extension (ADR-014), the drive receives
+`Kp*(p_des-p) + Kd*(v_des-v) + torque_ff`. Separate
+`position_max_abs_velocity_rad_s` and `position_max_abs_feedforward_nm` bound
+only the requested auxiliary values. They default to zero, and enabling an
+auxiliary interface requires its explicit positive bound. Invalid auxiliary
+values reject/latch the entire pending tuple; position envelope and feedback
+freshness still apply. No software total-torque clamp or actual-speed bound
+is claimed.
 
-The absolute bounds are a travel limit; the error bound is a force limit. The
-ceiling is a product, not a property of the envelope alone — the same rad
-number means a different N*m at a different `Kp`.
+Bounds are evaluated on host-accepted feedback and cannot bound later device
+behavior while it holds a previous command. No host cancellation/deactivation
+is proof of immediate torque disable or physical rest. The extension has only
+offline validation in this PR; real experiments await explicit owner approval.
 
 ## Alternatives considered / 替代方案
 
@@ -135,7 +140,7 @@ number means a different N*m at a different `Kp`.
 
 - A legitimate large step — a controller activated far from its target, for
   instance — latches the whole component, not just that one command. Choosing
-  the bound trades reach against the torque ceiling; there is no value that
+  the bound trades reach against the proportional-term budget; there is no value that
   avoids both failure modes.
 - **The shipped deployment's reach is materially reduced, and the numbers say
   by roughly how much.** At `Kp = 1` the shaft lags far behind the command: on
@@ -161,7 +166,7 @@ number means a different N*m at a different `Kp`.
   `2 rad` of error. The absolute bounds are unchanged; this is the error bound
   alone, and it is a new, deliberate limit on the shipped deployment rather
   than a restatement of what the controller YAML already did. The
-  owner-approved `0.5` is kept because it is the torque ceiling (`0.5 N*m`),
+  owner-approved `0.5` is kept because it is the proportional-term budget (`0.5 N*m`),
   not a travel budget — bench procedures must still plan each move as if it
   were one, treating `29 deg` as the ceiling on a single target displacement,
   and the T10 trajectory's `0.1745 rad` step is inside it.

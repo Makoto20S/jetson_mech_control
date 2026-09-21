@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!-- Offline deployment example for a stock Humble joint_trajectory_controller
+     claiming one immutable position+velocity command bundle. This file is not
+     selected by any launch file and does not authorize a real-device run.
+
+     The auxiliary bound below is a software-validation example, not a
+     physically validated limit. A real deployment requires a separately
+     approved bench experiment and reviewed values. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="motor1_ak30_position_velocity">
+  <link name="world"/>
+  <link name="motor1_joint"/>
+  <joint name="motor1_joint" type="revolute">
+    <parent link="world"/>
+    <child link="motor1_joint"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-12.56" upper="12.56" effort="15.0" velocity="40.0"/>
+  </joint>
+  <ros2_control name="motor1_ak30_system" type="system">
+    <hardware>
+      <plugin>mech_bringup/Ak30System</plugin>
+      <param name="device_path">/dev/ttyACM0</param>
+      <param name="logical_bus">1</param>
+      <param name="drive_id">104</param>
+      <param name="kp">1.0</param>
+      <param name="kd">1.0</param>
+      <param name="position_min_rad">-12.0</param>
+      <param name="position_max_rad">6.0</param>
+      <param name="position_max_error_rad">0.5</param>
+      <param name="position_max_abs_velocity_rad_s">1.0</param>
+      <param name="control_period_ns">2000000</param>
+      <param name="command_ttl_ns">4000000</param>
+      <param name="command_hard_ttl_ns">6000000</param>
+      <param name="feedback_period_ns">20000000</param>
+      <param name="feedback_ttl_ns">60000000</param>
+      <param name="zero_offset_rad">5.760604931781636</param>
+      <param name="position_is_output_shaft">true</param>
+      <param name="feedback_telemetry_log">false</param>
+    </hardware>
+    <joint name="motor1_joint">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="command_generation"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </ros2_control>
+</robot>
