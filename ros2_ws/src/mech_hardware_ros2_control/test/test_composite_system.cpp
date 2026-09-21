@@ -1005,6 +1005,26 @@ TEST(CompositeSystem, RepeatsLifecycleAndLatchesInvalidCommandFault) {
   EXPECT_TRUE(system.fault_latched());
 }
 
+TEST(CompositeSystem, InactiveCyclesDoNotLatchButExistingFaultsRemainErrors) {
+  CompositeSystem system;
+  ASSERT_EQ(system.on_init(info(1U)), hardware_interface::CallbackReturn::SUCCESS);
+  const rclcpp::Time time(0);
+  const auto period = rclcpp::Duration::from_nanoseconds(2000000);
+  ASSERT_EQ(system.on_configure(state()), hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_EQ(system.write(time, period), hardware_interface::return_type::OK);
+  EXPECT_FALSE(system.fault_latched());
+  ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
+  auto commands = system.export_command_interfaces();
+  commands[0].set_value(std::numeric_limits<double>::quiet_NaN());
+  ASSERT_EQ(system.write(time, period), hardware_interface::return_type::ERROR);
+  ASSERT_EQ(system.on_deactivate(state()), hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system.read(time, period), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(system.write(time, period), hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(system.fault_latched());
+  EXPECT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::ERROR);
+}
+
 // Regression test for a heap-buffer-overflow (ASan-confirmed): interface
 // names are "<joint>/<interface>", so a joint name that itself contains '/'
 // (e.g. "arm/j1" -> "arm/j1/position") made the old find('/')-based lookup

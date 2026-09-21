@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "hardware_interface/system.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "mech_bringup/pass_through_init.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
@@ -235,6 +236,85 @@ class Ak30SystemPluginTest : public ::testing::Test {
   int serial_requests_{0};
   Ak30System system_;
 };
+
+// Task12: the manager continues cycling INACTIVE hardware after configure and
+// after deactivate. Use Humble's real System wrapper: an erroneous read/write
+// invokes on_error and moves the component out of INACTIVE, exactly as on bench.
+TEST(Ak30SystemLifecycle, InactiveCyclesPreserveStateAndNeverTransmit) {
+  auto serial = std::make_shared<FakeSerial>(4096U);
+  std::vector<FeedbackTelemetryEvent> records;
+  {
+    auto plugin = std::make_unique<Ak30System>();
+    auto* view = plugin.get();
+    plugin->set_serial_port_factory_for_testing(
+        [serial](const std::string&) { return serial; });
+    plugin->set_telemetry_sink_for_testing(
+        [&records](const FeedbackTelemetryEvent& event) { records.push_back(event); });
+    auto params = valid_params();
+    params["feedback_telemetry_log"] = "true";
+    hardware_interface::System system(std::move(plugin));
+    using State = lifecycle_msgs::msg::State;
+    ASSERT_EQ(system.initialize(position_hardware_info(params)).id(),
+              State::PRIMARY_STATE_UNCONFIGURED);
+    ASSERT_EQ(system.configure().id(), State::PRIMARY_STATE_INACTIVE);
+    EXPECT_EQ(serial->take_tx(),
+              std::vector<std::uint8_t>(kPassThroughInitGolden.begin(),
+                                        kPassThroughInitGolden.end()));
+    serial->clear_tx();
+    auto states = system.export_state_interfaces();
+    auto commands = system.export_command_interfaces();
+    const rclcpp::Time time(0);
+    const auto period = rclcpp::Duration::from_nanoseconds(2000000);
+    const std::vector<std::string> claim{"motor1_joint/position"};
+    EXPECT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+    EXPECT_EQ(system.write(time, period), hardware_interface::return_type::OK);
+    ASSERT_EQ(system.get_state().id(), State::PRIMARY_STATE_INACTIVE);
+    EXPECT_TRUE(serial->take_tx().empty());
+    ASSERT_EQ(system.activate().id(), State::PRIMARY_STATE_ACTIVE);
+    ASSERT_TRUE(serial->inject_rx(feedback_wire_bytes()));
+    ASSERT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+    ASSERT_EQ(system.deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+    for (int phase = 0; phase < 2; ++phase) {
+      SCOPED_TRACE(phase);
+      const double previous_position = states[0].get_value();
+      // Even a leftover command must not reach the stopped runtime.
+      commands[0].set_value(1.0);
+      for (int cycle = 0; cycle < 10; ++cycle) {
+        EXPECT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+        EXPECT_EQ(system.write(time, period), hardware_interface::return_type::OK);
+        EXPECT_EQ(system.get_state().id(), State::PRIMARY_STATE_INACTIVE);
+        EXPECT_DOUBLE_EQ(states[0].get_value(), previous_position);
+      }
+      EXPECT_FALSE(view->fault_latched());
+      EXPECT_TRUE(serial->take_tx().empty());
+      EXPECT_EQ(system.prepare_command_mode_switch(claim, {}),
+                hardware_interface::return_type::ERROR);
+      ASSERT_EQ(system.activate().id(), State::PRIMARY_STATE_ACTIVE);
+      // Activation must still require newly accepted feedback before a claim.
+      EXPECT_EQ(system.prepare_command_mode_switch(claim, {}),
+                hardware_interface::return_type::ERROR);
+      ASSERT_TRUE(serial->inject_rx(feedback_wire_bytes()));
+      ASSERT_EQ(system.read(time, period), hardware_interface::return_type::OK);
+      EXPECT_NEAR(states[0].get_value(), -4.189808604986739, 1e-6);
+      ASSERT_EQ(system.deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+    }
+    ASSERT_EQ(system.cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
+    EXPECT_FALSE(serial->is_open());
+    EXPECT_TRUE(serial->take_tx().empty());
+  }  // Join/drain the telemetry worker before inspecting its records.
+  int deactivations = 0;
+  int cleanups = 0;
+  for (const auto& record : records) {
+    EXPECT_NE(record.reason, FeedbackTelemetryReason::Error);
+    if (record.kind != FeedbackTelemetryKind::LifecycleSummary) continue;
+    EXPECT_EQ(record.motor_command_frames, 0U);
+    EXPECT_EQ(record.pass_through_frames, 1U);
+    if (record.reason == FeedbackTelemetryReason::Deactivate) ++deactivations;
+    if (record.reason == FeedbackTelemetryReason::Cleanup) ++cleanups;
+  }
+  EXPECT_EQ(deactivations, 3);
+  EXPECT_EQ(cleanups, 1);
+}
 
 // The golden 0x12 init frame must be the first bytes on the wire after
 // on_configure, byte-for-byte. This is the frame that arms pass-through

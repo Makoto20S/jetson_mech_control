@@ -472,6 +472,12 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
 
 hardware_interface::return_type CompositeSystem::read(
     const rclcpp::Time&, const rclcpp::Duration&) {
+  // Humble cycles INACTIVE hardware too. configure/deactivate leave the
+  // runtime stopped: retain the last state without inventing a new sample or
+  // turning an ordinary stop into on_error(). A pre-existing fault still fails.
+  if (configured_ && !active_ && !fault_latched_) {
+    return hardware_interface::return_type::OK;
+  }
   if (!active_ || fault_latched_ || !runtime_->read(states_.data(), states_.size())) {
     fault_latched_ = true;
     return hardware_interface::return_type::ERROR;
@@ -490,6 +496,11 @@ hardware_interface::return_type CompositeSystem::read(
 
 hardware_interface::return_type CompositeSystem::write(
     const rclcpp::Time&, const rclcpp::Duration&) {
+  // Do not validate or forward stale command buffers while normally inactive.
+  // Authorization was revoked on deactivate; reactivation requires a new claim.
+  if (configured_ && !active_ && !fault_latched_) {
+    return hardware_interface::return_type::OK;
+  }
   if (!active_ || fault_latched_) return hardware_interface::return_type::ERROR;
   // Every element of commands_ is validated, including unauthorized ones: a
   // controller that wrote a non-finite value into an interface it does not
