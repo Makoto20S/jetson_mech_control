@@ -48,6 +48,7 @@ flowchart TB
 - 确定性虚拟时钟、Fake transport、模拟设备与故障注入；
 - SocketCAN/vcan 路径和可注入串口的 USB-CDC 帧传输实现；
 - 复合 `ros2_control::SystemInterface` 与有界 C++ controller 插件；
+- STM32 CtrBoard 双 IMU 与双足底压力数据的只接收 SocketCAN/ROS 2 桥接；
 
 以下内容尚不属于已完成能力：
 
@@ -66,8 +67,10 @@ flowchart TB
 | `mech_controllers` | 带边界、变化率和超时约束的 C++ controller 插件 |
 | `mech_bringup` | 仿真与部署组合、URDF/xacro、launch 和 controller 配置 |
 | `mech_protocol_cubemars` | CubeMars AK3.0 力控 profile：wire 编解码、证据门映射、会话与看门狗 |
+| `mech_protocol_ctrboard` | CtrBoard 传感器流分片重组、CRC16 校验和 196 字节载荷解析 |
+| `mech_ctrboard_bridge` | 只接收的 SocketCAN ROS 2 节点，发布两路 IMU 与左右足底压力话题 |
 
-`mech_protocol_cubemars` 是本分支新增的第六个包：CubeMars AK3.0 力控 profile 的实现，已在单电机取证台架上完成真机闭环验证（力矩、速度、位置三个子模式）。真实设备激活仍受硬件安全闸门（G0–G3）与 ADR-006 约束；HI12 等其他供应商协议包仍推迟。
+`mech_protocol_cubemars` 实现 CubeMars AK3.0 力控 profile，已在单电机取证台架上完成真机闭环验证（力矩、速度、位置三个子模式）。CtrBoard 两个包仅提供传感器接收路径，不配置 CAN 接口、不发送控制帧，也不改变现有 `ros2_control` 所有权。真实设备激活仍受硬件安全闸门（G0–G3）与 ADR-006 约束；HI12 等其他供应商协议包仍推迟。
 
 ## 环境要求
 
