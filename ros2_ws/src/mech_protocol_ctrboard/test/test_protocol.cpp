@@ -24,10 +24,13 @@ MonotonicTime timestamp() {
 
 std::vector<std::uint8_t> make_packet(const SensorTelemetryWire& telemetry) {
   const auto* payload = reinterpret_cast<const std::uint8_t*>(&telemetry);
-  std::vector<std::uint8_t> bytes{
-      kHeader1, kHeader2, static_cast<std::uint8_t>(MessageId::SensorState),
-      static_cast<std::uint8_t>(sizeof(telemetry))};
-  bytes.insert(bytes.end(), payload, payload + sizeof(telemetry));
+  constexpr std::size_t header_size = 4U;
+  std::vector<std::uint8_t> bytes(header_size + sizeof(telemetry));
+  bytes[0] = kHeader1;
+  bytes[1] = kHeader2;
+  bytes[2] = static_cast<std::uint8_t>(MessageId::SensorState);
+  bytes[3] = static_cast<std::uint8_t>(sizeof(telemetry));
+  std::memcpy(bytes.data() + header_size, payload, sizeof(telemetry));
   const auto crc = crc16_ccitt(bytes.data(), bytes.size());
   bytes.push_back(static_cast<std::uint8_t>(crc & 0xFFU));
   bytes.push_back(static_cast<std::uint8_t>(crc >> 8U));
