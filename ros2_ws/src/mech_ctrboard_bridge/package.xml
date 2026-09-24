@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mech_ctrboard_bridge</name>
+  <version>0.1.0</version>
+  <description>Receive-only ROS 2 bridge for STM32 CtrBoard sensors over SocketCAN.</description>
+  <maintainer email="project-owners@example.invalid">Project Owners</maintainer>
+  <license>Internal Research Use - All Rights Reserved</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>mech_control_core</depend>
+  <depend>mech_protocol_ctrboard</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+  <test_depend>ament_cmake_xmllint</test_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
