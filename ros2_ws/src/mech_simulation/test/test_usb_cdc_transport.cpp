@@ -1,6 +1,7 @@
 #include "mech_control_core/usb_cdc_transport.hpp"
 #include "mech_simulation/fake_serial.hpp"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <vector>
@@ -24,6 +25,24 @@ mech_control_core::RawCanFrame make_frame(
                                   ? 2U
                                   : 9U,
       payload, *now);
+}
+
+TEST(UsbCdcPassThroughInit, WritesOnlyTheVerifiedConfigurationRecord) {
+  FakeSerial serial;
+  ASSERT_TRUE(serial.open());
+  ASSERT_TRUE(mech_control_core::initialize_usb_cdc_pass_through(serial));
+  const auto wire = serial.take_tx();
+  ASSERT_EQ(wire.size(),
+            mech_control_core::kUsbCdcPassThroughInitFrame.size());
+  EXPECT_TRUE(std::equal(
+      wire.begin(), wire.end(),
+      mech_control_core::kUsbCdcPassThroughInitFrame.begin()));
+}
+
+TEST(UsbCdcPassThroughInit, RefusesAClosedSerialPort) {
+  FakeSerial serial;
+  EXPECT_FALSE(mech_control_core::initialize_usb_cdc_pass_through(serial));
+  EXPECT_TRUE(serial.take_tx().empty());
 }
 
 TEST(UsbCdcTransport, InjectedSerialRoundTripHasNoDeviceDependency) {

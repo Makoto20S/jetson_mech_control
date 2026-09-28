@@ -14,9 +14,8 @@ namespace mech::mech_bringup {
 // are a fixed literal - the CRCs are never recomputed at runtime or in
 // tests (recomputing goldens is exactly how the 0.2 N*m golden was
 // corrupted once; the literal is the evidence).
-inline constexpr std::array<std::uint8_t, 13U> kPassThroughInitFrame{
-    0xF7, 0x12, 0x06, 0x00, 0x7D, 0x70, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00};
+inline constexpr auto kPassThroughInitFrame =
+    mech::mech_control_core::kUsbCdcPassThroughInitFrame;
 
 // Writes the pass-through init frame over an already-open serial port,
 // retrying transient WouldBlock up to a bounded number of attempts (the

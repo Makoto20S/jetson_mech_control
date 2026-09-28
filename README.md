@@ -68,7 +68,7 @@ flowchart TB
 | `mech_bringup` | 仿真与部署组合、URDF/xacro、launch 和 controller 配置 |
 | `mech_protocol_cubemars` | CubeMars AK3.0 力控 profile：wire 编解码、证据门映射、会话与看门狗 |
 | `mech_protocol_ctrboard` | CtrBoard 传感器流分片重组、CRC16 校验和 196 字节载荷解析 |
-| `mech_ctrboard_bridge` | 只接收的 SocketCAN ROS 2 节点，发布两路 IMU 与左右足底压力话题 |
+| `mech_ctrboard_bridge` | 只接收的 SocketCAN/USB-CDC ROS 2 节点，发布两路 IMU 与左右足底压力话题 |
 
 `mech_protocol_cubemars` 实现 CubeMars AK3.0 力控 profile，已在单电机取证台架上完成真机闭环验证（力矩、速度、位置三个子模式）。CtrBoard 两个包仅提供传感器接收路径，不配置 CAN 接口、不发送控制帧，也不改变现有 `ros2_control` 所有权。真实设备激活仍受硬件安全闸门（G0–G3）与 ADR-006 约束；HI12 等其他供应商协议包仍推迟。
 
@@ -101,6 +101,11 @@ python3 tools/ci/context_check.py
 python3 tools/ci/check_adrs.py
 git diff --check
 ```
+
+CtrBoard 的仓库内启动、实机录包和回放步骤见
+[CtrBoard 硬件验证记录](docs/development/ctrboard_hardware_validation.md)。原始
+rosbag 属于实验产物，保存在被 Git 忽略的 `out/hardware_validation/`，不提交到
+源码仓库。
 
 ## 硬件安全边界
 

@@ -12,6 +12,7 @@ find_package(ament_cmake REQUIRED)
 
 add_library(${PROJECT_NAME}
   src/package_marker.cpp
+  src/posix_cdc_serial_port.cpp
   src/socketcan_transport.cpp
   src/usb_cdc_transport.cpp
 )
