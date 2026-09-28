@@ -1,7 +1,8 @@
 # Foundation ROS 2 workspace
 
 The workspace contains the five Foundation v0.1 packages planned in
-`docs/planning/07_framework_bootstrap_plan.md`, plus one protocol adapter:
+`docs/planning/07_framework_bootstrap_plan.md`, plus protocol and sensor
+integration packages:
 
 - `mech_control_core`
 - `mech_simulation`
@@ -10,6 +11,9 @@ The workspace contains the five Foundation v0.1 packages planned in
 - `mech_bringup`
 - `mech_protocol_cubemars` — the CubeMars AK3.0 force-control adapter. It is
   offline-only: it opens no device and performs no real device access.
+- `mech_protocol_ctrboard` — receive-side decoder for the STM32 sensor stream.
+- `mech_ctrboard_bridge` — receive-only SocketCAN ROS 2 publisher for two IMUs
+  and two 20-point plantar-pressure samples.
 
 From Ubuntu 22.04 with ROS 2 Humble installed, run from the repository root:
 

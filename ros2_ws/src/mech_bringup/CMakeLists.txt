@@ -23,7 +23,6 @@ find_package(realtime_tools REQUIRED)
 add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
-  src/posix_cdc_serial_port.cpp
   src/ak30_force_runtime.cpp
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp

@@ -23,6 +23,15 @@ class CdcSerialPort {
       const std::uint8_t* data, std::size_t size) noexcept = 0;
 };
 
+// Vendor MODE_FDCAN_PASS configuration with send_flag=0. It enables USB-to-CAN
+// receive forwarding but does not contain or transmit an application CAN frame.
+inline constexpr std::array<std::uint8_t, 13U> kUsbCdcPassThroughInitFrame{
+    0xF7, 0x12, 0x06, 0x00, 0x7D, 0x70, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00};
+
+[[nodiscard]] bool initialize_usb_cdc_pass_through(
+    CdcSerialPort& serial) noexcept;
+
 struct CdcProtocolVersion final {
   std::uint8_t major{0U};
   std::uint8_t minor{0U};

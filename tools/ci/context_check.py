@@ -24,6 +24,11 @@ EXPECTED_PACKAGES = {
         "mech_protocol_cubemars",
     },
     "mech_protocol_cubemars": {"mech_control_core", "mech_simulation"},
+    "mech_protocol_ctrboard": {"mech_control_core"},
+    "mech_ctrboard_bridge": {
+        "mech_control_core",
+        "mech_protocol_ctrboard",
+    },
 }
 
 REQUIRED_FILES = {
@@ -59,6 +64,8 @@ REQUIRED_FILES = {
     "ros2_ws/src/mech_controllers/package.xml",
     "ros2_ws/src/mech_bringup/package.xml",
     "ros2_ws/src/mech_protocol_cubemars/package.xml",
+    "ros2_ws/src/mech_protocol_ctrboard/package.xml",
+    "ros2_ws/src/mech_ctrboard_bridge/package.xml",
     "tools/ci/build_workspace.sh",
     "tools/ci/check_adrs.py",
     "tools/ci/context_check.py",
