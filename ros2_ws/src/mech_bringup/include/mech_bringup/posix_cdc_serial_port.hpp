@@ -11,7 +11,9 @@ namespace mech::mech_bringup {
 // one piece the Foundation deliberately left as an injected interface: the
 // production ros2_control slice will own its construction policy. The probe
 // keeps it deliberately small and single-threaded, matching the transport's
-// single-driver-thread contract.
+// single-driver-thread contract. open() takes a nonblocking advisory lock on
+// the opened device inode before changing terminal settings; close() and
+// destruction release it with the file descriptor.
 class PosixCdcSerialPort final : public mech_control_core::CdcSerialPort {
  public:
   explicit PosixCdcSerialPort(std::string device_path) noexcept;

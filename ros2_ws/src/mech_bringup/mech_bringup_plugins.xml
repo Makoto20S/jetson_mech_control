@@ -7,4 +7,10 @@
     runtime chain (PosixCdcSerialPort, UsbCdcTransport, Ak30ForceControlRuntime)
     into the composite SystemInterface.</description>
   </class>
+  <class name="mech_bringup/Ak30ServoSystem"
+         type="mech::mech_bringup::Ak30ServoSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>Position-only AK3.0 servo composition through one USB-CDC
+    transport, shared bus runtime, and independent servo sessions.</description>
+  </class>
 </library>

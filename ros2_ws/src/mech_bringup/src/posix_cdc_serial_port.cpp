@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -42,8 +43,16 @@ bool PosixCdcSerialPort::open() noexcept {
   if (fd_ >= 0) {
     return true;
   }
-  const int fd = ::open(device_path_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+  const int fd = ::open(device_path_.c_str(),
+                        O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) {
+    return false;
+  }
+  // Lock the opened inode before termios/flush touches it. Both production
+  // plugins use this port, so a symlink alias or separate process must not
+  // configure the same cooperative CDC channel concurrently.
+  if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+    ::close(fd);
     return false;
   }
   if (!configure_raw_nonblocking(fd)) {
