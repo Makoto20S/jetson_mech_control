@@ -37,6 +37,11 @@ ADR-001/002/003/004/005/009/012/013 为 Accepted；[ADR-006](../adr/ADR-006-cond
 
 ## 3. 当前实施顺序
 
+2026-09-28 新任务 **SERVO-001**：NEW104/105 位置伺服，目标角度与速度/加速度限制。
+首阶段离线编解码、显式映射及双设备共享总线验证；真实坐标、机构包络与中止行为
+尚待核实。设计及验收边界见 [位置伺服适配设计](../development/ak30_servo_position_design.md)。
+本任务不沿用旧 motor1 零点，不代表实机伺服已验收；Foundation 计划保留为历史实施入口。
+
 | 阶段 | 状态 | 出口 |
 |---|---|---|
 | FND-000～FND-015、RSP-001/RSP-002、INT-001 | **已完成（2026-08-31）** | 仓库/依赖/CI、九份 ADR、ROS-independent 核心契约、SocketCAN、注入式 USB-CDC、模拟链路、ros2_control 复合 SystemInterface 与集成测试；RC2 取证收口于 `9317d76`（tag `v0.1.0-foundation-rc2`：Jetson ARM64 build/test + sanitizers + 30 min 稳定性 + 首次 vcan 往返） |
@@ -144,3 +149,9 @@ FND-004A 不属于 G0～G3 的替代品，也不证明 vcan、实时性、总线
 本轮收敛保留 `01/04/06` 的证据链，压缩 `02/05` 的重复决策正文，保留 `03/07` 的验收与实施职责，并把初始总体规划提示词移入 [非规范归档](../archive/README.md)。删除的历史叙述仍可由 Git 历史追溯。
 
 活动文档不得引用归档作为当前规范。新增长期决定进入 ADR 或对应正式文档；共享任务进度进入 GitHub Issues/Milestones/PR；个人 `memory/` 不进入 Git。
+
+
+SERVO-001 生产组合补齐（2026-09-29）：将现有伺服 session 与共享 BusRuntime 接入
+真实 ROS 插件，验收直接覆盖仓库调用链；[ADR-020](../adr/ADR-020-declared-state-interfaces.md)
+提出按声明导出状态，新伺服仅提供位置。当前为实现/离线验证阶段，不代表设备激活、
+实机运动或生产部署已获验收。旧临时 Python 控制程序不作为本实现的验收入口。
