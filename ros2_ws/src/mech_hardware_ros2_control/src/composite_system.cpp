@@ -133,14 +133,15 @@ class LoopbackRuntime final : public RuntimePort {
   std::vector<CanonicalCommand> commands_;
 };
 
-bool exactly_interfaces(const hardware_interface::ComponentInfo& joint,
-                        const std::vector<std::string>& expected_state) {
-  if (joint.state_interfaces.size() != expected_state.size()) {
-    return false;
+bool valid_interfaces(const hardware_interface::ComponentInfo& joint) {
+  unsigned char states = 0U;
+  for (const auto& state : joint.state_interfaces) {
+    // State and motion command interfaces share the canonical p/v/e names.
+    const unsigned char bit = command_interface_bit(state.name);
+    if (bit == 0U || (states & bit) != 0U) return false;
+    states = static_cast<unsigned char>(states | bit);
   }
-  for (std::size_t index = 0U; index < expected_state.size(); ++index) {
-    if (joint.state_interfaces[index].name != expected_state[index]) return false;
-  }
+  if (states == 0U) return false;
   // The immutable motion bundle is one of p, v, e, p+v, p+e or p+v+e, plus
   // exactly one command_generation interface. Command-interface order is not
   // semantic; exported motion members use the canonical p/v/e order.
@@ -161,7 +162,9 @@ bool exactly_interfaces(const hardware_interface::ComponentInfo& joint,
       return false;
     }
   }
-  return valid_command_bundle(motion) && generation == 1U;
+  return valid_command_bundle(motion) && generation == 1U &&
+         ((motion & kPositionCommand) == 0U ||
+          (states & kPositionCommand) != 0U);
 }
 
 }  // namespace
@@ -180,13 +183,9 @@ bool CompositeSystem::validate_info(
       !info.gpios.empty()) {
     return false;
   }
-  const std::vector<std::string> state_interfaces{
-      hardware_interface::HW_IF_POSITION, hardware_interface::HW_IF_VELOCITY,
-      hardware_interface::HW_IF_EFFORT};
   for (std::size_t index = 0U; index < info.joints.size(); ++index) {
     const auto& joint = info.joints[index];
-    if (joint.name.empty() ||
-        !exactly_interfaces(joint, state_interfaces)) {
+    if (joint.name.empty() || !valid_interfaces(joint)) {
       return false;
     }
     for (std::size_t previous = 0U; previous < index; ++previous) {
@@ -207,8 +206,16 @@ hardware_interface::CallbackReturn CompositeSystem::on_init(
   joint_names_.reserve(info.joints.size());
   joint_command_interface_masks_.clear();
   joint_command_interface_masks_.reserve(info.joints.size());
+  joint_state_interface_masks_.clear();
+  joint_state_interface_masks_.reserve(info.joints.size());
   for (const auto& joint : info.joints) {
     joint_names_.push_back(joint.name);
+    unsigned char state_mask = 0U;
+    for (const auto& state : joint.state_interfaces) {
+      state_mask = static_cast<unsigned char>(
+          state_mask | command_interface_bit(state.name));
+    }
+    joint_state_interface_masks_.push_back(state_mask);
     unsigned char mask = 0U;
     for (const auto& command : joint.command_interfaces) {
       if (command.name != kCommandGenerationInterface) {
@@ -234,12 +241,19 @@ CompositeSystem::export_state_interfaces() {
   std::vector<hardware_interface::StateInterface> result;
   result.reserve(joint_names_.size() * 3U);
   for (std::size_t index = 0U; index < joint_names_.size(); ++index) {
-    result.emplace_back(joint_names_[index], hardware_interface::HW_IF_POSITION,
-                        &states_[index].position);
-    result.emplace_back(joint_names_[index], hardware_interface::HW_IF_VELOCITY,
-                        &states_[index].velocity);
-    result.emplace_back(joint_names_[index], hardware_interface::HW_IF_EFFORT,
-                        &states_[index].effort);
+    const unsigned char mask = joint_state_interface_masks_[index];
+    if ((mask & kPositionCommand) != 0U) {
+      result.emplace_back(joint_names_[index], hardware_interface::HW_IF_POSITION,
+                          &states_[index].position);
+    }
+    if ((mask & kVelocityCommand) != 0U) {
+      result.emplace_back(joint_names_[index], hardware_interface::HW_IF_VELOCITY,
+                          &states_[index].velocity);
+    }
+    if ((mask & kEffortCommand) != 0U) {
+      result.emplace_back(joint_names_[index], hardware_interface::HW_IF_EFFORT,
+                          &states_[index].effort);
+    }
   }
   return result;
 }
@@ -571,9 +585,12 @@ hardware_interface::return_type CompositeSystem::read(
   }
   // A device adapter decoding a corrupt frame must not be able to push
   // NaN/Inf into exported ros2_control state interfaces unnoticed.
-  for (const auto& state : states_) {
-    if (!std::isfinite(state.position) || !std::isfinite(state.velocity) ||
-        !std::isfinite(state.effort)) {
+  for (std::size_t index = 0U; index < states_.size(); ++index) {
+    const auto& state = states_[index];
+    const unsigned char mask = joint_state_interface_masks_[index];
+    if (((mask & kPositionCommand) != 0U && !std::isfinite(state.position)) ||
+        ((mask & kVelocityCommand) != 0U && !std::isfinite(state.velocity)) ||
+        ((mask & kEffortCommand) != 0U && !std::isfinite(state.effort))) {
       fault_latched_ = true;
       return hardware_interface::return_type::ERROR;
     }
