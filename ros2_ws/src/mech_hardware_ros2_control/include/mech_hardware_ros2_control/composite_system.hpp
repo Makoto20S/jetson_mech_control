@@ -166,6 +166,9 @@ class CompositeSystem : public hardware_interface::SystemInterface {
   // effort; the legal bundles are the three singletons and position combined
   // with either or both auxiliary fields.
   std::vector<unsigned char> joint_command_interface_masks_;
+  // Immutable declared state subset per joint. Only these members are
+  // exported to ros2_control and checked for finite values on read().
+  std::vector<unsigned char> joint_state_interface_masks_;
   std::vector<CanonicalCommand> commands_;
   std::vector<CanonicalState> states_;
   // ADR-017: the storage behind each joint's exported command_generation

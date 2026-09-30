@@ -13,6 +13,19 @@ fresh feedback or physical rest.
 Cleanup/configure is the recovery path. Deactivation revokes pending commands
 immediately and does not synthesize a zero or a braking command.
 
+## State declarations
+
+Each joint declares a nonempty subset of the standard `position`, `velocity`,
+and `effort` state interfaces. Unknown or repeated names are rejected. A joint
+with a position command must declare position state so a weak controller claim
+can seed its hold from accepted feedback. State interfaces are exported in
+position, velocity, effort order for the fields declared by that joint.
+
+A runtime may keep unsupported canonical fields unavailable (NaN). Only
+declared fields are published and checked for finite values on each active
+read. A nonfinite declared value latches the existing hardware fault. Existing
+three-state declarations retain the same behavior.
+
 ## Position command bundles
 
 A joint may declare one of `position`, `velocity`, `effort`, `position+velocity`,

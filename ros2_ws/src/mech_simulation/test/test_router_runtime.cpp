@@ -493,5 +493,353 @@ TEST(BusRuntime, SnapshotCapacityOverflowIsCountedSeparatelyFromTransportErrors)
   EXPECT_EQ(runtime.stats().transport_errors, 0U);
 }
 
+// A session must see each received frame before deciding whether TX remains
+// safe. A final snapshot alone would hide the first frame in this sequence.
+TEST(BusRuntime, ReceiveObserverSeesEveryFrameInOrderBeforeTransmit) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  ASSERT_FALSE(router.add_route(FrameRoute{
+      1U, FrameFilter{CanFrameFormat::Standard, 0x180U, 0x700U,
+                      CanFrameType::Classic}, 0U}));
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "observer", transport, router, ownership);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  const auto now = *MonotonicTime::from_nanoseconds(30);
+  const auto lease = *CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x100U, 0),
+      *MonotonicTime::from_nanoseconds(0),
+      *MonotonicTime::from_nanoseconds(100));
+  ASSERT_EQ(runtime.submit(lease), RuntimeResult::Ok);
+  ASSERT_EQ(transport.inject_receive(make_frame(FrameDirection::Rx, 0x180U, 10)),
+            TransportResult::Ok);
+  ASSERT_EQ(transport.inject_receive(make_frame(FrameDirection::Rx, 0x181U, 20)),
+            TransportResult::Ok);
+  struct SeenFrames {
+    std::array<std::uint32_t, 2U> ids{};
+    std::size_t count{0U};
+  } seen;
+  const BusRuntime::RxObserver observer{
+      &seen, [](void* context, std::uint16_t route_id,
+                const RawCanFrame& frame) noexcept {
+        if (route_id != 1U) return false;
+        auto& received = *static_cast<SeenFrames*>(context);
+        if (received.count >= received.ids.size()) return false;
+        received.ids[received.count++] = frame.id.value;
+        return true;
+      }};
+  EXPECT_EQ(runtime.receive(now, observer), RuntimeResult::Ok);
+  EXPECT_EQ(seen.count, 2U);
+  EXPECT_EQ(seen.ids[0], 0x180U);
+  EXPECT_EQ(seen.ids[1], 0x181U);
+  EXPECT_EQ(transport.pending_transmit(), 0U);
+  EXPECT_EQ(runtime.transmit(now), RuntimeResult::Ok);
+  EXPECT_EQ(transport.pending_transmit(), 1U);
+}
+
+TEST(BusRuntime, ReceiveReportsBudgetExhaustionUntilWouldBlock) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  FakeTransport transport(80U);
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "drain", transport, router, ownership);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  for (std::size_t index = 0; index < 65U; ++index) {
+    ASSERT_EQ(transport.inject_receive(make_frame(FrameDirection::Rx, 0x180U, 1)),
+              TransportResult::Ok);
+  }
+  const auto now = *MonotonicTime::from_nanoseconds(2);
+  EXPECT_EQ(runtime.receive(now), RuntimeResult::Ok);
+  EXPECT_FALSE(runtime.last_receive_drained());
+  EXPECT_EQ(transport.pending_receive(), 1U);
+  EXPECT_EQ(runtime.receive(now), RuntimeResult::Ok);
+  EXPECT_TRUE(runtime.last_receive_drained());
+  EXPECT_EQ(transport.pending_receive(), 0U);
+}
+
+TEST(BusRuntime, ReceiveObserverFailureFaultsAndSuppressesPendingTx) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  ASSERT_FALSE(router.add_route(FrameRoute{
+      1U, FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                      CanFrameType::Classic}, 0U}));
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "guard", transport, router, ownership);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  const auto now = *MonotonicTime::from_nanoseconds(10);
+  ASSERT_EQ(runtime.submit(*CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x100U, 0),
+      *MonotonicTime::from_nanoseconds(0),
+      *MonotonicTime::from_nanoseconds(100))), RuntimeResult::Ok);
+  ASSERT_EQ(transport.inject_receive(make_frame(FrameDirection::Rx, 0x180U, 5)),
+            TransportResult::Ok);
+  const BusRuntime::RxObserver reject{
+      nullptr, [](void*, std::uint16_t, const RawCanFrame&) noexcept {
+        return false;
+      }};
+  EXPECT_EQ(runtime.receive(now, reject), RuntimeResult::Fault);
+  EXPECT_EQ(runtime.state(), RuntimeState::Fault);
+  EXPECT_EQ(runtime.transmit(now), RuntimeResult::NotRunning);
+  EXPECT_EQ(transport.pending_transmit(), 0U);
+}
+
+TEST(BusRuntime, CancelRetainsGenerationAndIsolatesRoutes) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  for (const auto route : {1U, 2U}) {
+    ASSERT_FALSE(router.add_route(FrameRoute{
+        static_cast<std::uint16_t>(route),
+        FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                    CanFrameType::Classic}, 7U}));
+  }
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "cancel", transport, router, ownership);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  const auto start = *MonotonicTime::from_nanoseconds(0);
+  const auto deadline = *MonotonicTime::from_nanoseconds(100);
+  const auto a = *CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x101U, 0), start, deadline);
+  const auto b = *CommandLease::create(
+      2U, 1U, make_frame(FrameDirection::Tx, 0x102U, 0), start, deadline);
+  ASSERT_EQ(runtime.submit(a), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(b), RuntimeResult::Ok);
+  EXPECT_EQ(runtime.cancel(99U), RuntimeResult::InvalidCommand);
+  EXPECT_EQ(runtime.cancel(1U), RuntimeResult::Ok);
+  EXPECT_EQ(runtime.submit(a), RuntimeResult::InvalidCommand);
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(10)),
+            RuntimeResult::Ok);
+  RawCanFrame sent;
+  ASSERT_TRUE(transport.take_transmit(sent));
+  EXPECT_EQ(sent.id.value, 0x102U);
+  EXPECT_FALSE(transport.take_transmit(sent));
+}
+
+TEST(BusRuntime, ReportsActualSendPerRouteAndGeneration) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  ASSERT_FALSE(router.add_route(FrameRoute{
+      1U, FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                      CanFrameType::Classic}, 0U}));
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "sent-watermark", transport, router, ownership);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  const auto start = *MonotonicTime::from_nanoseconds(0);
+  const auto deadline = *MonotonicTime::from_nanoseconds(100);
+  const auto first = *CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x101U, 0), start, deadline);
+  ASSERT_EQ(runtime.submit(first), RuntimeResult::Ok);
+  transport.force_next_send_results({TransportResult::WouldBlock});
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(10)),
+            RuntimeResult::QueueFull);
+  EXPECT_FALSE(runtime.was_sent(1U, 1U));
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(20)),
+            RuntimeResult::Ok);
+  EXPECT_TRUE(runtime.was_sent(1U, 1U));
+  const auto second = *CommandLease::create(
+      1U, 2U, make_frame(FrameDirection::Tx, 0x101U, 0), start, deadline);
+  ASSERT_EQ(runtime.submit(second), RuntimeResult::Ok);
+  EXPECT_FALSE(runtime.was_sent(1U, 1U));
+  EXPECT_FALSE(runtime.was_sent(1U, 2U));
+}
+
+TEST(BusRuntime, PerAttemptGuardUsesFreshTimeForLeaseExpiry) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  for (const auto route : {1U, 2U}) {
+    ASSERT_FALSE(router.add_route(FrameRoute{
+        static_cast<std::uint16_t>(route),
+        FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                    CanFrameType::Classic}, 7U}));
+  }
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "guarded-clock", transport, router, ownership, 2U);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  const auto start = *MonotonicTime::from_nanoseconds(0);
+  const auto deadline = *MonotonicTime::from_nanoseconds(100);
+  for (const auto route : {1U, 2U}) {
+    ASSERT_EQ(runtime.submit(*CommandLease::create(
+        static_cast<std::uint16_t>(route), 1U,
+        make_frame(FrameDirection::Tx, 0x100U + route, 0), start, deadline)),
+        RuntimeResult::Ok);
+  }
+  struct GuardClock { int calls{0}; } guard_clock;
+  const BusRuntime::TxGuard guard{&guard_clock,
+      [](void* context, const CommandLease&, MonotonicTime& attempt) noexcept {
+        auto& clock = *static_cast<GuardClock*>(context);
+        attempt = *MonotonicTime::from_nanoseconds(++clock.calls == 1 ? 10 : 100);
+        return true;
+      }};
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(10), guard),
+            RuntimeResult::Ok);
+  EXPECT_EQ(transport.pending_transmit(), 1U);
+  EXPECT_EQ(runtime.stats().expired_commands, 1U);
+  EXPECT_FALSE(runtime.was_sent(2U, 1U));
+}
+
+TEST(BusRuntime, GuardedSnapshotOverflowFaultsBeforeTransmit) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  for (const auto route : {1U, 2U}) {
+    ASSERT_FALSE(router.add_route(FrameRoute{
+        static_cast<std::uint16_t>(route),
+        FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                    CanFrameType::Classic}, 7U}));
+  }
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "overflow", transport, router, ownership, 2U, 1U);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(*CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x100U, 0),
+      *MonotonicTime::from_nanoseconds(0),
+      *MonotonicTime::from_nanoseconds(100))), RuntimeResult::Ok);
+  ASSERT_EQ(transport.inject_receive(make_frame(FrameDirection::Rx, 0x180U, 5)),
+            TransportResult::Ok);
+  EXPECT_EQ(runtime.receive(*MonotonicTime::from_nanoseconds(10)),
+            RuntimeResult::Fault);
+  EXPECT_EQ(runtime.stats().snapshot_overflow, 1U);
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(10)),
+            RuntimeResult::NotRunning);
+  EXPECT_EQ(transport.pending_transmit(), 0U);
+}
+
+TEST(BusRuntime, StopStartAndRecoverResetEpochState) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  ASSERT_FALSE(router.add_route(FrameRoute{
+      1U, FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                      CanFrameType::Classic}, 0U}));
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "epoch", transport, router, ownership);
+  const auto now = *MonotonicTime::from_nanoseconds(10);
+  const auto lease = *CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x100U, 0),
+      *MonotonicTime::from_nanoseconds(0),
+      *MonotonicTime::from_nanoseconds(100));
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(lease), RuntimeResult::Ok);
+  ASSERT_EQ(transport.inject_receive(make_frame(FrameDirection::Rx, 0x180U, 5)),
+            TransportResult::Ok);
+  ASSERT_EQ(runtime.receive(now), RuntimeResult::Ok);
+  ASSERT_TRUE(runtime.snapshots().read(
+      1U, now, *MonotonicDuration::from_nanoseconds(100)).has_value());
+  runtime.stop();
+  runtime.stop();
+  EXPECT_FALSE(ownership.owns("epoch"));
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  EXPECT_EQ(runtime.snapshots().size(), 0U);
+  EXPECT_EQ(runtime.transmit(now), RuntimeResult::Ok);
+  EXPECT_EQ(transport.pending_transmit(), 0U);
+  EXPECT_EQ(runtime.submit(lease), RuntimeResult::Ok);
+  transport.force_next_receive_results({TransportResult::Disconnected});
+  EXPECT_EQ(runtime.receive(now), RuntimeResult::Disconnected);
+  ASSERT_EQ(runtime.recover(), RuntimeResult::Ok);
+  EXPECT_EQ(runtime.snapshots().size(), 0U);
+  EXPECT_EQ(runtime.transmit(now), RuntimeResult::Ok);
+  EXPECT_EQ(transport.pending_transmit(), 0U);
+  EXPECT_EQ(runtime.submit(lease), RuntimeResult::Ok);
+}
+
+TEST(BusRuntime, BackpressuredLeaseCanBeCancelledOrExpireWithoutRetry) {
+  using namespace mech_control_core;
+  for (const auto pressure : {TransportResult::QueueFull,
+                              TransportResult::WouldBlock}) {
+    FrameRouter router;
+    ASSERT_FALSE(router.add_route(FrameRoute{
+        1U, FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                        CanFrameType::Classic}, 0U}));
+    FakeTransport transport;
+    BusOwnershipRegistry ownership;
+    BusRuntime runtime(1U, "backpressure-cancel", transport, router, ownership);
+    ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+    const auto start = *MonotonicTime::from_nanoseconds(0);
+    const auto deadline = *MonotonicTime::from_nanoseconds(100);
+    const auto lease = *CommandLease::create(
+        1U, 1U, make_frame(FrameDirection::Tx, 0x101U, 0), start, deadline);
+    ASSERT_EQ(runtime.submit(lease), RuntimeResult::Ok);
+    transport.force_next_send_results({pressure});
+    EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(10)),
+              RuntimeResult::QueueFull);
+    EXPECT_EQ(runtime.cancel(1U), RuntimeResult::Ok);
+    EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(20)),
+              RuntimeResult::Ok);
+    EXPECT_EQ(transport.pending_transmit(), 0U);
+    EXPECT_EQ(runtime.submit(lease), RuntimeResult::InvalidCommand);
+
+    const auto replacement = *CommandLease::create(
+        1U, 2U, make_frame(FrameDirection::Tx, 0x102U, 0), start, deadline);
+    ASSERT_EQ(runtime.submit(replacement), RuntimeResult::Ok);
+    transport.force_next_send_results({pressure});
+    EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(30)),
+              RuntimeResult::QueueFull);
+    EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(100)),
+              RuntimeResult::Ok);
+    EXPECT_EQ(runtime.stats().expired_commands, 1U);
+    EXPECT_EQ(transport.pending_transmit(), 0U);
+  }
+}
+
+TEST(BusRuntime, RepeatedStopDoesNotReleaseAnotherWritersOwnership) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  FakeTransport first_transport;
+  FakeTransport second_transport;
+  FakeTransport third_transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime first(1U, "one-writer", first_transport, router, ownership);
+  BusRuntime second(1U, "one-writer", second_transport, router, ownership);
+  BusRuntime third(1U, "one-writer", third_transport, router, ownership);
+  ASSERT_EQ(first.start(), RuntimeResult::Ok);
+  EXPECT_EQ(second.start(), RuntimeResult::AlreadyOwned);
+  first.stop();
+  ASSERT_EQ(second.start(), RuntimeResult::Ok);
+  first.stop();
+  EXPECT_EQ(third.start(), RuntimeResult::AlreadyOwned);
+  second.stop();
+  EXPECT_EQ(third.start(), RuntimeResult::Ok);
+}
+
+TEST(BusRuntime, StopResetsTransmitFairnessCursor) {
+  using namespace mech_control_core;
+  FrameRouter router;
+  ASSERT_FALSE(router.add_route(FrameRoute{
+      1U, FrameFilter{CanFrameFormat::Standard, 0x180U, 0x7FFU,
+                      CanFrameType::Classic}, 0U}));
+  ASSERT_FALSE(router.add_route(FrameRoute{
+      2U, FrameFilter{CanFrameFormat::Standard, 0x280U, 0x7FFU,
+                      CanFrameType::Classic}, 0U}));
+  FakeTransport transport;
+  BusOwnershipRegistry ownership;
+  BusRuntime runtime(1U, "cursor", transport, router, ownership, 2U);
+  const auto start = *MonotonicTime::from_nanoseconds(0);
+  const auto deadline = *MonotonicTime::from_nanoseconds(100);
+  const auto a = *CommandLease::create(
+      1U, 1U, make_frame(FrameDirection::Tx, 0x101U, 0), start, deadline);
+  const auto b = *CommandLease::create(
+      2U, 1U, make_frame(FrameDirection::Tx, 0x102U, 0), start, deadline);
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(a), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(b), RuntimeResult::Ok);
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(10)),
+            RuntimeResult::Ok);
+  runtime.stop();
+  RawCanFrame sent;
+  while (transport.take_transmit(sent)) {}
+  ASSERT_EQ(runtime.start(), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(a), RuntimeResult::Ok);
+  ASSERT_EQ(runtime.submit(b), RuntimeResult::Ok);
+  transport.force_next_send_results({TransportResult::QueueFull});
+  EXPECT_EQ(runtime.transmit(*MonotonicTime::from_nanoseconds(20)),
+            RuntimeResult::QueueFull);
+  ASSERT_TRUE(transport.take_transmit(sent));
+  EXPECT_EQ(sent.id.value, 0x102U);
+  EXPECT_FALSE(transport.take_transmit(sent));
+}
+
 }  // namespace
 }  // namespace mech::mech_simulation

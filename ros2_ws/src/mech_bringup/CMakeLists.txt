@@ -25,6 +25,9 @@ add_library(${PROJECT_NAME} SHARED
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
   src/ak30_force_runtime.cpp
+  src/ak30_servo_runtime.cpp
+  src/ak30_servo_runtime_params.cpp
+  src/ak30_servo_system.cpp
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
@@ -121,6 +124,9 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
+    test/test_ak30_servo_runtime.cpp
+    test/test_ak30_servo_runtime_params.cpp
+    test/test_ak30_servo_system_plugin.cpp
     test/test_ak30_runtime_params.cpp
     test/test_ak30_system_integration.cpp
     test/test_ak30_system_plugin.cpp
@@ -142,6 +148,9 @@ if(BUILD_TESTING)
     test/test_plugin_loading.cpp)
   ament_target_dependencies(${PROJECT_NAME}_plugin_loading_test
     hardware_interface controller_interface pluginlib)
+  ament_add_gtest(${PROJECT_NAME}_posix_port_lock_test
+    test/test_posix_cdc_serial_port.cpp)
+  target_link_libraries(${PROJECT_NAME}_posix_port_lock_test ${PROJECT_NAME})
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
     test/test_velocity_controller_manager.cpp
@@ -180,6 +189,17 @@ if(BUILD_TESTING)
     rclcpp_action
     trajectory_msgs)
   set_tests_properties(${PROJECT_NAME}_jtc_manager_test PROPERTIES
+    ENVIRONMENT_MODIFICATION
+      "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
+
+  ament_add_gtest(${PROJECT_NAME}_servo_jtc_manager_test
+    test/test_ak30_servo_jtc_manager.cpp)
+  target_compile_definitions(${PROJECT_NAME}_servo_jtc_manager_test PRIVATE
+    MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(${PROJECT_NAME}_servo_jtc_manager_test ${PROJECT_NAME})
+  ament_target_dependencies(${PROJECT_NAME}_servo_jtc_manager_test
+    controller_manager controller_interface rclcpp_action trajectory_msgs)
+  set_tests_properties(${PROJECT_NAME}_servo_jtc_manager_test PROPERTIES
     ENVIRONMENT_MODIFICATION
       "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
 

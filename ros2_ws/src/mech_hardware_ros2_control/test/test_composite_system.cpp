@@ -92,10 +92,13 @@ hardware_interface::HardwareInfo info_with_slash_joint_name() {
   return result;
 }
 
-// RuntimePort double whose read() reports a NaN position, simulating a
-// device adapter that decoded a corrupt frame.
+// RuntimePort double whose read() returns a chosen canonical sample, including
+// nonfinite fields that a device adapter may leave unavailable.
 class NanReadRuntime final : public RuntimePort {
  public:
+  explicit NanReadRuntime(CanonicalState sample =
+                              {std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0})
+      : sample_(sample) {}
   bool configure(std::size_t resource_count) noexcept override {
     count_ = resource_count;
     return resource_count > 0U;
@@ -110,7 +113,7 @@ class NanReadRuntime final : public RuntimePort {
     for (std::size_t index = 0U; index < count; ++index) {
       states[index] = CanonicalState{};
     }
-    states[0].position = std::numeric_limits<double>::quiet_NaN();
+    states[0] = sample_;
     return true;
   }
   bool write(const CommandDispatch*, std::size_t) noexcept override { return true; }
@@ -118,6 +121,7 @@ class NanReadRuntime final : public RuntimePort {
   bool has_valid_sample() const noexcept override { return running_; }
 
  private:
+  CanonicalState sample_;
   bool running_{false};
   std::size_t count_{0U};
 };
@@ -1290,6 +1294,108 @@ TEST(CompositeSystem, RejectsInfOnUnclaimedCommandInterface) {
   EXPECT_EQ(system.write(rclcpp::Time(0), rclcpp::Duration(0, 1)),
             hardware_interface::return_type::ERROR);
   EXPECT_TRUE(system.fault_latched());
+}
+
+TEST(CompositeSystem, PositionOnlyStateExportsAndSeedsWeakTakeover) {
+  auto hardware_info = info(1U);
+  hardware_info.joints[0].state_interfaces.resize(1U);
+  ActiveSystem fixture(std::move(hardware_info));
+  auto states = fixture.system.export_state_interfaces();
+  ASSERT_EQ(states.size(), 1U);
+  EXPECT_EQ(states[0].get_name(), "joint_1/position");
+  fixture.recorder->measured_position = -2.25;
+  ASSERT_EQ(fixture.system.read(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(states[0].get_value(), -2.25);
+  ASSERT_EQ(fixture.system.perform_command_mode_switch({"joint_1/position"}, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(fixture.system.write(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+            hardware_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(fixture.recorder->last_command(0U).position, -2.25);
+}
+
+TEST(CompositeSystem, AcceptsDeclaredStateSubsetsInCanonicalExportOrder) {
+  for (const std::vector<std::string>& declared :
+       {std::vector<std::string>{"effort", "position"},
+        std::vector<std::string>{"velocity", "effort"}}) {
+    auto hardware_info = info_with_command_interface(
+        declared[0] == "effort" ? "position" : "velocity");
+    hardware_info.joints[0].state_interfaces.clear();
+    for (const auto& name : declared) {
+      hardware_interface::InterfaceInfo value;
+      value.name = name;
+      value.size = 1;
+      hardware_info.joints[0].state_interfaces.push_back(value);
+    }
+    CompositeSystem system;
+    ASSERT_EQ(system.on_init(hardware_info),
+              hardware_interface::CallbackReturn::SUCCESS);
+    auto states = system.export_state_interfaces();
+    ASSERT_EQ(states.size(), declared.size());
+    if (declared[0] == "effort") {
+      EXPECT_EQ(states[0].get_name(), "joint_1/position");
+      EXPECT_EQ(states[1].get_name(), "joint_1/effort");
+    } else {
+      EXPECT_EQ(states[0].get_name(), "joint_1/velocity");
+      EXPECT_EQ(states[1].get_name(), "joint_1/effort");
+    }
+  }
+}
+
+TEST(CompositeSystem, RejectsInvalidDeclaredStateSubsets) {
+  const auto rejects = [](std::vector<std::string> names) {
+    auto hardware_info = info(1U);
+    hardware_info.joints[0].state_interfaces.clear();
+    for (const auto& name : names) {
+      hardware_interface::InterfaceInfo value;
+      value.name = name;
+      value.size = 1;
+      hardware_info.joints[0].state_interfaces.push_back(value);
+    }
+    CompositeSystem system;
+    return system.on_init(hardware_info) == hardware_interface::CallbackReturn::ERROR;
+  };
+  EXPECT_TRUE(rejects({}));
+  EXPECT_TRUE(rejects({"position", "temperature"}));
+  EXPECT_TRUE(rejects({"position", "position"}));
+  EXPECT_TRUE(rejects({"velocity"}));
+}
+
+TEST(CompositeSystem, ChecksOnlyDeclaredStateValuesForFiniteness) {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const auto read_result = [](std::vector<std::string> names,
+                              CanonicalState sample) {
+    auto hardware_info = info(1U);
+    hardware_info.joints[0].state_interfaces.clear();
+    for (const auto& name : names) {
+      hardware_interface::InterfaceInfo value;
+      value.name = name;
+      value.size = 1;
+      hardware_info.joints[0].state_interfaces.push_back(value);
+    }
+    CompositeSystem system;
+    EXPECT_TRUE(system.set_runtime(std::make_unique<NanReadRuntime>(sample)));
+    EXPECT_EQ(system.on_init(hardware_info),
+              hardware_interface::CallbackReturn::SUCCESS);
+    EXPECT_EQ(system.on_configure(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    EXPECT_EQ(system.on_activate(state()),
+              hardware_interface::CallbackReturn::SUCCESS);
+    const auto result = system.read(rclcpp::Time(0), rclcpp::Duration(0, 1000000));
+    EXPECT_EQ(system.fault_latched(),
+              result == hardware_interface::return_type::ERROR);
+    return result;
+  };
+  EXPECT_EQ(read_result({"position"}, {1.25, nan, nan}),
+            hardware_interface::return_type::OK);
+  EXPECT_EQ(read_result({"position"}, {nan, 0.0, 0.0}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(read_result({"position", "velocity"}, {1.25, nan, 0.0}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(read_result({"position", "effort"}, {1.25, 0.0, nan}),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(read_result({"position", "velocity", "effort"}, {1.25, 0.0, nan}),
+            hardware_interface::return_type::ERROR);
 }
 
 TEST(CompositeSystem, LatchesFaultWhenRuntimeReadReturnsNonFiniteState) {
