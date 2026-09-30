@@ -259,6 +259,22 @@ if(BUILD_TESTING)
     endif()
   endif()
 
+  ament_add_test(${PROJECT_NAME}_servo_reader_check
+    COMMAND /usr/bin/python3
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/operator.py check
+      --reader $<TARGET_FILE:servo_feedback_reader>
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/config.example.json
+    TIMEOUT 35
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  foreach(servo_tool_test operator entrypoint control_launch)
+    ament_add_test(${PROJECT_NAME}_servo_${servo_tool_test}
+      COMMAND /usr/bin/python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_${servo_tool_test}.py
+      TIMEOUT 35
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+  endforeach()
+
   ament_lint_cmake()
   ament_xmllint()
 endif()

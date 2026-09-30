@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "device_path": "/dev/serial/by-id/usb-Livelybot_Livelybot_Communication_Board_2024051701-if00",
+  "calibrated": false,
+  "identity": {
+    "board": "Livelybot 2024051701",
+    "motors": "AK30 IDs104/105"
+  },
+  "motors": [
+    {
+      "id": 104,
+      "joint_name": "motor104_joint",
+      "target_scale": 57.29577951308232,
+      "target_offset": 0.0,
+      "feedback_scale": 0.017453292519943295,
+      "feedback_offset": 0.0,
+      "target_mapping_verified": true,
+      "feedback_mapping_verified": true,
+      "mapping_evidence": "PR24 bounded single/dual +10deg bench 2026-09-30; degree/radian identity for this deployment, not joint-zero or global coordinate certification",
+      "speed_erpm": 100.0,
+      "acceleration_raw": 100.0,
+      "position_min_rad": null,
+      "position_max_rad": null,
+      "position_max_error_rad": 0.25
+    },
+    {
+      "id": 105,
+      "joint_name": "motor105_joint",
+      "target_scale": 57.29577951308232,
+      "target_offset": 0.0,
+      "feedback_scale": 0.017453292519943295,
+      "feedback_offset": 0.0,
+      "target_mapping_verified": true,
+      "feedback_mapping_verified": true,
+      "mapping_evidence": "PR24 bounded single/dual +10deg bench 2026-09-30; degree/radian identity for this deployment, not joint-zero or global coordinate certification",
+      "speed_erpm": 100.0,
+      "acceleration_raw": 100.0,
+      "position_min_rad": null,
+      "position_max_rad": null,
+      "position_max_error_rad": 0.25
+    }
+  ]
+}
