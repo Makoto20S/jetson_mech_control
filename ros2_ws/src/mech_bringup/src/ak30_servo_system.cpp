@@ -94,6 +94,11 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_activate(
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
+std::optional<mech_protocol_cubemars::ServoPositionSnapshot>
+Ak30ServoSystem::diagnostic_snapshot(std::size_t index) const noexcept {
+  return runtime_view_ == nullptr ? std::nullopt : runtime_view_->diagnostic_snapshot(index);
+}
+
 std::uint64_t Ak30ServoSystem::motor_command_frames() const noexcept {
   return runtime_view_ == nullptr ? 0U : runtime_view_->bus_stats().tx_frames;
 }

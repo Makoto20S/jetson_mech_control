@@ -130,6 +130,8 @@ AdapterResult Ak30ServoPositionSession::accept_feedback(
     sample_.availability = ServoPositionAvailability::Invalid;
     return AdapterResult::InvalidCommand;
   }
+  sample_.feedback_position_deg = decoded.position_deg;
+  sample_.temperature_c = decoded.board_temperature_c;
   sample_.position_rad = position;
   sample_.electrical_speed_erpm = decoded.electrical_speed_erpm;
   sample_.current_iq_a = decoded.current_iq_a;
@@ -152,6 +154,8 @@ ServoPositionSnapshot Ak30ServoPositionSession::snapshot(MonotonicTime now) cons
       result.availability = ServoPositionAvailability::Stale;
   }
   if (result.availability != ServoPositionAvailability::Fresh) {
+    result.feedback_position_deg = std::numeric_limits<double>::quiet_NaN();
+    result.temperature_c = std::numeric_limits<double>::quiet_NaN();
     result.position_rad = std::numeric_limits<double>::quiet_NaN();
     result.electrical_speed_erpm = std::numeric_limits<double>::quiet_NaN();
     result.current_iq_a = std::numeric_limits<double>::quiet_NaN();

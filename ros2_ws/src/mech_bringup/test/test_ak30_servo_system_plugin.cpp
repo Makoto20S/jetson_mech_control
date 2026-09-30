@@ -78,6 +78,7 @@ std::vector<std::uint8_t> feedback_wire(std::uint8_t id,
                                         std::uint8_t status = 0U) {
   using namespace mech::mech_control_core;
   std::array<std::uint8_t, kMaxCanPayloadBytes> payload{};
+  payload[6] = 43U;
   payload[7] = status;
   const auto frame = RawCanFrame::create(
       42U, *CanId::create(0x2900U | id, CanFrameFormat::Extended),
@@ -345,3 +346,31 @@ TEST(Ak30ServoSystemPlugin, FeedbackFaultCancelsBothPendingTargetsAndRecoveryNee
   ASSERT_EQ(plugin.on_deactivate(state), CallbackReturn::SUCCESS);
 }
 }  // namespace
+
+TEST(Ak30ServoSystemDiagnostics, ReceiveOnlyIncludesTemperatureAndNeverTransmitsMotorFrames) {
+  auto serial = std::make_shared<FakeSerial>();
+  Ak30ServoSystem plugin;
+  plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
+  const rclcpp_lifecycle::State state;
+  ASSERT_EQ(plugin.on_init(info()), CallbackReturn::SUCCESS);
+  ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+  EXPECT_FALSE(plugin.diagnostic_snapshot(0).has_value());
+  ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+  serial->clear_tx();
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(104U)));
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(105U)));
+  ASSERT_EQ(plugin.read(rclcpp::Time(0), rclcpp::Duration(std::chrono::milliseconds(2))),
+            hardware_interface::return_type::OK);
+  const auto sample = plugin.diagnostic_snapshot(0);
+  ASSERT_TRUE(sample.has_value());
+  EXPECT_DOUBLE_EQ(sample->temperature_c, 43.0);
+  EXPECT_DOUBLE_EQ(sample->feedback_position_deg, 0.0);
+  EXPECT_EQ(sample->sequence, 1U);
+  EXPECT_EQ(plugin.motor_command_frames(), 0U);
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(104U, 1U)));
+  EXPECT_EQ(plugin.read(rclcpp::Time(0), rclcpp::Duration(std::chrono::milliseconds(2))),
+            hardware_interface::return_type::ERROR);
+  EXPECT_EQ(plugin.motor_command_frames(), 0U);
+  EXPECT_EQ(plugin.on_error(state), CallbackReturn::SUCCESS);
+  EXPECT_TRUE(serial->take_tx().empty());
+}

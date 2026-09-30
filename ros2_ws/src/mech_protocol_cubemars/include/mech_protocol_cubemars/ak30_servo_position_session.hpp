@@ -39,6 +39,8 @@ enum class ServoPositionAvailability : std::uint8_t {
 };
 
 struct ServoPositionSnapshot final {
+  double feedback_position_deg{std::numeric_limits<double>::quiet_NaN()};
+  double temperature_c{std::numeric_limits<double>::quiet_NaN()};
   double position_rad{std::numeric_limits<double>::quiet_NaN()};
   double electrical_speed_erpm{std::numeric_limits<double>::quiet_NaN()};
   double current_iq_a{std::numeric_limits<double>::quiet_NaN()};

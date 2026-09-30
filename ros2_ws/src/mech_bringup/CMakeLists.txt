@@ -28,6 +28,7 @@ add_library(${PROJECT_NAME} SHARED
   src/ak30_servo_runtime.cpp
   src/ak30_servo_runtime_params.cpp
   src/ak30_servo_system.cpp
+  src/servo_feedback_reader.cpp
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
@@ -50,6 +51,11 @@ ament_target_dependencies(
 
 pluginlib_export_plugin_description_file(
   hardware_interface mech_bringup_plugins.xml)
+
+add_executable(servo_feedback_reader src/servo_feedback_reader_main.cpp)
+target_link_libraries(servo_feedback_reader ${PROJECT_NAME})
+ament_target_dependencies(servo_feedback_reader hardware_interface)
+install(TARGETS servo_feedback_reader RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 # First real-device entry point: drives a motor through the repository's own
 # UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
@@ -124,6 +130,7 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
+    test/test_servo_feedback_reader.cpp
     test/test_ak30_servo_runtime.cpp
     test/test_ak30_servo_runtime_params.cpp
     test/test_ak30_servo_system_plugin.cpp

@@ -33,6 +33,9 @@ class Ak30ServoSystem final : public mech_hardware_ros2_control::CompositeSystem
   }
   [[nodiscard]] std::uint64_t motor_command_frames() const noexcept;
 
+  [[nodiscard]] std::optional<mech_protocol_cubemars::ServoPositionSnapshot>
+  diagnostic_snapshot(std::size_t index) const noexcept;
+
   // Test seams must be set before initialization. Production uses the
   // PosixCdcSerialPort, steady clock, and a process-wide bus registry.
   void set_serial_port_factory_for_testing(SerialPortFactory factory) noexcept;
