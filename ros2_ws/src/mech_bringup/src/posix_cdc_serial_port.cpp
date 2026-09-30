@@ -13,11 +13,15 @@ namespace mech::mech_bringup {
 namespace {
 
 // The board enumerates as CDC-ACM and speaks its own framing on top; the
-// vendor stack opens the device raw (no baud rate is negotiated for ACM) with
-// non-blocking I/O, which is also what the bring-up probes used.
+// vendor stack and bench receiver set the host line coding to 4,000,000 baud
+// with raw, non-blocking I/O. This is independent of the CAN bus bitrates.
 bool configure_raw_nonblocking(int fd) noexcept {
   termios attrs{};
   if (tcgetattr(fd, &attrs) != 0) {
+    return false;
+  }
+  if (cfsetispeed(&attrs, B4000000) != 0 ||
+      cfsetospeed(&attrs, B4000000) != 0) {
     return false;
   }
   attrs.c_cflag &= ~(CSIZE | PARENB);

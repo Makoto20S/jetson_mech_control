@@ -6,6 +6,7 @@
 #include <string>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <gtest/gtest.h>
@@ -33,6 +34,23 @@ class PosixCdcPortLockTest : public ::testing::Test {
   int master_{-1};
   std::string path_;
 };
+
+TEST_F(PosixCdcPortLockTest, OpenSetsVendorBaudAfterPreviouslyConfigured9600) {
+  termios attrs{};
+  ASSERT_EQ(::tcgetattr(master_, &attrs), 0);
+  ASSERT_EQ(::cfsetispeed(&attrs, B9600), 0);
+  ASSERT_EQ(::cfsetospeed(&attrs, B9600), 0);
+  ASSERT_EQ(::tcsetattr(master_, TCSANOW, &attrs), 0);
+  ASSERT_EQ(::tcgetattr(master_, &attrs), 0);
+  ASSERT_EQ(::cfgetispeed(&attrs), B9600);
+  ASSERT_EQ(::cfgetospeed(&attrs), B9600);
+
+  PosixCdcSerialPort serial(path_);
+  ASSERT_TRUE(serial.open());
+  ASSERT_EQ(::tcgetattr(master_, &attrs), 0);
+  EXPECT_EQ(::cfgetispeed(&attrs), B4000000);
+  EXPECT_EQ(::cfgetospeed(&attrs), B4000000);
+}
 
 TEST_F(PosixCdcPortLockTest, SecondInstanceCannotOpenSamePtyUntilFirstCloses) {
   PosixCdcSerialPort first(path_);
