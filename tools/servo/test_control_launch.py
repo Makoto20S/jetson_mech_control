@@ -8,6 +8,20 @@ ROOT = pathlib.Path(__file__).resolve().parent
 
 
 class ControlLaunchTests(unittest.TestCase):
+    def test_readiness_requires_both_successful_spawners(self):
+        spec = importlib.util.spec_from_file_location('servo_launch', ROOT / 'servo_pair.launch.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            path=pathlib.Path(directory)/'ready'
+            completed=set()
+            module.mark_ready(completed,'state',0,str(path))
+            self.assertFalse(path.exists())
+            with self.assertRaises(RuntimeError):
+                module.mark_ready(completed,'trajectory',1,str(path))
+            self.assertFalse(path.exists())
+            module.mark_ready(completed,'trajectory',0,str(path))
+            self.assertTrue(path.exists())
+
     def test_saved_description_and_inactive_controller(self):
         os.environ.setdefault("ROS_LOG_DIR", "/tmp/servo-tools-launch-tests")
         from launch import LaunchContext

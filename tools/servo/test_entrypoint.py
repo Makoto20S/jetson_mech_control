@@ -9,7 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parent
 
 class EntryTests(unittest.TestCase):
     def test_help_does_not_need_ros_or_config(self):
-        for name in ('servo-range', 'servo-status', 'servo-control'):
+        for name in ('servo-range', 'servo-status', 'servo-control', 'servo-move'):
             with tempfile.TemporaryDirectory() as directory:
                 entry = pathlib.Path(directory) / name
                 entry.symlink_to(ROOT / 'entrypoint.sh')

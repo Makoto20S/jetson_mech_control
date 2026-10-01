@@ -267,7 +267,7 @@ if(BUILD_TESTING)
     TIMEOUT 35
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
-  foreach(servo_tool_test operator entrypoint control_launch)
+  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros)
     ament_add_test(${PROJECT_NAME}_servo_${servo_tool_test}
       COMMAND /usr/bin/python3
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_${servo_tool_test}.py
