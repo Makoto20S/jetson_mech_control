@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import json
 from unittest.mock import Mock, patch
+from types import SimpleNamespace as NS
 
 ROOT = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('servo_motion', ROOT / 'motion.py')
@@ -70,6 +71,64 @@ class MotionTests(unittest.TestCase):
         client.state=Mock()
         client.disable()
         client.state.assert_not_called()
+
+    def test_relative_target_uses_measured_position_each_time(self):
+        current=[math.radians(20),math.radians(-10)]
+        target,seconds=self.policy.relative_move(['5','-3','2'],current)
+        self.assertAlmostEqual(target[0],math.radians(25))
+        self.assertAlmostEqual(target[1],math.radians(-13))
+        again,_=self.policy.relative_move(['5','-3','2'],[math.radians(24),math.radians(-12)])
+        self.assertAlmostEqual(again[0],math.radians(29))
+        self.assertAlmostEqual(again[1],math.radians(-15))
+        self.assertEqual(seconds,2.)
+
+    def test_relative_mapping_and_limits(self):
+        m=self.config['motors'][0]
+        m.update(feedback_scale=-.02,feedback_offset=1.,target_scale=-50.,target_offset=50.)
+        policy=motion.MotionPolicy(self.config)
+        target,_=policy.relative_move(['5','0','2'],[0.,.2])
+        self.assertAlmostEqual(target[0],-.1)
+        self.assertAlmostEqual(target[1],.2)
+        for words in (['200','0','2'],['nan','0','2'],['0','0','inf'],['0']):
+            with self.subTest(words=words),self.assertRaises(ValueError):
+                self.policy.relative_move(words,[0.,0.])
+        with self.assertRaises(ValueError):self.policy.relative_move(['0','0','2'],[3.,0.])
+
+    def test_relative_rejects_stale_feedback_and_ongoing_motion(self):
+        client=object.__new__(motion.RosControl)
+        client.goal=None
+        client.ready_feedback=Mock(side_effect=ValueError('stale'))
+        client.send=Mock()
+        with self.assertRaises(ValueError):client.move_relative(['1','1','2'])
+        client.send.assert_not_called()
+        client.goal=object();client.ready_feedback.reset_mock()
+        with self.assertRaises(ValueError):client.move_relative(['1','1','2'])
+        client.ready_feedback.assert_not_called()
+
+    def test_hardware_health_rejects_cached_state_with_active_controller(self):
+        def response(state=3, available=True, claimed=True):
+            return NS(component=[NS(name='servo_pair',state=NS(id=state,label='active'),
+                command_interfaces=[NS(name=n+'/position',is_available=available,is_claimed=claimed)
+                                    for n in self.policy.names])])
+        self.assertTrue(motion.hardware_health(response(),self.policy.names,True)['healthy'])
+        for reply in (response(state=1),response(available=False),response(claimed=False),NS(component=[])):
+            with self.subTest(reply=reply):
+                self.assertFalse(motion.hardware_health(reply,self.policy.names,True)['healthy'])
+        self.assertTrue(motion.hardware_health(response(claimed=False),self.policy.names,False)['healthy'])
+
+    def test_hardware_fault_invalidates_feedback_and_suppresses_hold(self):
+        client=object.__new__(motion.RosControl)
+        client.policy=self.policy;client.record=Mock();client.active=True
+        client.feedback=motion.Feedback(self.policy.names)
+        client.feedback.ingest(self.policy.names,[0.,0.],1.,1.)
+        client.hardware_error=None;client.hardware_status=None
+        with self.assertRaises(RuntimeError):client.accept_hardware(NS(component=[]))
+        self.assertFalse(client.feedback.fresh(1.))
+        client.on_feedback(NS())  # Cached broadcaster traffic must not restore freshness.
+        self.assertFalse(client.feedback.fresh(1.))
+        client.stop=Mock();client.state=Mock();client.uncertain=False
+        with self.assertRaises(RuntimeError):client.disable()
+        client.stop.assert_not_called();client.state.assert_not_called()
 
     def test_requires_saved_calibration(self):
         self.config['calibrated'] = False

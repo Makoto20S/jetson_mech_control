@@ -43,7 +43,10 @@ class RosMotionTests(unittest.TestCase):
             def expect(text,timeout=15.):
                 deadline=time.monotonic()+timeout
                 while time.monotonic()<deadline:
-                    if text.encode() in received:return
+                    end=received.find(text.encode())
+                    if end>=0:
+                        del received[:end+len(text.encode())]
+                        return
                     if select.select([master],[],[],.1)[0]:
                         try:received.extend(os.read(master,65536))
                         except OSError:break
@@ -52,11 +55,21 @@ class RosMotionTests(unittest.TestCase):
                 expect('控制器已就绪')
                 os.write(master,b'enable\n');expect('已使能')
                 os.write(master,b'move 5 -3 0.6\n');expect('轨迹到达容差内')
+                received.clear()
+                os.write(master,b'step 2 -1 0.6\n');expect('运动中');expect('轨迹到达容差内')
                 os.write(master,b'quit\n')
                 self.assertEqual(proc.wait(timeout=15),0,received.decode(errors='replace'))
                 self.assertEqual(path.read_bytes(),before)
                 records=[json.loads(line) for line in next((Path(directory)/'runs').glob('*/events.jsonl')).read_text().splitlines()]
-                self.assertTrue(any(r['event']=='goal' for r in records))
+                relative=[r for r in records if r['event']=='relative_goal']
+                self.assertEqual(len(relative),1)
+                self.assertEqual(relative[0]['delta_device_deg'],[2.,-1.])
+                index=records.index(relative[0])
+                stop=next(i for i,r in enumerate(records[index+1:],index+1) if r['event']=='stop_requested')
+                self.assertTrue(any(r['event']=='result' and r['status']==4 and r['error_code']==0
+                                    for r in records[index+1:stop]))
+                for actual,expected in zip(relative[0]['positions_rad'],[math.radians(7),math.radians(-4)]):
+                    self.assertAlmostEqual(actual,expected,delta=math.radians(.5))
                 self.assertEqual([r['state'] for r in records if r['event']=='controller'],['active','inactive'])
             finally:
                 if proc.poll() is None:
@@ -105,6 +118,12 @@ class RosMotionTests(unittest.TestCase):
                     self.assertIsNone(client.result)
                     for actual,expected in zip(client.feedback.positions,target):
                         self.assertAlmostEqual(actual,expected,delta=math.radians(.5))
+                    client.move_relative(['2','-1','0.6'])
+                    deadline=time.monotonic()+4
+                    while client.result is not None and time.monotonic()<deadline:client.poll()
+                    self.assertIsNone(client.result)
+                    for actual,expected in zip(client.feedback.positions,[math.radians(7),math.radians(-4)]):
+                        self.assertAlmostEqual(actual,expected,delta=math.radians(.5))
                     client.send([.5,-.5],2.)
                     deadline=time.monotonic()+.15
                     while time.monotonic()<deadline:client.poll()
@@ -117,8 +136,28 @@ class RosMotionTests(unittest.TestCase):
                     self.assertEqual(client.state(),'inactive')
                     self.assertFalse(client.active)
                     self.assertTrue(any(e=='stop_requested' for e,_ in events))
+                    # Reproduce the incident's misleading combination on actual manager:
+                    # controller remains ACTIVE while the hardware is made unavailable.
+                    client.enable()
+                    from controller_manager_msgs.srv import SetHardwareComponentState
+                    from lifecycle_msgs.msg import State
+                    service=client.node.create_client(SetHardwareComponentState,
+                        'controller_manager/set_hardware_component_state')
+                    self.assertTrue(service.wait_for_service(timeout_sec=2.))
+                    request=SetHardwareComponentState.Request()
+                    request.name='servo_pair';request.target_state=State(id=1,label='unconfigured')
+                    response=client.await_future(service.call_async(request))
+                    self.assertTrue(response.ok)
+                    self.assertEqual(client.state(),'active')
+                    before=len([e for e,_ in events if e=='goal'])
+                    with self.assertRaises(RuntimeError):client.check_hardware()
+                    self.assertIsNotNone(client.hardware_error)
+                    with self.assertRaises(RuntimeError):client.send([0.,0.],1.)
+                    with self.assertRaises(RuntimeError):client.disable()
+                    self.assertEqual(before,len([e for e,_ in events if e=='goal']))
+                    self.assertTrue(any(e=='hardware' and not data['healthy'] for e,data in events))
                     client.feedback.received=-math.inf
-                    with self.assertRaises(ValueError):client.ready_feedback()
+                    with self.assertRaises(RuntimeError):client.ready_feedback()
                 except Exception:
                     log.flush();log.seek(0);print(log.read())
                     raise

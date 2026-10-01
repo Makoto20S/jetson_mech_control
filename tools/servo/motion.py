@@ -56,6 +56,14 @@ class MotionPolicy:
         self.check_positions(positions)
         return positions, seconds
 
+    def relative_move(self, words, current):
+        if len(words) != 3:
+            raise ValueError('格式：step 104增量角度 105增量角度 移动秒数')
+        self.check_positions(current)
+        delta104,delta105,seconds = map(float,words)
+        angles = self.device_angles(current)
+        return self.move([angles[0]+delta104,angles[1]+delta105,seconds])
+
     def device_angles(self, positions):
         return [(p-m['feedback_offset'])/m['feedback_scale']
                 for m,p in zip(self.motors,positions)]
@@ -132,6 +140,27 @@ class CommandInput:
         termios.tcsetattr(self.fd, termios.TCSANOW, self.saved)
 
 
+def hardware_health(response, names, require_claimed):
+    expected={name+'/position' for name in names}
+    components=[]
+    seen=set()
+    healthy=True
+    for component in response.component:
+        selected=[i for i in component.command_interfaces if i.name in expected]
+        if not selected:
+            continue
+        for interface in selected:
+            if interface.name in seen:
+                healthy=False
+            seen.add(interface.name)
+            healthy=healthy and interface.is_available and (interface.is_claimed or not require_claimed)
+        healthy=healthy and component.state.id==3  # lifecycle ACTIVE
+        components.append(dict(name=component.name,state_id=component.state.id,state=component.state.label,
+            interfaces=[dict(name=i.name,available=i.is_available,claimed=i.is_claimed) for i in selected]))
+    return dict(healthy=bool(healthy and seen==expected),components=components,
+                missing=sorted(expected-seen),require_claimed=require_claimed)
+
+
 class RosControl:
     """One-thread ROS client; server owns hardware and enforces hardware limits."""
     def __init__(self, policy, namespace, record):
@@ -140,7 +169,7 @@ class RosControl:
         from rclpy.node import Node
         from rclpy.qos import qos_profile_sensor_data
         from control_msgs.action import FollowJointTrajectory
-        from controller_manager_msgs.srv import ListControllers, SwitchController
+        from controller_manager_msgs.srv import ListControllers, SwitchController, ListHardwareComponents
         from sensor_msgs.msg import JointState
         self.ros = rclpy
         self.node = Node('servo_move_operator', namespace=namespace)
@@ -148,6 +177,13 @@ class RosControl:
         self.feedback = Feedback(policy.names)
         self.node.create_subscription(JointState, 'joint_states', self.on_feedback, qos_profile_sensor_data)
         self.list_client = self.node.create_client(ListControllers, 'controller_manager/list_controllers')
+        self.hardware_client = self.node.create_client(ListHardwareComponents, 'controller_manager/list_hardware_components')
+        self.hardware_error = None
+        self.hardware_status = None
+        self.hardware_future = None
+        self.hardware_deadline = 0.
+        self.next_hardware_check = 0.
+        self.monitor_hardware = False
         self.switch_client = self.node.create_client(SwitchController, 'controller_manager/switch_controller')
         self.action = ActionClient(self.node, FollowJointTrajectory, CONTROLLER+'/follow_joint_trajectory')
         self.active = False
@@ -159,6 +195,8 @@ class RosControl:
         self.message = '未使能'
 
     def on_feedback(self, msg):
+        if self.hardware_error:
+            return  # Later broadcaster messages cannot revive a failed hardware session.
         self.feedback.ingest(list(msg.name),list(msg.position),
                              msg.header.stamp.sec+msg.header.stamp.nanosec/1e9,time.monotonic())
 
@@ -194,6 +232,7 @@ class RosControl:
         request.timeout=Duration(sec=2)
         # An unanswered request may complete later; never retry movement in that session.
         self.uncertain=True
+        self.record('switch_request',enabled=enabled,positions_rad=list(self.feedback.positions))
         response=self.await_future(self.switch_client.call_async(request))
         actual=self.state()
         if not response.ok or actual != ('active' if enabled else 'inactive'):
@@ -202,7 +241,62 @@ class RosControl:
         self.uncertain=False
         self.record('controller',state=actual)
 
+    def hardware_failed(self, reason):
+        self.hardware_error = self.hardware_error or reason
+        self.feedback.received = -math.inf
+        raise RuntimeError(self.hardware_error)
+
+    def accept_hardware(self, response):
+        status=hardware_health(response,self.policy.names,self.active)
+        if status != self.hardware_status:
+            self.record('hardware',**status)
+        self.hardware_status=status
+        if not status['healthy']:
+            self.hardware_failed('硬件状态或位置命令接口不可用；停止接受目标，请查看framework.log首次故障记录')
+
+    def check_hardware(self):
+        from controller_manager_msgs.srv import ListHardwareComponents
+        if self.hardware_error:
+            raise RuntimeError(self.hardware_error)
+        try:
+            if not self.hardware_client.wait_for_service(timeout_sec=.5):
+                raise RuntimeError('硬件状态服务不可用')
+            # Discard responses issued before a claim/lifecycle transition.
+            if self.hardware_future is not None:
+                self.hardware_future.cancel()
+                self.hardware_future=None
+            # A new request is required before each enable/goal, not a cached healthy flag.
+            response=self.await_future(self.hardware_client.call_async(ListHardwareComponents.Request()),1.)
+            self.accept_hardware(response)
+            self.monitor_hardware=True
+        except Exception as exc:
+            self.hardware_failed('硬件检查失败：'+str(exc))
+
+    def poll_hardware(self):
+        from controller_manager_msgs.srv import ListHardwareComponents
+        if not self.monitor_hardware:
+            return
+        now=time.monotonic()
+        if self.hardware_future is not None:
+            if self.hardware_future.done():
+                future=self.hardware_future
+                self.hardware_future=None
+                try:
+                    self.accept_hardware(future.result())
+                except Exception as exc:
+                    self.hardware_failed('硬件检查失败：'+str(exc))
+            elif now>=self.hardware_deadline:
+                self.hardware_failed('硬件状态响应超时')
+        if self.hardware_future is None and now>=self.next_hardware_check:
+            if not self.hardware_client.service_is_ready():
+                self.hardware_failed('硬件状态服务中断')
+            self.hardware_future=self.hardware_client.call_async(ListHardwareComponents.Request())
+            self.hardware_deadline=now+1.
+            self.next_hardware_check=now+.2
+
     def ready_feedback(self):
+        if getattr(self,'hardware_error',None):
+            raise RuntimeError(self.hardware_error)
         if not self.feedback.fresh(time.monotonic()):
             raise ValueError('等待有效的双电机ROS位置反馈')
         self.policy.check_positions(self.feedback.positions)
@@ -211,10 +305,23 @@ class RosControl:
         if self.uncertain:
             raise RuntimeError('上次请求结果不确定，请退出并检查日志')
         self.ready_feedback()
+        self.check_hardware()
         if self.state() != 'inactive':
             raise ValueError('使能前控制器必须为inactive')
         self.switch(True)
+        self.check_hardware()
         self.message='已使能，保持当前位置；可输入move'
+
+    def move_relative(self, words):
+        if self.goal is not None:
+            raise ValueError('当前运动尚未完成，请等待或stop')
+        self.ready_feedback()
+        base=list(self.feedback.positions)
+        target,seconds=self.policy.relative_move(words,base)
+        self.send(target,seconds)
+        self.record('relative_goal',base_positions_rad=base,
+                    delta_device_deg=[float(words[0]),float(words[1])],
+                    positions_rad=target,duration_s=seconds)
 
     def send(self, positions, seconds, settling=3.):
         from builtin_interfaces.msg import Duration
@@ -223,6 +330,7 @@ class RosControl:
         from trajectory_msgs.msg import JointTrajectoryPoint
         if not self.active or self.uncertain:
             raise ValueError('请先enable；不确定状态下拒绝运动')
+        self.check_hardware()
         self.ready_feedback()
         self.policy.check_positions(positions)
         if not self.action.wait_for_server(timeout_sec=.5):
@@ -277,6 +385,8 @@ class RosControl:
         self.record('stop_requested')
 
     def disable(self):
+        if getattr(self,'hardware_error',None):
+            raise RuntimeError('硬件已失效，不再发送保持目标；将关闭框架进程：'+self.hardware_error)
         if not self.active and not self.uncertain:
             self.message='本工具未使能控制器，关闭框架进程'
             return
@@ -286,6 +396,8 @@ class RosControl:
                 self.await_future(self.result,2.)
             except Exception as exc:
                 self.record('hold_unconfirmed',error=str(exc))
+        if self.hardware_error:
+            raise RuntimeError('硬件失效，跳过控制器切换，关闭框架进程：'+self.hardware_error)
         # Always check the server, including after an ambiguous activation/goal request.
         if self.state() == 'active':
             self.switch(False)
@@ -298,6 +410,7 @@ class RosControl:
 
     def poll(self):
         self.spin(.01)
+        self.poll_hardware()
         if self.active and not self.feedback.fresh(time.monotonic()):
             raise RuntimeError('ROS位置反馈中断')
         if self.result is not None and self.result.done():
@@ -314,8 +427,8 @@ class RosControl:
             raise RuntimeError('轨迹结果超时')
 
     def status(self):
-        fresh=self.feedback.fresh(time.monotonic())
-        lines=[self.message+(' | ROS反馈有效' if fresh else ' | ROS反馈过期/等待中')]
+        fresh=self.feedback.fresh(time.monotonic()) and not self.hardware_error
+        lines=[self.message+(' | ROS消息更新' if fresh else ' | ROS消息过期/硬件异常/等待中')]
         positions=self.feedback.positions
         for i,m in enumerate(self.policy.motors):
             actual='未知' if positions is None else f'{self.policy.device_angles(positions)[i]:.2f}'
@@ -408,10 +521,13 @@ def main():
             namespace='servo_move_'+uuid.uuid4().hex[:8]
             proc=subprocess.Popen(['ros2','launch',str(Path(__file__).with_name('servo_pair.launch.py')),
                                    'urdf:='+str(urdf),'namespace:='+namespace,'ready_file:='+str(ready_file)],
-                                  stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
+                                  stdout=output,stderr=subprocess.STDOUT,start_new_session=True,
+                                  env={**os.environ,'MECH_SERVO_TRACE_PATH':str(run/'serial-trace.jsonl'),
+                                       'MECH_SERVO_CHAIN_PATH':str(run/'command-chain.jsonl')})
             client=RosControl(policy,namespace,record)
             display.message('输入设备绝对角度（与servo-status一致）；不会设置零点。\n'
-                            'enable：使能并保持当前位置\nmove 104角度 105角度 秒数：移动\n'
+                            'enable：使能并保持当前位置\nmove 104角度 105角度 秒数：绝对移动\n'
+                            'step 104增量 105增量 秒数：从当前实际角度增量移动\n'
                             'stop：请求保持当前测量位置；disable：停用；quit：退出\n'
                             '软件停止不等同于机械急停。日志：'+str(run))
             for m in policy.motors:
@@ -430,6 +546,7 @@ def main():
                 if not ready:
                     ready=ready_file.exists() and client.feedback.fresh(now)
                     if ready:
+                        client.check_hardware()
                         client.message='控制器已就绪；输入enable使能'
                     if not ready and now>startup_deadline:
                         raise RuntimeError('启动20秒后双电机反馈或控制器仍未就绪，请检查framework.log')
@@ -451,6 +568,7 @@ def main():
                     words=line.split()
                     if not words:
                         continue
+                    record('operator_input',words=words)
                     command=words[0].lower()
                     try:
                         if command=='quit' and len(words)==1:
@@ -464,12 +582,14 @@ def main():
                                 raise ValueError('当前运动尚未完成，请等待或stop')
                             target,seconds=policy.move(words[1:])
                             client.send(target,seconds)
+                        elif command=='step':
+                            client.move_relative(words[1:])
                         elif command=='stop' and len(words)==1:
                             client.stop()
                         elif command=='disable' and len(words)==1:
                             client.disable()
                         else:
-                            raise ValueError('命令：enable / move 角度104 角度105 秒数 / stop / disable / quit')
+                            raise ValueError('命令：enable / move 角度104 角度105 秒数 / step 增量104 增量105 秒数 / stop / disable / quit')
                     except ValueError as exc:
                         display.message('拒绝：'+str(exc))
             selector.close()
