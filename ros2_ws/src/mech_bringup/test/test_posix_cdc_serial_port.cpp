@@ -127,3 +127,40 @@ TEST_F(PosixCdcPortLockTest, TerminalConfigurationFailureReleasesFileLock) {
   EXPECT_EQ(::unlink(regular_file), 0);
 }
 }  // namespace
+
+#include <sstream>
+#include "mech_bringup/command_trace.hpp"
+#include "mech_bringup/serial_trace.hpp"
+
+TEST_F(PosixCdcPortLockTest, RecordsActualKernelWriteAndUnchangedPeerBytes) {
+  auto trace = std::make_shared<mech::mech_bringup::CommandTrace>(16);
+  auto port = std::make_shared<PosixCdcSerialPort>(path_);
+  port->set_command_trace(trace.get());
+  mech::mech_bringup::SerialTrace serial(port, 16, trace.get());
+  ASSERT_TRUE(serial.open());
+  const std::uint8_t packet[]{0xf7, 0x12, 0x00, 0xff, 0x0a, 0x0d};
+  ASSERT_EQ(serial.write_all(packet, sizeof(packet)), mech::mech_control_core::TransportResult::Ok);
+  std::array<std::uint8_t, 6> received{};
+  ASSERT_EQ(::read(master_, received.data(), received.size()), 6);
+  EXPECT_EQ(received, (std::array<std::uint8_t, 6>{0xf7, 0x12, 0, 0xff, 0x0a, 0x0d}));
+  std::ostringstream out;
+  trace->dump(out);
+  EXPECT_NE(out.str().find("\"stage\":\"syscall_write\""), std::string::npos);
+  EXPECT_NE(out.str().find("\"result\":6,\"errno\":0,\"requested\":6"), std::string::npos);
+  EXPECT_NE(out.str().find("\"hex\":\"f71200ff0a0d\""), std::string::npos);
+}
+
+TEST_F(PosixCdcPortLockTest, BackpressureDoesNotClaimUnacceptedBytesWereWritten) {
+  auto trace = std::make_shared<mech::mech_bringup::CommandTrace>(16);
+  PosixCdcSerialPort port(path_);
+  port.set_command_trace(trace.get());
+  ASSERT_TRUE(port.open());
+  // Fill a real nonblocking PTY without draining the peer. This forces a
+  // partial prefix and EAGAIN, unlike FakeSerial's all-or-nothing interface.
+  std::vector<std::uint8_t> bytes(1024U * 1024U, 0x5a);
+  EXPECT_EQ(port.write_all(bytes.data(), bytes.size()),
+            mech::mech_control_core::TransportResult::WouldBlock);
+  std::ostringstream out; trace->dump(out);
+  EXPECT_NE(out.str().find("\"result\":-1,\"errno\":11"), std::string::npos);
+  EXPECT_EQ(out.str().find("\"result\":1048576"), std::string::npos);
+}

@@ -1,6 +1,7 @@
 #include "mech_bringup/posix_cdc_serial_port.hpp"
 
 #include <cerrno>
+#include "mech_bringup/command_trace.hpp"
 #include <cstring>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -102,7 +103,13 @@ mech_control_core::TransportResult PosixCdcSerialPort::write_all(
   }
   std::size_t written = 0U;
   while (written < size) {
+    const auto begin = trace_ ? CommandTrace::now() : 0;
     const ssize_t sent = ::write(fd_, data + written, size - written);
+    const int saved_errno = sent < 0 ? errno : 0;
+    if (trace_) trace_->bytes("syscall_write", data + written,
+        sent > 0 ? static_cast<std::size_t>(sent) : 0U, sent, size - written,
+        saved_errno, begin);
+    if (sent < 0) errno = saved_errno;
     if (sent > 0) {
       written += static_cast<std::size_t>(sent);
       continue;

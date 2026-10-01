@@ -24,6 +24,7 @@ add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
+  src/command_trace.cpp
   src/ak30_force_runtime.cpp
   src/ak30_servo_runtime.cpp
   src/ak30_servo_runtime_params.cpp
@@ -131,6 +132,8 @@ if(BUILD_TESTING)
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
     test/test_servo_feedback_reader.cpp
+    test/test_serial_trace.cpp
+    test/test_command_trace.cpp
     test/test_ak30_servo_runtime.cpp
     test/test_ak30_servo_runtime_params.cpp
     test/test_ak30_servo_system_plugin.cpp
@@ -267,7 +270,7 @@ if(BUILD_TESTING)
     TIMEOUT 35
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
-  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros)
+  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit)
     ament_add_test(${PROJECT_NAME}_servo_${servo_tool_test}
       COMMAND /usr/bin/python3
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_${servo_tool_test}.py

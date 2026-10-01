@@ -6,6 +6,7 @@
 #include "mech_control_core/usb_cdc_transport.hpp"
 
 namespace mech::mech_bringup {
+class CommandTrace;
 
 // CdcSerialPort over a real Linux terminal device (/dev/ttyACM*). This is the
 // one piece the Foundation deliberately left as an injected interface: the
@@ -42,7 +43,11 @@ class PosixCdcSerialPort final : public mech_control_core::CdcSerialPort {
   // are never recomputed.
   [[nodiscard]] bool send_pass_through_init() noexcept;
 
+  // Set only before opening; recorder must outlive this port.
+  void set_command_trace(CommandTrace* trace) noexcept { if (fd_ < 0) trace_ = trace; }
+
  private:
+  CommandTrace* trace_{nullptr};
   std::string device_path_;
   int fd_{-1};
 };

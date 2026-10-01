@@ -6,6 +6,7 @@
 #include <string>
 
 #include "mech_bringup/ak30_servo_runtime.hpp"
+#include "mech_bringup/command_trace.hpp"
 #include "mech_control_core/runtime.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
 #include "mech_hardware_ros2_control/composite_system.hpp"
@@ -28,6 +29,16 @@ class Ak30ServoSystem final : public mech_hardware_ros2_control::CompositeSystem
   hardware_interface::CallbackReturn on_activate(
       const rclcpp_lifecycle::State& previous_state) override;
 
+  hardware_interface::return_type perform_command_mode_switch(
+      const std::vector<std::string>& start, const std::vector<std::string>& stop) override;
+  hardware_interface::return_type read(const rclcpp::Time& time,
+                                       const rclcpp::Duration& period) override;
+  hardware_interface::return_type write(const rclcpp::Time& time,
+                                        const rclcpp::Duration& period) override;
+  [[nodiscard]] std::optional<Ak30ServoFault> first_fault() const noexcept {
+    return runtime_view_ == nullptr ? std::nullopt : runtime_view_->first_fault();
+  }
+
   [[nodiscard]] std::uint64_t pass_through_frames() const noexcept {
     return pass_through_frames_;
   }
@@ -44,11 +55,20 @@ class Ak30ServoSystem final : public mech_hardware_ros2_control::CompositeSystem
       mech_control_core::BusOwnershipRegistry& registry) noexcept;
 
  private:
+  void report_first_fault();
+  void capture_interfaces(const char* stage);
+  std::unique_ptr<CommandTrace> command_trace_;
+  std::string command_trace_path_;
+  std::vector<hardware_interface::CommandInterface> trace_commands_;
+  std::vector<hardware_interface::StateInterface> trace_states_;
+  std::string serial_trace_path_;
+  bool first_fault_reported_{false};
   SerialPortFactory serial_factory_;
   Ak30ServoRuntime::Clock clock_;
   mech_control_core::BusOwnershipRegistry* registry_{nullptr};
   std::shared_ptr<mech_control_core::CdcSerialPort> serial_;
   std::unique_ptr<mech_control_core::UsbCdcTransport> transport_;
+  std::unique_ptr<CommandTraceTransport> traced_transport_;
   // CompositeSystem owns this runtime. Stop it in the derived destructor
   // while the borrowed transport and registry are still alive.
   Ak30ServoRuntime* runtime_view_{nullptr};

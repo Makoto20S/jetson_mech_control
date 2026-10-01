@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <unistd.h>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -373,4 +377,164 @@ TEST(Ak30ServoSystemDiagnostics, ReceiveOnlyIncludesTemperatureAndNeverTransmits
   EXPECT_EQ(plugin.motor_command_frames(), 0U);
   EXPECT_EQ(plugin.on_error(state), CallbackReturn::SUCCESS);
   EXPECT_TRUE(serial->take_tx().empty());
+}
+
+TEST(Ak30ServoSystemDiagnostics, ReportsFirstCauseOnceAndRetainsItThroughOnError) {
+  auto serial = std::make_shared<FakeSerial>();
+  Ak30ServoSystem plugin;
+  plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
+  const rclcpp_lifecycle::State state;
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period{std::chrono::milliseconds(2)};
+  ASSERT_EQ(plugin.on_init(info()), CallbackReturn::SUCCESS);
+  ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+  ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(104U)));
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(105U)));
+  ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(105U, 1U)));
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(plugin.read(time, period), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(plugin.read(time, period), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(plugin.on_error(state), CallbackReturn::SUCCESS);
+  const auto log = testing::internal::GetCapturedStderr();
+  const auto first = log.find("AK30 servo first fault");
+  ASSERT_NE(first, std::string::npos) << log;
+  EXPECT_EQ(log.find("AK30 servo first fault", first + 1U), std::string::npos);
+  EXPECT_NE(log.find("reason=FeedbackRejected phase=ReceiveObserver index=1 drive_id=105"), std::string::npos);
+  ASSERT_TRUE(plugin.first_fault());
+  EXPECT_EQ(plugin.first_fault()->drive_id, 105U);
+  ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+  ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+  EXPECT_FALSE(plugin.first_fault());
+}
+
+TEST(Ak30ServoSystemPlugin, OptionalSerialTraceFlushesAfterShutdown) {
+  char path[] = "/tmp/servo-trace-test-XXXXXX";
+  const auto fd = mkstemp(path);
+  ASSERT_GE(fd, 0);
+  close(fd);
+  unlink(path);
+  const auto prior = std::getenv("MECH_SERVO_TRACE_PATH");
+  const std::string old = prior ? prior : "";
+  const bool had_prior = prior != nullptr;
+  auto serial = std::make_shared<FakeSerial>();
+  {
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
+    setenv("MECH_SERVO_TRACE_PATH", path, 1);
+    const std::string chain_path = std::string(path) + ".chain";
+    setenv("MECH_SERVO_CHAIN_PATH", chain_path.c_str(), 1);
+    const auto initialized = plugin.on_init(info());
+    unsetenv("MECH_SERVO_CHAIN_PATH");
+    if (had_prior) setenv("MECH_SERVO_TRACE_PATH", old.c_str(), 1);
+    else unsetenv("MECH_SERVO_TRACE_PATH");
+    ASSERT_EQ(initialized, CallbackReturn::SUCCESS);
+    const rclcpp_lifecycle::State state;
+    ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(104)));
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(105)));
+    ASSERT_EQ(plugin.read(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+              hardware_interface::return_type::OK);
+    auto commands = plugin.export_command_interfaces();
+    ASSERT_EQ(plugin.perform_command_mode_switch({"left/position", "right/position"}, {}),
+              hardware_interface::return_type::OK);
+    ASSERT_EQ(plugin.write(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+              hardware_interface::return_type::OK);
+    ASSERT_EQ(plugin.read(rclcpp::Time(0), rclcpp::Duration(0, 2000000)),
+              hardware_interface::return_type::OK);
+    EXPECT_FALSE(std::ifstream(path).good());
+  }
+  EXPECT_FALSE(serial->is_open());
+  std::ifstream input(path);
+  std::ostringstream output; output << input.rdbuf();
+  EXPECT_NE(output.str().find("\"direction\":\"tx\""), std::string::npos);
+  EXPECT_NE(output.str().find("\"direction\":\"rx\""), std::string::npos);
+  std::ifstream chain(std::string(path) + ".chain");
+  std::ostringstream records; records << chain.rdbuf();
+  for (const auto* stage : {"claim_after", "interface", "dispatch", "stored",
+                             "prepared", "selected", "transport_send", "serial_request"})
+    EXPECT_NE(records.str().find(std::string("\"stage\":\"") + stage + "\""), std::string::npos) << stage;
+  EXPECT_NE(records.str().find("\"hex\":\"ffff8ad000640032\""), std::string::npos);
+  unlink((std::string(path) + ".chain").c_str());
+  unlink(path);
+}
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include "mech_bringup/posix_cdc_serial_port.hpp"
+
+TEST(Ak30ServoSystemPlugin, FullChainAuditMatchesRealPtyBytesAndRejectsMutation) {
+  const int master = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
+  ASSERT_GE(master, 0);
+  ASSERT_EQ(grantpt(master), 0);
+  ASSERT_EQ(unlockpt(master), 0);
+  std::array<char, 256> name{};
+  ASSERT_EQ(ptsname_r(master, name.data(), name.size()), 0);
+  char directory[] = "/tmp/servo-chain-integration-XXXXXX";
+  ASSERT_NE(mkdtemp(directory), nullptr);
+  const std::string path = std::string(directory) + "/chain.jsonl";
+  {
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([&](const std::string&) {
+      return std::make_shared<mech::mech_bringup::PosixCdcSerialPort>(name.data());
+    });
+    setenv("MECH_SERVO_CHAIN_PATH", path.c_str(), 1);
+    const auto initialized = plugin.on_init(info());
+    unsetenv("MECH_SERVO_CHAIN_PATH");
+    ASSERT_EQ(initialized, CallbackReturn::SUCCESS);
+    const rclcpp_lifecycle::State state;
+    ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+    std::array<std::uint8_t, 128> rx{};
+    ASSERT_EQ(::read(master, rx.data(), rx.size()), 13);
+    for (const auto id : {104, 105}) {
+      const auto bytes = feedback_wire(id);
+      ASSERT_EQ(::write(master, bytes.data(), bytes.size()), static_cast<ssize_t>(bytes.size()));
+    }
+    const rclcpp::Time time(0);
+    const rclcpp::Duration period(0, 2000000);
+    // PTY delivery is asynchronous; no command is claimed during this wait.
+    for (int i = 0; i < 100; ++i) {
+      ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+      auto sample = plugin.diagnostic_snapshot(1);
+      if (sample && sample->availability == mech::mech_protocol_cubemars::ServoPositionAvailability::Fresh) break;
+      usleep(1000);
+    }
+    ASSERT_EQ(plugin.perform_command_mode_switch({"left/position", "right/position"}, {}),
+              hardware_interface::return_type::OK);
+    ASSERT_EQ(plugin.write(time, period), hardware_interface::return_type::OK);
+    ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+    const auto size = ::read(master, rx.data(), rx.size());
+    ASSERT_EQ(size, 42);
+    std::vector<std::uint8_t> received(rx.begin(), rx.begin() + size);
+    const auto left_offset = received[7] == 104 ? 0U : 21U;
+    expect_mode6_packet(received, left_offset, 104, {0xff, 0xff, 0x8a, 0xd0});
+    expect_mode6_packet(received, 21U - left_offset, 105, {0xff, 0xff, 0xec, 0x78});
+    EXPECT_EQ(plugin.on_deactivate(state), CallbackReturn::SUCCESS);
+  }
+  ::close(master);
+  const std::string audit = std::string(MECH_BRINGUP_SOURCE_DIR) + "/../../../tools/servo/chain_audit.py";
+  auto run_audit = [&] {
+    const auto pid = fork();
+    if (pid == 0) {
+      execl("/usr/bin/python3", "python3", audit.c_str(), path.c_str(), "--hardware-only", static_cast<char*>(nullptr));
+      _exit(127);
+    }
+    int status = 0;
+    if (pid < 0 || waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) return -1;
+    return WEXITSTATUS(status);
+  };
+  EXPECT_EQ(run_audit(), 0);
+  // Mutate a real captured boundary; production codec is not used as oracle.
+  std::ifstream input(path);
+  std::string contents((std::istreambuf_iterator<char>(input)), {});
+  const auto at = contents.find("ffff8ad000640032");
+  ASSERT_NE(at, std::string::npos);
+  contents.replace(at, 16, "0000000000640032");
+  { std::ofstream output(path); output << contents; }
+  EXPECT_EQ(run_audit(), 1);
+  unlink(path.c_str());
+  rmdir(directory);
 }

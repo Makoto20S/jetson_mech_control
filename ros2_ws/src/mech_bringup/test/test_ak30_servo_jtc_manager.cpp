@@ -72,9 +72,10 @@ hardware_interface::HardwareInfo servo_info() {
   return result;
 }
 
-std::vector<std::uint8_t> feedback_wire() {
+std::vector<std::uint8_t> feedback_wire(std::uint8_t status = 0U) {
   using namespace mech::mech_control_core;
   std::array<std::uint8_t, kMaxCanPayloadBytes> payload{};  // 0 deg -> 1 rad
+  payload[7] = status;
   const auto frame = RawCanFrame::create(
       42U, *CanId::create(0x2968U, CanFrameFormat::Extended),
       CanFrameType::Classic, FrameDirection::Tx, 8U, payload,
@@ -108,6 +109,7 @@ class ServoJtcManagerTest : public ::testing::Test {
     plugin->set_serial_port_factory_for_testing(
         [serial = serial_](const std::string&) { return serial; });
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
+    resources_ = resources.get();
     resources->import_component(std::move(plugin), servo_info());
     rclcpp_lifecycle::State active{
         lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
@@ -179,6 +181,7 @@ class ServoJtcManagerTest : public ::testing::Test {
     return result.get();
   }
 
+  hardware_interface::ResourceManager* resources_{nullptr};
   std::shared_ptr<FakeSerial> serial_;
   std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
   std::shared_ptr<controller_manager::ControllerManager> manager_;
@@ -187,6 +190,24 @@ class ServoJtcManagerTest : public ::testing::Test {
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr publisher_;
   std::chrono::steady_clock::time_point next_cycle_;
 };
+
+TEST_F(ServoJtcManagerTest, DeviceFaultCanLeaveControllerActiveWithCachedPosition) {
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  ASSERT_EQ(drive_switch({kController}, {}), controller_interface::return_type::OK);
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  auto state = resources_->claim_state_interface("motor1_joint/position");
+  const auto before = state.get_value();
+  ASSERT_EQ(controller_->get_state().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
+  ASSERT_TRUE(resources_->command_interface_is_available("motor1_joint/position"));
+
+  // Inject a real servo status fault through the actual codec/session/plugin path.
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire(1U)));
+  ASSERT_NO_FATAL_FAILURE(cycle(1));
+  EXPECT_FALSE(resources_->command_interface_is_available("motor1_joint/position"));
+  EXPECT_EQ(controller_->get_state().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
+  EXPECT_DOUBLE_EQ(state.get_value(), before);
+  EXPECT_NE(drive_switch({}, {kController}), controller_interface::return_type::OK);
+}
 
 TEST_F(ServoJtcManagerTest, PositionTrajectoryProducesMode6AndDeactivateIsSilent) {
   ASSERT_NO_FATAL_FAILURE(cycle(2));  // establish actual position-only feedback
@@ -230,9 +251,67 @@ TEST_F(ServoJtcManagerTest, PositionTrajectoryProducesMode6AndDeactivateIsSilent
   EXPECT_TRUE(saw_nontrivial_target)
       << "JTC must move the target past the measured-position hold";
 
+  // Once the trajectory has ended, waiting for another user command must
+  // still emit the final position every cycle through the real servo codec.
+  serial_->clear_tx();
+  ASSERT_NO_FATAL_FAILURE(cycle(100));
+  const auto held = serial_->take_tx();
+  ASSERT_EQ(held.size(), 100U * 21U);
+  for (std::size_t offset = 0; offset < held.size(); offset += 21U) {
+    EXPECT_EQ(held[offset + 8U], 0x06U);
+    const std::uint32_t raw =
+        (static_cast<std::uint32_t>(held[offset + 13U]) << 24U) |
+        (static_cast<std::uint32_t>(held[offset + 14U]) << 16U) |
+        (static_cast<std::uint32_t>(held[offset + 15U]) << 8U) |
+        static_cast<std::uint32_t>(held[offset + 16U]);
+    EXPECT_NEAR(static_cast<std::int32_t>(raw), -28000, 1);
+  }
+
   ASSERT_EQ(drive_switch({}, {kController}), controller_interface::return_type::OK);
   serial_->clear_tx();
   ASSERT_NO_FATAL_FAILURE(cycle(20));
   EXPECT_TRUE(serial_->take_tx().empty());
 }
 }  // namespace
+
+#include <fstream>
+#include <sstream>
+#include <unistd.h>
+
+class ServoJtcChainTest : public ServoJtcManagerTest {
+ protected:
+  void SetUp() override {
+    char directory[] = "/tmp/servo-jtc-chain-XXXXXX";
+    ASSERT_NE(mkdtemp(directory), nullptr);
+    directory_ = directory;
+    path_ = directory_ + "/chain.jsonl";
+    setenv("MECH_SERVO_CHAIN_PATH", path_.c_str(), 1);
+    ServoJtcManagerTest::SetUp();
+    unsetenv("MECH_SERVO_CHAIN_PATH");
+  }
+  void TearDown() override {
+    ServoJtcManagerTest::TearDown();
+    std::ifstream file(path_);
+    std::ostringstream trace; trace << file.rdbuf();
+    const auto records = trace.str();
+    EXPECT_NE(records.find("\"stage\":\"claim_after\""), std::string::npos);
+    EXPECT_NE(records.find("\"stage\":\"interface\""), std::string::npos);
+    EXPECT_NE(records.find("\"stage\":\"dispatch\""), std::string::npos);
+    EXPECT_NE(records.find("\"hex\":\"ffff8ad000640032\""), std::string::npos);
+    EXPECT_NE(records.find("\"dropped\":0"), std::string::npos);
+    unlink(path_.c_str());
+    rmdir(directory_.c_str());
+  }
+  std::string directory_, path_;
+};
+
+TEST_F(ServoJtcChainTest, ActualUpstreamJtcHoldIsCapturedThroughUsbEncoder) {
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  ASSERT_EQ(drive_switch({kController}, {}), controller_interface::return_type::OK);
+  ASSERT_NO_FATAL_FAILURE(cycle(30));
+  EXPECT_FALSE(serial_->take_tx().empty());
+  ASSERT_EQ(drive_switch({}, {kController}), controller_interface::return_type::OK);
+  serial_->clear_tx();
+  ASSERT_NO_FATAL_FAILURE(cycle(3));
+  EXPECT_TRUE(serial_->take_tx().empty());
+}
