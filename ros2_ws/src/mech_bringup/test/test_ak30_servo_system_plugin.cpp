@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -79,9 +80,13 @@ hardware_interface::HardwareInfo info() {
 }
 
 std::vector<std::uint8_t> feedback_wire(std::uint8_t id,
-                                        std::uint8_t status = 0U) {
+                                        std::uint8_t status = 0U,
+                                        std::int16_t position_tenths = 0) {
   using namespace mech::mech_control_core;
   std::array<std::uint8_t, kMaxCanPayloadBytes> payload{};
+  const auto position = static_cast<std::uint16_t>(position_tenths);
+  payload[0] = static_cast<std::uint8_t>(position >> 8U);
+  payload[1] = static_cast<std::uint8_t>(position);
   payload[6] = 43U;
   payload[7] = status;
   const auto frame = RawCanFrame::create(
@@ -113,6 +118,142 @@ void expect_mode6_packet(const std::vector<std::uint8_t>& bytes,
   EXPECT_EQ(bytes[offset + 20U], 50U);   // raw acceleration 500 / 10
 }
 
+TEST(Ak30ServoSystemPlugin, NamedCommandHandlesAndFeedbackCannotAliasOtherRoute) {
+  for (const bool reverse_declaration : {false, true}) {
+    SCOPED_TRACE(reverse_declaration ? "right-first hardware" : "left-first hardware");
+    auto serial = std::make_shared<FakeSerial>();
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
+    auto declaration = info();
+    if (reverse_declaration)
+      std::reverse(declaration.joints.begin(), declaration.joints.end());
+    const rclcpp_lifecycle::State state;
+    const rclcpp::Time time(0);
+    const rclcpp::Duration period(0, 2000000);
+    ASSERT_EQ(plugin.on_init(declaration), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+    auto commands = plugin.export_command_interfaces();
+    auto states = plugin.export_state_interfaces();
+    auto left = std::find_if(commands.begin(), commands.end(), [](const auto& c) {
+      return c.get_name() == "left/position";
+    });
+    auto right = std::find_if(commands.begin(), commands.end(), [](const auto& c) {
+      return c.get_name() == "right/position";
+    });
+    ASSERT_NE(left, commands.end());
+    ASSERT_NE(right, commands.end());
+    ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+    serial->clear_tx();
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(105U)));
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(104U)));
+    ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+    ASSERT_EQ(plugin.perform_command_mode_switch({"right/position", "left/position"}, {}),
+              hardware_interface::return_type::OK);
+
+    const std::array<std::array<double, 2>, 4> targets{{
+        {1.125, 0.625}, {1.1875, 0.625}, {1.1875, 0.4375}, {1.0625, 0.5625}}};
+    // Golden raw mode6 fields from the documented affine and 10000 scale;
+    // no production codec is used to construct the oracle.
+    const std::array<std::array<std::int32_t, 2>, 4> raw_targets{{
+        {-27500, -8750}, {-26250, -8750}, {-26250, -3125}, {-28750, -6875}}};
+    for (std::size_t stage = 0; stage < targets.size(); ++stage) {
+      for (unsigned sample = 0; sample < 128U; ++sample) {
+        left->set_value(targets[stage][0]);
+        EXPECT_DOUBLE_EQ(right->get_value(), sample == 0U && stage == 0U
+            ? 0.5 : 0.68);  // writing the left handle cannot alter the right handle
+        right->set_value(targets[stage][1]);
+        EXPECT_DOUBLE_EQ(left->get_value(), targets[stage][0]);
+        ASSERT_EQ(plugin.write(time, period), hardware_interface::return_type::OK);
+        // A dispatch is a value snapshot. Mutating the exported buffers after
+        // write() must not alter the pending runtime command before read().
+        left->set_value(1.18);
+        right->set_value(0.68);
+        // Non-constant fresh feedback arrives in changing ID order. read()
+        // may update state but must never seed/rewrite an existing claim.
+        const auto first = sample % 2U == 0U ? 104U : 105U;
+        const auto second = first == 104U ? 105U : 104U;
+        for (const auto id : {first, second}) {
+          const auto tenths = static_cast<std::int16_t>(id == 104U
+              ? sample % 3U : sample % 5U);
+          ASSERT_TRUE(serial->inject_rx(feedback_wire(id, 0U, tenths)));
+        }
+        ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+        EXPECT_DOUBLE_EQ(left->get_value(), 1.18);
+        EXPECT_DOUBLE_EQ(right->get_value(), 0.68);
+        const auto bytes = serial->take_tx();
+        serial->clear_tx();
+        ASSERT_EQ(bytes.size(), 42U);
+        std::array<bool, 2> seen{};
+        for (std::size_t offset = 0; offset < bytes.size(); offset += 21U) {
+          const auto id = bytes[offset + 7U];
+          ASSERT_TRUE(id == 104U || id == 105U);
+          const auto index = id == 104U ? 0U : 1U;
+          ASSERT_FALSE(seen[index]);
+          seen[index] = true;
+          const auto raw = static_cast<std::uint32_t>(raw_targets[stage][index]);
+          expect_mode6_packet(bytes, offset, id,
+              {static_cast<std::uint8_t>(raw >> 24U),
+               static_cast<std::uint8_t>(raw >> 16U),
+               static_cast<std::uint8_t>(raw >> 8U), static_cast<std::uint8_t>(raw)});
+        }
+        for (const auto& s : states) {
+          const auto expected = s.get_name() == "left/position"
+              ? 1.0 + (sample % 3U) * 0.05 : 0.5 + (sample % 5U) * 0.025;
+          EXPECT_NEAR(s.get_value(), expected, 1e-12);
+        }
+      }
+    }
+    ASSERT_EQ(plugin.on_deactivate(state), CallbackReturn::SUCCESS);
+  }
+}
+
+TEST(Ak30ServoSystemPlugin, FeedbackAtPeerTargetCannotRewriteHeldCommand) {
+  auto serial = std::make_shared<FakeSerial>();
+  Ak30ServoSystem plugin;
+  plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
+  auto declaration = info();
+  for (auto& joint : declaration.joints) {
+    joint.parameters["target_scale"] = "1.0";
+    joint.parameters["target_offset"] = "0.0";
+    joint.parameters["feedback_scale"] = "0.1";
+    joint.parameters["feedback_offset"] = "0.0";
+  }
+  const rclcpp_lifecycle::State state;
+  const rclcpp::Time time(0);
+  const rclcpp::Duration period(0, 2000000);
+  ASSERT_EQ(plugin.on_init(declaration), CallbackReturn::SUCCESS);
+  ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+  auto commands = plugin.export_command_interfaces();
+  auto states = plugin.export_state_interfaces();
+  ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+  serial->clear_tx();
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(104U, 0U, 100)));
+  ASSERT_TRUE(serial->inject_rx(feedback_wire(105U, 0U, 120)));
+  ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+  ASSERT_EQ(plugin.perform_command_mode_switch({"left/position", "right/position"}, {}),
+            hardware_interface::return_type::OK);
+  commands[0].set_value(1.1);
+  commands[2].set_value(1.25);
+  for (int repeat = 0; repeat < 20; ++repeat) {
+    ASSERT_EQ(plugin.write(time, period), hardware_interface::return_type::OK);
+    // The 105 feedback deliberately equals 104's canonical command. A
+    // receive-path alias or read-time command seeding would now be exposed.
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(105U, 0U, 110)));
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(104U, 0U, 100)));
+    ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+    EXPECT_NEAR(states[1].get_value(), 1.1, 1e-12);
+    EXPECT_DOUBLE_EQ(commands[0].get_value(), 1.1);
+    EXPECT_DOUBLE_EQ(commands[2].get_value(), 1.25);
+    const auto bytes = serial->take_tx();
+    serial->clear_tx();
+    ASSERT_EQ(bytes.size(), 42U);
+    const auto left_offset = bytes[7] == 104U ? 0U : 21U;
+    expect_mode6_packet(bytes, left_offset, 104U, {0x00, 0x00, 0x2A, 0xF8});
+    expect_mode6_packet(bytes, 21U - left_offset, 105U, {0x00, 0x00, 0x30, 0xD4});
+  }
+  ASSERT_EQ(plugin.on_deactivate(state), CallbackReturn::SUCCESS);
+}
+
 TEST(Ak30ServoSystemPlugin, InvalidDeclarationNeverConstructsSerial) {
   Ak30ServoSystem plugin;
   unsigned requests = 0;
@@ -125,6 +266,56 @@ TEST(Ak30ServoSystemPlugin, InvalidDeclarationNeverConstructsSerial) {
   bad.joints[1].parameters["drive_id"] = "104";
   EXPECT_EQ(plugin.on_init(bad), CallbackReturn::ERROR);
   EXPECT_EQ(requests, 0U);
+}
+
+TEST(Ak30ServoSystemPlugin, InjectedClockAcceptsFeedbackAndStillEnforcesCommandExpiry) {
+  using namespace mech::mech_control_core;
+  using mech::mech_bringup::Ak30ServoFaultReason;
+  // Both timestamp producers must observe this same externally owned clock.
+  // Its epoch deliberately differs from the host steady clock.
+  for (const auto elapsed : {3000000LL, 6000000LL}) {
+    SCOPED_TRACE(elapsed);
+    std::int64_t now_ns = 1000000000;
+    auto serial = std::make_shared<FakeSerial>();
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing(
+        [serial](const std::string&) { return serial; });
+    plugin.set_clock_for_testing(
+        [&now_ns] { return *MonotonicTime::from_nanoseconds(now_ns); });
+    ASSERT_EQ(plugin.on_init(info()), CallbackReturn::SUCCESS);
+    const rclcpp_lifecycle::State state;
+    ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+    serial->clear_tx();
+    const rclcpp::Time time(0);
+    const rclcpp::Duration period(0, 2000000);
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(104U)));
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(105U)));
+    ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
+    for (std::size_t index = 0; index < 2U; ++index) {
+      const auto feedback = plugin.diagnostic_snapshot(index);
+      ASSERT_TRUE(feedback);
+      EXPECT_EQ(feedback->availability,
+                mech::mech_protocol_cubemars::ServoPositionAvailability::Fresh);
+      ASSERT_TRUE(feedback->host_rx_time);
+      EXPECT_EQ(feedback->host_rx_time->nanoseconds(), now_ns);
+    }
+    ASSERT_EQ(plugin.perform_command_mode_switch(
+                  {"left/position", "right/position"}, {}),
+              hardware_interface::return_type::OK);
+    ASSERT_EQ(plugin.write(time, period), hardware_interface::return_type::OK);
+    // Leave this generation unsent, then cross its real configured TTL in
+    // logical time. Fresh feedback cannot revive the expired target.
+    now_ns += elapsed;
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(104U)));
+    ASSERT_TRUE(serial->inject_rx(feedback_wire(105U)));
+    EXPECT_EQ(plugin.read(time, period), hardware_interface::return_type::ERROR);
+    ASSERT_TRUE(plugin.first_fault());
+    EXPECT_EQ(plugin.first_fault()->reason,
+              elapsed == 3000000LL ? Ak30ServoFaultReason::UnsentSoftDeadline
+                                   : Ak30ServoFaultReason::HardDeadline);
+    EXPECT_TRUE(serial->take_tx().empty());
+  }
 }
 
 TEST(Ak30ServoSystemPlugin, ConfigureDoesNotOpenAndEachActivationInitializesGateway) {
@@ -506,9 +697,20 @@ TEST(Ak30ServoSystemPlugin, FullChainAuditMatchesRealPtyBytesAndRejectsMutation)
               hardware_interface::return_type::OK);
     ASSERT_EQ(plugin.write(time, period), hardware_interface::return_type::OK);
     ASSERT_EQ(plugin.read(time, period), hardware_interface::return_type::OK);
-    const auto size = ::read(master, rx.data(), rx.size());
-    ASSERT_EQ(size, 42);
-    std::vector<std::uint8_t> received(rx.begin(), rx.begin() + size);
+    // PTY is a nonblocking byte stream: one read can return only the first
+    // of the two already-written frames. Accumulate with a bounded wait while
+    // keeping the exact total and golden byte assertions below.
+    std::vector<std::uint8_t> received;
+    for (int guard = 0; guard < 100 && received.size() < 42U; ++guard) {
+      const auto size = ::read(master, rx.data(), rx.size());
+      if (size > 0) {
+        received.insert(received.end(), rx.begin(), rx.begin() + size);
+      } else if (size < 0) {
+        ASSERT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+      }
+      if (received.size() < 42U) usleep(1000);
+    }
+    ASSERT_EQ(received.size(), 42U);
     const auto left_offset = received[7] == 104 ? 0U : 21U;
     expect_mode6_packet(received, left_offset, 104, {0xff, 0xff, 0x8a, 0xd0});
     expect_mode6_packet(received, 21U - left_offset, 105, {0xff, 0xff, 0xec, 0x78});

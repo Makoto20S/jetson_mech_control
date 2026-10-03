@@ -121,7 +121,7 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_init(
     serial_ = std::make_shared<SerialTrace>(serial_, 1U, command_trace_.get());
   // Serial wrapping must precede construction of the transport borrowing it.
   transport_ = std::make_unique<mech_control_core::UsbCdcTransport>(
-      *serial_, transport_options(parsed->config.logical_bus));
+      *serial_, transport_options(parsed->config.logical_bus), clock_);
   mech_control_core::Transport* runtime_transport = transport_.get();
   if (command_trace_) {
     traced_transport_ = std::make_unique<CommandTraceTransport>(*transport_, *command_trace_);

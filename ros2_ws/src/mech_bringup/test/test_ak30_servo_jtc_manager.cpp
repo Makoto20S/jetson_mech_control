@@ -1,4 +1,6 @@
 #include <array>
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -10,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "controller_manager/controller_manager.hpp"
+#include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "hardware_interface/resource_manager.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "hardware_interface/types/lifecycle_state_names.hpp"
@@ -19,6 +22,7 @@
 #include "mech_hardware_ros2_control/composite_system.hpp"
 #include "mech_simulation/fake_serial.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 
 namespace {
@@ -72,12 +76,13 @@ hardware_interface::HardwareInfo servo_info() {
   return result;
 }
 
-std::vector<std::uint8_t> feedback_wire(std::uint8_t status = 0U) {
+std::vector<std::uint8_t> feedback_wire(std::uint8_t status = 0U,
+                                      std::uint8_t id = 104U) {
   using namespace mech::mech_control_core;
   std::array<std::uint8_t, kMaxCanPayloadBytes> payload{};  // 0 deg -> 1 rad
   payload[7] = status;
   const auto frame = RawCanFrame::create(
-      42U, *CanId::create(0x2968U, CanFrameFormat::Extended),
+      42U, *CanId::create(0x2900U | id, CanFrameFormat::Extended),
       CanFrameType::Classic, FrameDirection::Tx, 8U, payload,
       *MonotonicTime::from_nanoseconds(0));
   std::array<std::uint8_t, 528U> bytes{};
@@ -103,14 +108,21 @@ class ServoJtcManagerTest : public ::testing::Test {
     if (rclcpp::ok()) rclcpp::shutdown();
   }
 
+  virtual hardware_interface::HardwareInfo hardware_info() { return servo_info(); }
+  virtual std::vector<std::string> controller_joints() { return {"motor1_joint"}; }
+  virtual void inject_feedback() { ASSERT_TRUE(serial_->inject_rx(feedback_wire())); }
+  virtual void configure_hardware_clock(Ak30ServoSystem&) {}
+  virtual void advance_hardware_clock() {}
+
   void SetUp() override {
     serial_ = std::make_shared<FakeSerial>(65536U);
     auto plugin = std::make_unique<Ak30ServoSystem>();
     plugin->set_serial_port_factory_for_testing(
         [serial = serial_](const std::string&) { return serial; });
+    configure_hardware_clock(*plugin);
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
     resources_ = resources.get();
-    resources->import_component(std::move(plugin), servo_info());
+    resources->import_component(std::move(plugin), hardware_info());
     rclcpp_lifecycle::State active{
         lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
         hardware_interface::lifecycle_state_names::ACTIVE};
@@ -122,6 +134,8 @@ class ServoJtcManagerTest : public ::testing::Test {
         std::move(resources), executor_, "controller_manager", "", options);
     controller_ = manager_->load_controller(kController);
     ASSERT_NE(controller_, nullptr);
+    ASSERT_TRUE(controller_->get_node()->set_parameter(
+        rclcpp::Parameter("joints", controller_joints())).successful);
     ASSERT_EQ(manager_->configure_controller(kController),
               controller_interface::return_type::OK);
     publisher_node_ = std::make_shared<rclcpp::Node>("servo_jtc_publisher");
@@ -152,7 +166,8 @@ class ServoJtcManagerTest : public ::testing::Test {
       if (next_cycle_ < current) next_cycle_ = current;
       next_cycle_ += std::chrono::nanoseconds(kPeriodNs);
       std::this_thread::sleep_until(next_cycle_);
-      ASSERT_TRUE(serial_->inject_rx(feedback_wire()));
+      advance_hardware_clock();
+      ASSERT_NO_FATAL_FAILURE(inject_feedback());
       const auto clock = controller_->get_node()->get_clock();
       const auto time = clock->now();
       const rclcpp::Duration period(0, kPeriodNs);
@@ -315,3 +330,177 @@ TEST_F(ServoJtcChainTest, ActualUpstreamJtcHoldIsCapturedThroughUsbEncoder) {
   ASSERT_NO_FATAL_FAILURE(cycle(3));
   EXPECT_TRUE(serial_->take_tx().empty());
 }
+
+// The application submits joint names in ID order; JTC and hardware need not
+// use that same order. Exercise all three orderings through the production
+// action -> JTC -> CompositeSystem -> session -> USB encoder chain.
+class ServoPairJtcMappingTest : public ServoJtcManagerTest,
+                               public ::testing::WithParamInterface<bool> {
+ protected:
+  using Action = control_msgs::action::FollowJointTrajectory;
+
+  void configure_hardware_clock(Ak30ServoSystem& plugin) override {
+    // This mapping test runs ROS callbacks synchronously on a non-RT thread.
+    // Runtime and transport copy callbacks that read this single state;
+    // neither callback advances time. Every read/update/write cycle is fixed
+    // at one logical instant while ROS/JTC and sleep keep their real clocks.
+    // This verifies routing, not a 3/6 ms scheduling guarantee or trace timing.
+    plugin.set_clock_for_testing([this] {
+      return *mech::mech_control_core::MonotonicTime::from_nanoseconds(
+          hardware_now_ns_.load());
+    });
+  }
+
+  void advance_hardware_clock() override { hardware_now_ns_.fetch_add(kPeriodNs); }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(ServoJtcManagerTest::SetUp());
+    // DDS entity creation/destruction is not bounded by the active 3/6 ms
+    // command watchdog. Prepare one client before claiming motion interfaces
+    // and retain it across all submissions and hold checks.
+    action_client_ = rclcpp_action::create_client<Action>(
+        publisher_node_, std::string("/") + kController + "/follow_joint_trajectory");
+    for (int guard = 0; guard < 1000 && !action_client_->action_server_is_ready(); ++guard)
+      ASSERT_NO_FATAL_FAILURE(cycle(1));
+    ASSERT_TRUE(action_client_->action_server_is_ready());
+  }
+
+  hardware_interface::HardwareInfo hardware_info() override {
+    auto result = servo_info();
+    result.joints[0].name = "motor104_joint";
+    auto right = result.joints[0];
+    right.name = "motor105_joint";
+    right.parameters["drive_id"] = "105";
+    right.parameters["target_scale"] = "-3.0";
+    right.parameters["target_offset"] = "1.0";
+    right.parameters["feedback_scale"] = "0.25";
+    right.parameters["feedback_offset"] = "0.5";
+    right.parameters["speed_erpm"] = "1700";
+    right.parameters["acceleration_raw"] = "900";
+    result.joints.push_back(std::move(right));
+    if (GetParam()) std::reverse(result.joints.begin(), result.joints.end());
+    return result;
+  }
+
+  std::vector<std::string> controller_joints() override {
+    return {"motor105_joint", "motor104_joint"};
+  }
+
+  void inject_feedback() override {
+    // Reverse reception order too; feedback values stay distinct after mapping.
+    ASSERT_TRUE(serial_->inject_rx(feedback_wire(0U, 105U)));
+    ASSERT_TRUE(serial_->inject_rx(feedback_wire(0U, 104U)));
+  }
+
+  void submit(double left, double right, bool reverse_goal_order) {
+    for (int guard = 0; guard < 1000 && !action_client_->action_server_is_ready(); ++guard)
+      ASSERT_NO_FATAL_FAILURE(cycle(1));
+    ASSERT_TRUE(action_client_->action_server_is_ready());
+    Action::Goal goal;
+    goal.trajectory.joint_names = {"motor104_joint", "motor105_joint"};
+    trajectory_msgs::msg::JointTrajectoryPoint start, finish;
+    start.positions = {1.0, 0.5};
+    start.velocities = {0.0, 0.0};
+    finish.positions = {left, right};
+    finish.velocities = {0.0, 0.0};
+    finish.time_from_start = rclcpp::Duration(0, 80000000);
+    if (reverse_goal_order) {
+      std::reverse(goal.trajectory.joint_names.begin(), goal.trajectory.joint_names.end());
+      std::reverse(start.positions.begin(), start.positions.end());
+      std::reverse(finish.positions.begin(), finish.positions.end());
+    }
+    goal.trajectory.points = {start, finish};
+    // Fake feedback is fixed at distinct centers. Wide action tolerances let
+    // this test isolate routing, while the real hardware envelope remains on.
+    for (const auto& name : goal.trajectory.joint_names) {
+      control_msgs::msg::JointTolerance tolerance;
+      tolerance.name = name;
+      tolerance.position = 0.25;
+      goal.goal_tolerance.push_back(tolerance);
+    }
+    auto accepted = action_client_->async_send_goal(goal);
+    for (int guard = 0; guard < 1000 &&
+         accepted.wait_for(std::chrono::seconds(0)) != std::future_status::ready; ++guard)
+      ASSERT_NO_FATAL_FAILURE(cycle(1));
+    ASSERT_EQ(accepted.wait_for(std::chrono::seconds(0)), std::future_status::ready);
+    auto handle = accepted.get();
+    ASSERT_NE(handle, nullptr);
+    auto result = action_client_->async_get_result(handle);
+    for (int guard = 0; guard < 1000 &&
+         result.wait_for(std::chrono::seconds(0)) != std::future_status::ready; ++guard)
+      ASSERT_NO_FATAL_FAILURE(cycle(1));
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(0)), std::future_status::ready);
+    const auto completed = result.get();
+    ASSERT_EQ(completed.code, rclcpp_action::ResultCode::SUCCEEDED);
+    ASSERT_EQ(completed.result->error_code, Action::Result::SUCCESSFUL);
+    ASSERT_NO_FATAL_FAILURE(cycle(4));
+    serial_->clear_tx();
+  }
+
+  void expect_hold(std::int32_t left_raw, std::int32_t right_raw, int cycles) {
+    ASSERT_NO_FATAL_FAILURE(cycle(cycles));
+    const auto bytes = serial_->take_tx();
+    serial_->clear_tx();  // take_tx() snapshots without consuming FakeSerial
+    ASSERT_EQ(bytes.size(), static_cast<std::size_t>(cycles) * 42U);
+    std::array<unsigned, 2> seen{};
+    for (std::size_t offset = 0; offset < bytes.size(); offset += 21U) {
+      ASSERT_EQ(bytes[offset], 0xF7U);
+      ASSERT_EQ(bytes[offset + 2U], 14U);
+      ASSERT_EQ(bytes[offset + 8U], 0x06U);
+      ASSERT_EQ(bytes[offset + 9U], 0U);
+      ASSERT_EQ(bytes[offset + 10U], 0U);
+      ASSERT_EQ(bytes[offset + 11U], 0x0CU);
+      ASSERT_EQ(bytes[offset + 12U], 8U);
+      const auto id = bytes[offset + 7U];
+      ASSERT_TRUE(id == 104U || id == 105U);
+      const auto index = id == 104U ? 0U : 1U;
+      ++seen[index];
+      const std::uint32_t bits =
+          (static_cast<std::uint32_t>(bytes[offset + 13U]) << 24U) |
+          (static_cast<std::uint32_t>(bytes[offset + 14U]) << 16U) |
+          (static_cast<std::uint32_t>(bytes[offset + 15U]) << 8U) |
+          bytes[offset + 16U];
+      const std::int64_t raw = bits >= 0x80000000U
+          ? static_cast<std::int64_t>(bits) - 0x100000000LL : bits;
+      // Independent golden integers, not a call to the production codec.
+      EXPECT_NEAR(raw, index == 0U ? left_raw : right_raw, 1);
+      EXPECT_EQ(bytes[offset + 17U], 0U);
+      EXPECT_EQ(bytes[offset + 18U], index == 0U ? 100U : 170U);
+      EXPECT_EQ(bytes[offset + 19U], 0U);
+      EXPECT_EQ(bytes[offset + 20U], index == 0U ? 50U : 90U);
+    }
+    EXPECT_EQ(seen[0], static_cast<unsigned>(cycles));
+    EXPECT_EQ(seen[1], static_cast<unsigned>(cycles));
+  }
+
+  rclcpp_action::Client<Action>::SharedPtr action_client_;
+  std::atomic<std::int64_t> hardware_now_ns_{1000000000};
+};
+
+TEST_P(ServoPairJtcMappingTest, DistinctTargetsSurviveUpdatesReorderingAndSixteenSecondHold) {
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  ASSERT_EQ(drive_switch({kController}, {}), controller_interface::return_type::OK);
+  ASSERT_NO_FATAL_FAILURE(cycle(4));
+  serial_->clear_tx();
+  ASSERT_NO_FATAL_FAILURE(expect_hold(-30000, -5000, 20));
+  ASSERT_NO_FATAL_FAILURE(submit(1.10, 0.60, false));
+  ASSERT_NO_FATAL_FAILURE(expect_hold(-28000, -8000, 40));
+  ASSERT_NO_FATAL_FAILURE(submit(1.20, 0.60, true));
+  ASSERT_NO_FATAL_FAILURE(expect_hold(-26000, -8000, 40));
+  ASSERT_NO_FATAL_FAILURE(submit(1.20, 0.40, false));
+  ASSERT_NO_FATAL_FAILURE(expect_hold(-26000, -2000, 40));
+  ASSERT_NO_FATAL_FAILURE(submit(1.05, 0.55, true));
+  // 8000 * 2 ms is at least 16 s of real wall time. Drain each chunk so
+  // FakeSerial capacity cannot hide dropped/repeated late hold commands.
+  const auto hold_start = std::chrono::steady_clock::now();
+  for (int chunk = 0; chunk < 80; ++chunk)
+    ASSERT_NO_FATAL_FAILURE(expect_hold(-29000, -6500, 100));
+  EXPECT_GE(std::chrono::steady_clock::now() - hold_start, std::chrono::seconds(16));
+  ASSERT_EQ(drive_switch({}, {kController}), controller_interface::return_type::OK);
+  serial_->clear_tx();
+  ASSERT_NO_FATAL_FAILURE(cycle(10));
+  EXPECT_TRUE(serial_->take_tx().empty());
+}
+
+INSTANTIATE_TEST_SUITE_P(HardwareDeclarationOrder, ServoPairJtcMappingTest,
+                        ::testing::Values(false, true));
