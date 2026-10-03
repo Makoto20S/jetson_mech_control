@@ -159,7 +159,7 @@ TEST_F(PosixCdcPortLockTest, BackpressureDoesNotClaimUnacceptedBytesWereWritten)
   // partial prefix and EAGAIN, unlike FakeSerial's all-or-nothing interface.
   std::vector<std::uint8_t> bytes(1024U * 1024U, 0x5a);
   EXPECT_EQ(port.write_all(bytes.data(), bytes.size()),
-            mech::mech_control_core::TransportResult::WouldBlock);
+            mech::mech_control_core::TransportResult::Fault);
   std::ostringstream out; trace->dump(out);
   EXPECT_NE(out.str().find("\"result\":-1,\"errno\":11"), std::string::npos);
   EXPECT_EQ(out.str().find("\"result\":1048576"), std::string::npos);

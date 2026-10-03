@@ -161,6 +161,16 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_posix_port_lock_test
     test/test_posix_cdc_serial_port.cpp)
   target_link_libraries(${PROJECT_NAME}_posix_port_lock_test ${PROJECT_NAME})
+  # Compile the actual port into this test executable so GNU ld's syscall
+  # seam can force short writes without wrapping writes in production DSOs.
+  ament_add_gtest(${PROJECT_NAME}_usb_cdc_pty_isolation_test
+    test/test_usb_cdc_pty_isolation.cpp
+    src/posix_cdc_serial_port.cpp
+    src/command_trace.cpp
+    src/pass_through_init.cpp)
+  target_include_directories(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE include)
+  ament_target_dependencies(${PROJECT_NAME}_usb_cdc_pty_isolation_test mech_control_core)
+  target_link_options(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE "-Wl,--wrap=write")
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
     test/test_velocity_controller_manager.cpp

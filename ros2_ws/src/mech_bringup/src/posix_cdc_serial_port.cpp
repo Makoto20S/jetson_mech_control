@@ -118,10 +118,12 @@ mech_control_core::TransportResult PosixCdcSerialPort::write_all(
       continue;
     }
     if ((sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) || sent == 0) {
-      // A real non-blocking CDC write that cannot proceed right now. This is
-      // exactly the transient case the RC defect permanently faulted on; the
-      // caller retries the next cycle.
-      return mech_control_core::TransportResult::WouldBlock;
+      // Retry is safe only when no byte of this packet entered the stream.
+      // After a partial write, callers cannot resume from our local offset;
+      // retrying the whole packet or sending another route would corrupt the
+      // framing. Fault the bus epoch instead of blocking or replaying it.
+      return written == 0U ? mech_control_core::TransportResult::WouldBlock
+                           : mech_control_core::TransportResult::Fault;
     }
     return mech_control_core::TransportResult::Fault;
   }
