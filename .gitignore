@@ -37,6 +37,7 @@
 /ros2_ws/install/
 /ros2_ws/log/
 compile_commands.json
+/symlink_install_manifest.txt
 *.coverage
 coverage/
 
