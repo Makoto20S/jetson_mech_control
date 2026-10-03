@@ -75,6 +75,16 @@ class OperatorTests(unittest.TestCase):
         c['motors'][0]['target_mapping_verified']=False
         with self.assertRaises(ValueError): self.op.generate_urdf(c)
 
+    def test_single_105_urdf_selects_only_after_pair_validation(self):
+        import xml.etree.ElementTree as ET
+        c=self.config();c['calibrated']=True
+        root=ET.fromstring(self.op.generate_urdf(c,motor_id=105))
+        self.assertEqual([j.attrib['name'] for j in root.findall('./ros2_control/joint')],['motor105_joint'])
+        self.assertEqual([p.text for p in root.findall(".//param[@name='drive_id']")],['105'])
+        c['motors'][0]['position_min_rad']=None
+        with self.assertRaises(ValueError):self.op.generate_urdf(c,motor_id=105)
+        with self.assertRaises(ValueError):self.op.generate_urdf(self.config(),motor_id=104)
+
     def test_startup_unknown_waits_but_fault_fails(self):
         s=self.op.Calibration(self.config()); f=self.frame(1_000_000_000)
         f['motors'][0].update(availability='unknown',position_rad=None,host_rx_ns=0)

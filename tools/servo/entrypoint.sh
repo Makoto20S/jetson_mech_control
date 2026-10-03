@@ -13,6 +13,8 @@ case "${1:-}" in
   ./servo-status --duration 10 限时监视
   ./servo-move                交互输入两台电机目标角度与移动时间，显示位置反馈
   ./servo-move check          离线校验运动配置，不打开串口
+  ./servo-move --motor-id 105  仅105单机；move/step 一个角度加秒数；disable 失能留窗，quit 失能退出
+  ./servo-move check --motor-id 105  离线校验完整双机配置及105单机选择，不打开串口
   ./servo-control             使用已标定限位加载框架，轨迹控制器保持 inactive
   ./servo-status check        离线校验配置和实际插件解析，不打开串口
   ./servo-control check       离线校验已标定运动配置，不打开串口
@@ -42,6 +44,7 @@ source "${release}/output/install/setup.bash"
 set -u
 operator="${release}/src/tools/servo/operator.py"
 reader="${release}/output/install/mech_bringup/lib/mech_bringup/servo_feedback_reader"
+disabler="${release}/output/install/mech_bringup/lib/mech_bringup/servo_disable"
 if [[ "${1:-}" == check && "$mode" != servo-control && "$mode" != servo-move ]]; then
   shift
   exec /usr/bin/python3 "$operator" check --config "$config" --reader "$reader" "$@"
@@ -54,9 +57,9 @@ case "$mode" in
   servo-move)
     if [[ "${1:-}" == check ]]; then
       shift
-      exec /usr/bin/python3 "${release}/src/tools/servo/motion.py" --config "$config" --run-dir "${root}/runs/servo" --check "$@"
+      exec /usr/bin/python3 "${release}/src/tools/servo/motion.py" --config "$config" --run-dir "${root}/runs/servo" --disable-helper "$disabler" --check "$@"
     fi
-    exec /usr/bin/python3 "${release}/src/tools/servo/motion.py" --config "$config" --run-dir "${root}/runs/servo" "$@" ;;
+    exec /usr/bin/python3 "${release}/src/tools/servo/motion.py" --config "$config" --run-dir "${root}/runs/servo" --disable-helper "$disabler" "$@" ;;
   servo-control)
     if [[ $# != 0 && "${1:-}" != check ]]; then echo "servo-control 不接受运动参数；使用 --help 查看说明。" >&2; exit 2; fi
     mkdir -p "${root}/runs/servo"

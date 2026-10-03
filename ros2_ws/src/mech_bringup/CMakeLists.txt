@@ -58,6 +58,12 @@ target_link_libraries(servo_feedback_reader ${PROJECT_NAME})
 ament_target_dependencies(servo_feedback_reader hardware_interface)
 install(TARGETS servo_feedback_reader RUNTIME DESTINATION lib/${PROJECT_NAME})
 
+add_executable(servo_disable src/servo_disable_main.cpp)
+target_link_libraries(servo_disable ${PROJECT_NAME})
+ament_target_dependencies(servo_disable hardware_interface)
+install(TARGETS servo_disable RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+
 # First real-device entry point: drives a motor through the repository's own
 # UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
 # option so default builds and CI never produce a device-touching binary.
@@ -280,11 +286,23 @@ if(BUILD_TESTING)
     TIMEOUT 35
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
+  ament_add_test(${PROJECT_NAME}_servo_disable
+    COMMAND /usr/bin/python3
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_disable.py
+      $<TARGET_FILE:servo_disable>
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
   foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit)
+    set(servo_tool_timeout 35)
+    if(servo_tool_test STREQUAL "motion_ros")
+      # Includes the real 31-second single-motor manual-lifetime acceptance.
+      set(servo_tool_timeout 120)
+    endif()
     ament_add_test(${PROJECT_NAME}_servo_${servo_tool_test}
       COMMAND /usr/bin/python3
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_${servo_tool_test}.py
-      TIMEOUT 35
+      TIMEOUT ${servo_tool_timeout}
       GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
   endforeach()
 

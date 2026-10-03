@@ -4,11 +4,15 @@ import math
 import os
 import pty
 import select
+import shutil
+import struct
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import time
+import threading
+import tty
 import unittest
 import uuid
 
@@ -17,10 +21,85 @@ spec=importlib.util.spec_from_file_location('servo_motion',ROOT/'motion.py')
 motion=importlib.util.module_from_spec(spec); spec.loader.exec_module(motion)
 
 
+def descendant_pids(pid, proc_root=Path('/proc')):
+    pending=[pid];seen=set();parents=None
+    while pending:
+        current=pending.pop()
+        if current in seen:continue
+        seen.add(current)
+        # Linux records a child against the task which created it. ROS launch
+        # may spawn the manager from a worker thread rather than its main task.
+        children_paths=list((proc_root/str(current)/'task').glob('*/children'))
+        readable=False
+        for children in children_paths:
+            try:
+                pending.extend(map(int,children.read_text().split()));readable=True
+            except OSError:continue
+        if not readable:
+            # Some Jetson kernels omit the task children interface entirely.
+            # Parse PPid after the final comm delimiter; comm may contain spaces
+            # and parentheses. Keep the actual loaded-library assertion strict.
+            if parents is None:
+                parents={}
+                for stat in proc_root.glob('[0-9]*/stat'):
+                    try:
+                        fields=stat.read_text().rsplit(') ',1)[1].split()
+                        parents.setdefault(int(fields[1]),[]).append(int(stat.parent.name))
+                    except (OSError,ValueError,IndexError):continue
+            pending.extend(parents.get(current,[]))
+    return seen
+
+
+class ProcessTreeTests(unittest.TestCase):
+    def test_children_created_by_non_main_thread_are_included_recursively(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for process,thread,children in ((10,10,''),(10,11,'20'),(20,20,'30'),(30,30,'')):
+                path=root/str(process)/'task'/str(thread)/'children'
+                path.parent.mkdir(parents=True,exist_ok=True);path.write_text(children)
+            self.assertEqual(set(descendant_pids(10,root)),{10,20,30})
+
+    def test_stat_parent_fallback_without_children_handles_spaces_and_parentheses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for pid,parent,comm in ((10,1,'operator worker'),(20,10,'launch ) worker'),(30,20,'manager (node)'),(40,1,'unrelated')):
+                path=root/str(pid)/'stat';path.parent.mkdir()
+                path.write_text(f'{pid} ({comm}) S {parent} 0 0 0')
+            self.assertEqual(set(descendant_pids(10,root)),{10,20,30})
+
+
 class RosMotionTests(unittest.TestCase):
     def test_terminal_workflow_and_config_preservation(self):
+        from ament_index_python.packages import get_package_prefix
+        helper=Path(get_package_prefix('mech_bringup'))/'lib/mech_bringup/servo_disable'
+        serial_master,serial_slave=pty.openpty()
+        serial_packets=[]
+        serial_done=threading.Event()
+        # Hand-checked mode15 ACK fixtures (normal-feedback frame, status 0x77).
+        replies={104:bytes.fromhex('f7120e000bdffd68290000040802b9000000002877'),
+                 105:bytes.fromhex('f7120e000b358369290000040802b9000000002877')}
+        def serial_gateway():
+            pending=b''
+            while not serial_done.is_set():
+                if not select.select([serial_master],[],[],.05)[0]:
+                    continue
+                pending+=os.read(serial_master,4096)
+                while len(pending)>=7:
+                    length=int.from_bytes(pending[2:4],'little')+7
+                    if len(pending)<length:
+                        break
+                    packet,pending=pending[:length],pending[length:]
+                    serial_packets.append(packet)
+                    body=packet[7:]
+                    if len(body)==6 and body!=bytes(6):
+                        drive=int.from_bytes(body[:4],'little')&255
+                        if drive in replies:
+                            os.write(serial_master,replies[drive])
+        gateway=threading.Thread(target=serial_gateway,daemon=True)
+        gateway.start()
         config=motion.load_config(ROOT/'config.example.json',require_calibrated=False)
         config['calibrated']=True
+        config['device_path']=os.ttyname(serial_slave)
         for motor in config['motors']:
             motor.update(position_min_rad=-2.,position_max_rad=2.)
         with tempfile.TemporaryDirectory() as directory:
@@ -33,10 +112,16 @@ class RosMotionTests(unittest.TestCase):
                 +"m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n"
                 +"original=m.config_tools.generate_urdf\n"
                 +"m.config_tools.generate_urdf=lambda c: original(c).replace('mech_bringup/Ak30ServoSystem','mech_hardware_ros2_control/CompositeSystem')\n"
+                +"original_disable=m.disable_motors\n"
+                +"def disable(helper,urdf,run,record,ids):\n"
+                +"    device_urdf=run/'disable.urdf'\n"
+                +"    device_urdf.write_text(urdf.read_text().replace('mech_hardware_ros2_control/CompositeSystem','mech_bringup/Ak30ServoSystem'))\n"
+                +"    original_disable(helper,device_urdf,run,record,ids)\n"
+                +"m.disable_motors=disable\n"
                 +"raise SystemExit(m.main())\n")
             master,slave=pty.openpty()
             proc=subprocess.Popen(['/usr/bin/python3',str(driver),'--config',str(path),
-                '--run-dir',str(Path(directory)/'runs')],stdin=slave,stdout=slave,stderr=slave,
+                '--run-dir',str(Path(directory)/'runs'),'--disable-helper',str(helper)],stdin=slave,stdout=slave,stderr=slave,
                 start_new_session=True)
             os.close(slave)
             received=bytearray()
@@ -57,12 +142,24 @@ class RosMotionTests(unittest.TestCase):
                 os.write(master,b'move 5 -3 0.6\n');expect('轨迹到达容差内')
                 received.clear()
                 os.write(master,b'step 2 -1 0.6\n');expect('运动中');expect('轨迹到达容差内')
+                os.write(master,b'disable\n');expect('电机已失能；会话保留')
+                self.assertIsNone(proc.poll())
+                run=next((Path(directory)/'runs').glob('move-*'))
+                self.assertFalse((run/'backend-002').exists())
+                expect('上次测量')
+                os.write(master,b'move 1 1 0.6\n');expect('拒绝：请先enable')
+                os.write(master,b'step 1 1 0.6\n');expect('拒绝：请先enable')
+                self.assertFalse((run/'backend-002').exists())
+                os.write(master,b'enable\n');expect('已使能')
+                os.write(master,b'step 2 -1 0.6\n');expect('运动中');expect('轨迹到达容差内')
+                os.write(master,b'disable\n');expect('电机已失能；会话保留')
+                self.assertIsNone(proc.poll())
                 os.write(master,b'quit\n')
                 self.assertEqual(proc.wait(timeout=15),0,received.decode(errors='replace'))
                 self.assertEqual(path.read_bytes(),before)
                 records=[json.loads(line) for line in next((Path(directory)/'runs').glob('*/events.jsonl')).read_text().splitlines()]
                 relative=[r for r in records if r['event']=='relative_goal']
-                self.assertEqual(len(relative),1)
+                self.assertEqual(len(relative),2)
                 self.assertEqual(relative[0]['delta_device_deg'],[2.,-1.])
                 index=records.index(relative[0])
                 stop=next(i for i,r in enumerate(records[index+1:],index+1) if r['event']=='stop_requested')
@@ -70,12 +167,188 @@ class RosMotionTests(unittest.TestCase):
                                     for r in records[index+1:stop]))
                 for actual,expected in zip(relative[0]['positions_rad'],[math.radians(7),math.radians(-4)]):
                     self.assertAlmostEqual(actual,expected,delta=math.radians(.5))
-                self.assertEqual([r['state'] for r in records if r['event']=='controller'],['active','inactive'])
+                self.assertEqual([r['state'] for r in records if r['event']=='controller'],
+                                 ['active','inactive','active','inactive'])
+                disables=[r for r in records if r['event']=='device_disable_result']
+                self.assertEqual([r['returncode'] for r in disables],[0,0])
+                self.assertEqual([p[7:].hex() for p in serial_packets],
+                    ['000000000000','680f00000c00','690f00000c00']*2)
+                # Loopback resets to zero on a new manager: stale 7/-4 must not
+                # become the base of the second relative goal or takeover hold.
+                for value in relative[1]['base_positions_rad']:
+                    self.assertAlmostEqual(value,0.,delta=math.radians(.5))
+                inputs=[r for r in records if r['event']=='operator_input']
+                self.assertEqual(inputs[-1]['words'],['quit'])
+                second=[json.loads(line) for line in (run/'backend-002'/'events.jsonl').read_text().splitlines()]
+                self.assertTrue(any(r['event']=='relative_goal' for r in second))
+                enabling=next(r for r in second if r['event']=='operator_input' and r['words']==['enable'])
+                self.assertEqual(enabling,next(r for r in inputs if r['words']==['enable'] and r.get('backend')==2))
+                self.assertLess(enabling['monotonic_s'],next(r['monotonic_s'] for r in second
+                                                          if r['event']=='switch_request' and r['enabled']))
+                for name in ('config.json','control.urdf','framework.log','disable.log','disable-trace.jsonl'):
+                    self.assertTrue((run/name).exists())
+                    self.assertTrue((run/'backend-002'/name).exists())
+                first_disable=next(i for i,r in enumerate(records) if r['event']=='device_disable_result')
+                second_enable=next(i for i,r in enumerate(records[first_disable+1:],first_disable+1)
+                                   if r['event']=='operator_input' and r['words']==['enable'])
+                self.assertFalse(any(r['event'] in ('feedback','switch_request','backend_started')
+                                     for r in records[first_disable+1:second_enable]))
             finally:
                 if proc.poll() is None:
                     proc.terminate()
                     proc.wait(timeout=15)
                 os.close(master)
+                serial_done.set();gateway.join(timeout=1.)
+                os.close(serial_master);os.close(serial_slave)
+
+    def single_105_workflow(self):
+        """Production Ak30ServoSystem and helper share a synthetic USB gateway."""
+        from ament_index_python.packages import get_package_prefix
+        prefix=Path(get_package_prefix('mech_bringup'))
+        helper=prefix/'lib/mech_bringup/servo_disable'
+        audit_spec=importlib.util.spec_from_file_location('chain_audit',ROOT/'chain_audit.py')
+        audit=importlib.util.module_from_spec(audit_spec);audit_spec.loader.exec_module(audit)
+        serial_master,serial_slave=pty.openpty()
+        tty.setraw(serial_slave)
+        serial_packets=[];packet_times=[];gateway_errors=[]
+        serial_done=threading.Event()
+        def feedback(angle,status=0):
+            body=struct.pack('<IBB',0x2969,4,8)+struct.pack('>hhhBB',round(angle*10),0,0,40,status)
+            head=b'\x12'+struct.pack('<H',len(body))
+            return b'\xf7'+head+bytes([audit.crc(head,255,0x8c)])+struct.pack('<H',audit.crc(body,65535,0x8408))+body
+        def serial_gateway():
+            pending=b'';angle=10.;next_feedback=0.;initializations=0
+            try:
+                while not serial_done.is_set():
+                    if select.select([serial_master],[],[],.002)[0]:
+                        pending+=os.read(serial_master,4096)
+                    while len(pending)>=7:
+                        length=int.from_bytes(pending[2:4],'little')+7
+                        if len(pending)<length:break
+                        packet,pending=pending[:length],pending[length:]
+                        serial_packets.append(packet);packet_times.append(time.monotonic())
+                        body=packet[7:]
+                        if body==bytes(6):
+                            initializations+=1
+                            # Every other init belongs to a newly started framework.
+                            if initializations%2:angle=10.+5.*(initializations//2)
+                        else:
+                            ident=int.from_bytes(body[:4],'little')
+                            if ident==0x669:
+                                angle=struct.unpack('>i',body[6:10])[0]/10000.
+                            elif ident==0xf69:
+                                os.write(serial_master,feedback(angle,0x77))
+                            else:
+                                raise AssertionError('Unexpected outgoing ID '+hex(ident))
+                    now=time.monotonic()
+                    if now>=next_feedback:
+                        # Never synthesize 104 feedback: the production graph must
+                        # become ready and move with the selected 105 alone.
+                        os.write(serial_master,feedback(angle));next_feedback=now+.005
+            except Exception as exc:gateway_errors.append(str(exc))
+        gateway=threading.Thread(target=serial_gateway,daemon=True);gateway.start()
+        config=motion.load_config(ROOT/'config.example.json',require_calibrated=False)
+        config['calibrated']=True;config['device_path']=os.ttyname(serial_slave)
+        for motor in config['motors']:motor.update(position_min_rad=-2.,position_max_rad=2.)
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'config.json';path.write_text(json.dumps(config));before=path.read_bytes()
+            master,slave=pty.openpty()
+            proc=subprocess.Popen(['/usr/bin/python3',str(ROOT/'motion.py'),'--config',str(path),
+                '--run-dir',str(Path(directory)/'runs'),'--disable-helper',str(helper),'--motor-id','105'],
+                stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+            os.close(slave);received=bytearray();transcript=bytearray();loaded=set()
+            def expect(text,timeout=15.):
+                deadline=time.monotonic()+timeout
+                while time.monotonic()<deadline:
+                    end=received.find(text.encode())
+                    if end>=0:
+                        del received[:end+len(text.encode())];return
+                    if select.select([master],[],[],.05)[0]:
+                        try:data=os.read(master,65536)
+                        except OSError:break
+                        received.extend(data);transcript.extend(data)
+                self.fail('Missing '+text+'; output='+received.decode(errors='replace'))
+            def capture_loaded_library():
+                for pid in descendant_pids(proc.pid):
+                    entry=Path('/proc')/str(pid)
+                    try:
+                        for line in (entry/'maps').read_text().splitlines():
+                            if 'libmech_bringup.so' in line:loaded.add(line.split()[-1])
+                    except (OSError,ProcessLookupError):continue
+                self.assertIn(str((prefix/'lib/libmech_bringup.so').resolve()),loaded)
+            try:
+                expect('控制器已就绪');capture_loaded_library()
+                initial_count=len(serial_packets)
+                self.assertTrue(initial_count>=1)
+                self.assertTrue(all(p[7:]==bytes(6) for p in serial_packets))
+                os.write(master,b'move 12 0.6\n');expect('拒绝：请先enable')
+                self.assertEqual(len(serial_packets),initial_count)
+                os.write(master,b'enable\n');expect('已使能')
+                os.write(master,b'move 12 0.6\n');expect('运动中');expect('轨迹到达容差内')
+                # Drain the terminal for >30 s while the real controller holds.
+                # There is no elapsed-enable-time shutdown in this operator.
+                hold_until=time.monotonic()+31.
+                while time.monotonic()<hold_until:
+                    self.assertIsNone(proc.poll())
+                    if select.select([master],[],[],.05)[0]:
+                        data=os.read(master,65536);self.assertTrue(data)
+                        received.extend(data);transcript.extend(data)
+                self.assertFalse(any(p[7:]!=bytes(6) and int.from_bytes(p[7:11],'little')==0xf69
+                                     for p in serial_packets))
+                received.clear()
+                os.write(master,b'step 1 0.6\n');expect('运动中');expect('轨迹到达容差内')
+                os.write(master,b'disable\n');expect('电机已失能；会话保留')
+                self.assertIsNone(proc.poll())
+                stopped_count=len(serial_packets)
+                os.write(master,b'move 12 0.6\n');expect('拒绝：请先enable')
+                self.assertEqual(len(serial_packets),stopped_count)
+                os.write(master,b'enable\n');expect('已使能');capture_loaded_library()
+                os.write(master,b'step 1 0.6\n');expect('运动中');expect('轨迹到达容差内')
+                os.write(master,b'disable\n');expect('电机已失能；会话保留')
+                stopped_count=len(serial_packets)
+                os.write(master,b'quit\n')
+                self.assertEqual(proc.wait(timeout=15.),0,received.decode(errors='replace'))
+                self.assertEqual(len(serial_packets),stopped_count)
+                self.assertEqual(path.read_bytes(),before)
+                run=next((Path(directory)/'runs').glob('move-*'))
+                records=[json.loads(line) for line in (run/'events.jsonl').read_text().splitlines()]
+                self.assertFalse(any(r['event'] in ('enable_limit_started','auto_disable_requested') for r in records))
+                relative=[r for r in records if r['event']=='relative_goal']
+                self.assertEqual([r['delta_device_deg'] for r in relative],[[1.],[1.]])
+                self.assertAlmostEqual(relative[0]['base_positions_rad'][0],math.radians(12),delta=math.radians(.2))
+                self.assertAlmostEqual(relative[1]['base_positions_rad'][0],math.radians(15),delta=math.radians(.2))
+                self.assertEqual(len([p for p in serial_packets if p[7:]!=bytes(6) and int.from_bytes(p[7:11],'little')==0xf69]),2)
+                self.assertEqual({int.from_bytes(p[7:11],'little') for p in serial_packets if p[7:]!=bytes(6)},{0x669,0xf69})
+                traces=list(run.glob('**/command-chain.jsonl'))
+                self.assertEqual(len(traces),2)
+                for trace in traces:
+                    for filename,loss_key in (('serial-trace.jsonl','overwritten'),('disable-trace.jsonl','dropped')):
+                        trace_path=trace.with_name(filename)
+                        self.assertTrue(trace_path.exists(),str(trace_path))
+                        metadata=json.loads(trace_path.read_text().splitlines()[0])
+                        self.assertEqual(metadata[loss_key],0,metadata)
+                    report=audit.audit_records(json.loads(line) for line in trace.read_text().splitlines())
+                    events=[json.loads(line) for line in trace.with_name('events.jsonl').read_text().splitlines()]
+                    report['issues']+=audit.audit_operator(events,report['acquisitions'])
+                    self.assertTrue(report['complete'] and not report['issues'],report['issues'])
+                    self.assertEqual(set(report['drives']),{105})
+                    trace.with_name('chain-audit.json').write_text(json.dumps(report,indent=2))
+                self.assertFalse(gateway_errors,gateway_errors)
+            finally:
+                if proc.poll() is None:proc.terminate();proc.wait(timeout=15.)
+                os.close(master);serial_done.set();gateway.join(timeout=1.)
+                os.close(serial_master);os.close(serial_slave)
+                artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
+                if artifact:
+                    destination=Path(artifact)/'single-lifecycle'
+                    if destination.exists():shutil.rmtree(destination)
+                    shutil.copytree(directory,destination,dirs_exist_ok=True)
+                    (destination/'terminal.txt').write_bytes(transcript)
+                    (destination/'loaded-libraries.json').write_text(json.dumps(sorted(loaded),indent=2))
+                    (destination/'gateway-tx.json').write_text(json.dumps([dict(monotonic_s=t,hex=p.hex()) for t,p in zip(packet_times,serial_packets)],indent=2))
+
+    def test_single_105_real_framework_pty_lifecycle_and_chain(self):
+        self.single_105_workflow()
 
     def test_pair_enable_move_stop_disable_and_stale_feedback(self):
         import rclpy

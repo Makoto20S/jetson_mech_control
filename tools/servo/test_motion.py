@@ -23,25 +23,190 @@ class MotionTests(unittest.TestCase):
             m.update(position_min_rad=-2., position_max_rad=2.)
         self.policy = motion.MotionPolicy(self.config)
 
+    def test_single_105_policy_uses_one_angle_and_validates_full_pair_first(self):
+        policy=motion.MotionPolicy(self.config,motor_id=105)
+        self.assertEqual(policy.names,['motor105_joint'])
+        target,seconds=policy.move(['12','2'])
+        self.assertEqual(len(target),1)
+        self.assertAlmostEqual(target[0],math.radians(12))
+        relative,_=policy.relative_move(['3','1'],[math.radians(12)])
+        self.assertAlmostEqual(relative[0],math.radians(15))
+        for words in (['1','2','3'],['nan','1'],['1','.1']):
+            with self.assertRaises(ValueError):policy.move(words)
+        with self.assertRaises(ValueError):policy.check_positions([0.,0.])
+        self.config['motors'][0]['target_mapping_verified']=False
+        with self.assertRaises(ValueError):motion.MotionPolicy(self.config,motor_id=105)
+
+    def test_single_check_is_device_free_and_preserves_pair_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'config.json';path.write_text(json.dumps(self.config))
+            before=path.read_bytes()
+            result=subprocess.run(['/usr/bin/python3',str(ROOT/'motion.py'),
+                '--config',str(path),'--run-dir',str(Path(directory)/'runs'),
+                '--motor-id','105','--check'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('105',result.stdout)
+            self.assertEqual(path.read_bytes(),before)
+            self.assertFalse((Path(directory)/'runs').exists())
+
+    def test_single_session_has_no_elapsed_time_shutdown(self):
+        policy=motion.MotionPolicy(self.config,motor_id=105)
+        backend=motion.BackendSession(self.config,policy,'urdf','helper',Path('/unused'),Mock())
+        backend.client=Mock();backend.proc=Mock();backend.proc.poll.return_value=None
+        backend.ready=True;backend.stop=Mock()
+        with patch.object(motion.time,'monotonic',return_value=10.):backend.enable()
+        with patch.object(motion.time,'monotonic',return_value=41.):backend.poll()
+        backend.stop.assert_not_called()
+        backend.client.poll.assert_called_once()
+
+    def test_single_feedback_requires_105_and_never_fills_missing_joint(self):
+        feedback=motion.Feedback(['motor105_joint'])
+        self.assertFalse(feedback.ingest(['motor104_joint'],[.1],1.,1.))
+        self.assertIsNone(feedback.positions)
+        self.assertTrue(feedback.ingest(['motor105_joint'],[.2],2.,2.))
+        self.assertEqual(feedback.positions,[.2])
+        self.assertTrue(feedback.fresh(2.))
+        self.assertFalse(feedback.ingest([],[],3.,3.))
+        self.assertFalse(feedback.fresh(3.))
+
+    def backend_fixture(self):
+        backend=motion.BackendSession(self.config,self.policy,'urdf','helper',Path('/unused'),Mock())
+        backend.proc=Mock(pid=123)
+        backend.client=Mock()
+        backend.client.feedback.positions=[.1,.2]
+        backend.disable_pending=True
+        return backend
+
     def test_terminal_failure_cannot_skip_controller_or_process_cleanup(self):
-        client=Mock()
+        backend=self.backend_fixture()
+        client=backend.client
         keyboard=Mock()
         keyboard.close.side_effect=OSError('PTY gone')
         display=Mock()
         display.clear.side_effect=OSError('stdout gone')
+        selector=Mock()
         with patch.object(motion,'terminate_launch') as terminate:
-            errors=motion.cleanup(client,object(),keyboard,display)
+            with patch.object(motion,'disable_motors') as disabler:
+                errors=motion.cleanup(backend,keyboard,display,selector)
+                disabler.assert_called_once()
         client.disable.assert_called_once()
         terminate.assert_called_once()
+        selector.close.assert_called_once()
         self.assertTrue(errors)
 
     def test_disable_failure_still_terminates_process(self):
-        client=Mock()
-        client.disable.side_effect=RuntimeError('unconfirmed')
+        backend=self.backend_fixture()
+        backend.client.disable.side_effect=RuntimeError('unconfirmed')
         with patch.object(motion,'terminate_launch') as terminate:
-            errors=motion.cleanup(client,object(),None,Mock())
+            with patch.object(motion,'disable_motors'):
+                errors=motion.cleanup(backend,None,Mock())
         terminate.assert_called_once()
         self.assertIn('unconfirmed',' '.join(errors))
+
+    def test_device_disable_runs_after_process_exit_even_if_controller_fails(self):
+        order=[]
+        backend=self.backend_fixture()
+        def deactivate():
+            order.append('controller')
+            raise RuntimeError('controller fault')
+        backend.client.disable.side_effect=deactivate
+        with patch.object(motion,'terminate_launch',side_effect=lambda p:order.append('exit')):
+            with patch.object(motion,'disable_motors',side_effect=lambda *a:order.append('mode15')):
+                errors=motion.cleanup(backend,None,Mock())
+        self.assertEqual(order,['controller','exit','mode15'])
+        self.assertTrue(errors)
+        with self.assertRaises(RuntimeError):backend.start()
+
+    def test_no_device_access_when_process_exit_unconfirmed(self):
+        backend=self.backend_fixture()
+        with patch.object(motion,'terminate_launch',side_effect=RuntimeError('still running')):
+            with patch.object(motion,'disable_motors') as disabler:
+                errors=motion.cleanup(backend,None,Mock())
+                disabler.assert_not_called()
+        self.assertTrue(errors)
+
+    def test_disable_ack_failure_is_not_success(self):
+        backend=self.backend_fixture()
+        with patch.object(motion,'terminate_launch'):
+            with patch.object(motion,'disable_motors',side_effect=RuntimeError('105 missing ack')):
+                errors=motion.cleanup(backend,None,Mock())
+        self.assertIn('105 missing ack',' '.join(errors))
+
+    def test_backend_disable_latches_failure_and_preserves_writer_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend=motion.BackendSession(self.config,self.policy,'urdf','helper',Path(directory),Mock())
+            backend.proc=Mock(pid=123)
+            backend.client=Mock()
+            backend.client.feedback.positions=[.1,.2]
+            backend.disable_pending=True
+            with patch.object(motion,'terminate_launch',side_effect=RuntimeError('writer still alive')):
+                with patch.object(motion,'disable_motors') as disabler:
+                    with self.assertRaises(RuntimeError):backend.stop()
+                    disabler.assert_not_called()
+            self.assertIsNotNone(backend.proc)
+            with self.assertRaises(RuntimeError):backend.start()
+
+    def test_confirmed_backend_disable_is_idempotent_and_caches_only_last_position(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend=motion.BackendSession(self.config,self.policy,'urdf','helper',Path(directory),Mock())
+            backend.proc=Mock(pid=123)
+            backend.client=Mock()
+            backend.client.feedback.positions=[.1,.2]
+            backend.disable_pending=True
+            with patch.object(motion,'terminate_launch'):
+                with patch.object(motion,'disable_motors') as disabler:
+                    backend.stop();backend.stop()
+                    disabler.assert_called_once()
+            self.assertIsNone(backend.proc)
+            self.assertIsNone(backend.client)
+            self.assertIn('上次测量',backend.status())
+            self.assertNotIn('ROS消息更新',backend.status())
+
+    def test_backend_missing_disable_ack_latches_reenable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend=motion.BackendSession(self.config,self.policy,'urdf','helper',Path(directory),Mock())
+            backend.proc=Mock(pid=123)
+            backend.client=Mock()
+            backend.client.feedback.positions=[.1,.2]
+            backend.disable_pending=True
+            with patch.object(motion,'terminate_launch'):
+                with patch.object(motion,'disable_motors',side_effect=RuntimeError('105 missing ack')):
+                    with self.assertRaisesRegex(RuntimeError,'105 missing ack'):backend.stop()
+            self.assertTrue(backend.disable_pending)
+            with self.assertRaises(RuntimeError):backend.start()
+            with patch.object(motion,'disable_motors') as disabler:
+                with self.assertRaisesRegex(RuntimeError,'105 missing ack'):backend.stop()
+                disabler.assert_not_called()  # Final cleanup preserves the failed attempt.
+
+    def test_helper_exit_zero_alone_is_not_disable_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run=Path(directory)
+            with self.assertRaisesRegex(RuntimeError,'失能未获全部确认'):
+                motion.disable_motors('/bin/true',run/'unused',run,Mock(),[104,105])
+
+    def test_disable_helper_requires_both_ack_records_and_final_confirmation(self):
+        for ids,confirmed,valid in (([104],True,False),([104,105],False,False),([104,105],True,True)):
+            with tempfile.TemporaryDirectory() as directory:
+                run=Path(directory)
+                def fake_run(command,**kwargs):
+                    rows=[dict(event='disable_ack',id=drive,status=119) for drive in ids]
+                    rows.append(dict(event='disable_complete',confirmed=confirmed,missing=[]))
+                    return NS(returncode=0,stdout='\n'.join(json.dumps(r) for r in rows),stderr='')
+                with patch.object(motion.subprocess,'run',side_effect=fake_run):
+                    if valid:
+                        motion.disable_motors('helper',run/'urdf',run,Mock(),[104,105])
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            motion.disable_motors('helper',run/'urdf',run,Mock(),[104,105])
+
+    def test_log_open_failure_still_attempts_device_disable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run=Path(directory)
+            with patch.object(Path,'open',side_effect=OSError('disk unavailable')):
+                with patch.object(motion.subprocess,'run',return_value=NS(returncode=2,stdout='',stderr='')) as invoke:
+                    with self.assertRaises(RuntimeError):
+                        motion.disable_motors('helper',run/'urdf',run,Mock(),[104,105])
+                invoke.assert_called_once()
 
     def test_check_works_without_ros_and_preserves_config(self):
         with tempfile.TemporaryDirectory() as directory:

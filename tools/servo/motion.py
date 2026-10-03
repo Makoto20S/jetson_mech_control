@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired position operator: standard ROS services/actions, never device I/O."""
+"""Position operator: standard ROS services/actions, never device I/O."""
 import argparse
 from collections import deque
 import importlib.util
@@ -21,7 +21,6 @@ _spec.loader.exec_module(config_tools)
 CONTROLLER = 'servo_trajectory_controller'
 FEEDBACK_TIMEOUT = .25
 
-
 def load_config(path, require_calibrated=True):
     config = json.loads(Path(path).read_text())
     config_tools.validate_config(config, observe=not require_calibrated)
@@ -31,38 +30,42 @@ def load_config(path, require_calibrated=True):
 
 
 class MotionPolicy:
-    def __init__(self, config):
+    def __init__(self, config, motor_id=None):
         config_tools.validate_config(config)
         if config.get('calibrated') is not True:
             raise ValueError('请先完成范围标定并保存')
-        self.motors = sorted(config['motors'], key=lambda m: m['id'])
+        self.motors = config_tools.select_motors(config,motor_id)
         self.names = [m['joint_name'] for m in self.motors]
 
+    def command_format(self, command):
+        kind='目标角度' if command=='move' else '增量角度'
+        return command+' '+' '.join(str(m['id'])+kind for m in self.motors)+' 移动秒数'
+
     def check_positions(self, positions):
-        if len(positions) != 2:
-            raise ValueError('必须有两个位置')
+        if len(positions) != len(self.motors):
+            raise ValueError('必须有全部所选电机的位置')
         for m, value in zip(self.motors, positions):
             if not config_tools.finite(value) or not m['position_min_rad'] <= value <= m['position_max_rad']:
                 raise ValueError(f"电机{m['id']}位置超出已标定范围")
 
     def move(self, words):
-        if len(words) != 3:
-            raise ValueError('格式：move 104目标角度 105目标角度 移动秒数')
-        a, b, seconds = map(float, words)
-        if not all(math.isfinite(v) for v in (a, b, seconds)) or not .5 <= seconds <= 60.:
+        if len(words) != len(self.motors)+1:
+            raise ValueError('格式：'+self.command_format('move'))
+        *angles,seconds = map(float, words)
+        if not all(math.isfinite(v) for v in (*angles,seconds)) or not .5 <= seconds <= 60.:
             raise ValueError('请输入有限角度，移动时间须为0.5至60秒')
         positions = [(angle-m['target_offset'])/m['target_scale']
-                     for m, angle in zip(self.motors, (a,b))]
+                     for m, angle in zip(self.motors, angles)]
         self.check_positions(positions)
         return positions, seconds
 
     def relative_move(self, words, current):
-        if len(words) != 3:
-            raise ValueError('格式：step 104增量角度 105增量角度 移动秒数')
+        if len(words) != len(self.motors)+1:
+            raise ValueError('格式：'+self.command_format('step'))
         self.check_positions(current)
-        delta104,delta105,seconds = map(float,words)
+        *deltas,seconds = map(float,words)
         angles = self.device_angles(current)
-        return self.move([angles[0]+delta104,angles[1]+delta105,seconds])
+        return self.move([*(a+d for a,d in zip(angles,deltas)),seconds])
 
     def device_angles(self, positions):
         return [(p-m['feedback_offset'])/m['feedback_scale']
@@ -298,7 +301,7 @@ class RosControl:
         if getattr(self,'hardware_error',None):
             raise RuntimeError(self.hardware_error)
         if not self.feedback.fresh(time.monotonic()):
-            raise ValueError('等待有效的双电机ROS位置反馈')
+            raise ValueError('等待有效的所选电机ROS位置反馈')
         self.policy.check_positions(self.feedback.positions)
 
     def enable(self):
@@ -320,7 +323,7 @@ class RosControl:
         target,seconds=self.policy.relative_move(words,base)
         self.send(target,seconds)
         self.record('relative_goal',base_positions_rad=base,
-                    delta_device_deg=[float(words[0]),float(words[1])],
+                    delta_device_deg=[float(value) for value in words[:-1]],
                     positions_rad=target,duration_s=seconds)
 
     def send(self, positions, seconds, settling=3.):
@@ -340,7 +343,7 @@ class RosControl:
         for values,t in ((self.feedback.positions,0.),(positions,seconds)):
             point=JointTrajectoryPoint()
             point.positions=list(values)
-            point.velocities=[0.,0.]
+            point.velocities=[0.]*len(self.policy.names)
             ns=round(t*1e9)
             point.time_from_start=Duration(sec=ns//10**9,nanosec=ns%10**9)
             goal.trajectory.points.append(point)
@@ -460,16 +463,15 @@ def terminate_launch(proc):
     raise RuntimeError('控制进程组未能确认退出')
 
 
-def cleanup(client, proc, keyboard, display):
+def cleanup(backend, keyboard, display, selector=None):
     errors=[]
-    # Terminal/log failures must never bypass controller and process cleanup.
-    operations=[]
-    if client is not None:
-        operations.append(('停用未确认',client.disable))
-    operations.append(('框架退出未确认',lambda:terminate_launch(proc)))
+    # Terminal/log failures must never bypass backend ownership cleanup.
+    operations=[('框架退出或电机失能未确认',backend.stop)]
     if keyboard is not None:
         operations.append(('终端恢复失败',keyboard.close))
     operations.append(('终端显示关闭失败',display.clear))
+    if selector is not None:
+        operations.append(('输入监听关闭失败',selector.close))
     for label,operation in operations:
         try:
             operation()
@@ -485,25 +487,176 @@ def report_safely(callback, *args, **kwargs):
         pass
 
 
+def disable_motors(helper, urdf, run, record, ids):
+    # Persistence failures must never prevent the shutdown command itself.
+    result=subprocess.run([helper,'--urdf',str(urdf),
+        '--trace',str(run/'disable-trace.jsonl')],
+        capture_output=True,text=True,timeout=5.)
+    try:
+        (run/'disable.log').write_text(result.stdout+result.stderr)
+    except OSError as exc:
+        report_safely(print,'失能日志保存失败：'+str(exc),file=sys.stderr)
+    if result.stderr:
+        report_safely(print,result.stderr,file=sys.stderr)
+    report_safely(record,'device_disable_result',returncode=result.returncode)
+    rows=[]
+    try:
+        rows=[json.loads(line) for line in result.stdout.splitlines()]
+    except (ValueError,OSError):
+        pass
+    acknowledged={r.get('id') for r in rows if r.get('event')=='disable_ack' and r.get('status')==119}
+    confirmed=bool(rows and rows[-1].get('event')=='disable_complete' and
+                   rows[-1].get('confirmed') is True and rows[-1].get('missing')==[])
+    if result.returncode != 0 or acknowledged != set(ids) or not confirmed:
+        raise RuntimeError('电机失能未获全部确认，查看disable.log；请现场断电确认')
+    print('所有配置电机均已返回失能成功确认。')
+
+
+class BackendSession:
+    """One serial-owner lifetime; the terminal outlives confirmed shutdown."""
+    def __init__(self, config, policy, description, helper, run, record):
+        self.config, self.policy, self.description = config, policy, description
+        self.helper, self.root, self.record_all = helper, run, record
+        self.index=0
+        self.run=run
+        self.urdf=run/'control.urdf'
+        self.proc=self.client=self.output=self.events=None
+        self.ready=False
+        self.disable_pending=False
+        self.shutdown_error=None
+        self.last_positions=None
+
+    def record(self, event, **data):
+        row=dict(event=event,backend=data.pop('backend',self.index),
+                 monotonic_s=time.monotonic(),**data)
+        self.record_all(**row)
+        if self.events is not None:
+            self.events.write(json.dumps(row,ensure_ascii=False,allow_nan=False)+'\n')
+        return row
+
+    def start(self, enabling_input=None):
+        if self.shutdown_error or self.disable_pending:
+            raise RuntimeError('上次失能未确认，禁止再次使能；请退出并现场检查')
+        if self.proc is not None:
+            raise RuntimeError('控制框架仍在运行')
+        self.index+=1
+        self.run=self.root if self.index==1 else self.root/f'backend-{self.index:03d}'
+        self.run.mkdir(parents=True,exist_ok=True)
+        (self.run/'config.json').write_text(json.dumps(self.config,ensure_ascii=False,indent=2)+'\n')
+        self.urdf=self.run/'control.urdf'; self.urdf.write_text(self.description)
+        self.ready_file=self.run/'controllers.ready'
+        if self.index>1:
+            self.events=(self.run/'events.jsonl').open('w',buffering=1)
+            if enabling_input is not None:
+                # Same physical input and timestamp as the parent timeline.
+                self.events.write(json.dumps(enabling_input,ensure_ascii=False,allow_nan=False)+'\n')
+        self.output=(self.run/'framework.log').open('w')
+        namespace='servo_move_'+uuid.uuid4().hex[:8]
+        self.proc=subprocess.Popen(['ros2','launch',str(Path(__file__).with_name('servo_pair.launch.py')),
+            'urdf:='+str(self.urdf),'namespace:='+namespace,'ready_file:='+str(self.ready_file)],
+            stdout=self.output,stderr=subprocess.STDOUT,start_new_session=True,
+            env={**os.environ,'MECH_SERVO_TRACE_PATH':str(self.run/'serial-trace.jsonl'),
+                 'MECH_SERVO_CHAIN_PATH':str(self.run/'command-chain.jsonl')})
+        self.disable_pending=True
+        self.ready=False
+        self.startup_deadline=time.monotonic()+20.
+        self.client=RosControl(self.policy,namespace,self.record)
+        self.record('backend_started',run_dir=str(self.run),motor_ids=[m['id'] for m in self.policy.motors])
+
+    def enable(self):
+        self.client.enable()
+
+    def poll(self):
+        if self.proc is None:
+            return
+        if self.proc.poll() is not None:
+            raise RuntimeError('控制框架已退出，请查看framework.log')
+        self.client.poll()
+        now=time.monotonic()
+        if not self.ready:
+            if self.ready_file.exists() and self.client.feedback.fresh(now):
+                self.client.check_hardware()
+                self.ready=True
+                self.client.message='控制器已就绪；输入enable使能'
+            elif now>self.startup_deadline:
+                raise RuntimeError('启动20秒后所选电机反馈或控制器仍未就绪，请检查framework.log')
+
+    def stop(self):
+        if self.shutdown_error and self.proc is None:
+            # Preserve the first failure's disable log/trace; no automatic resend.
+            raise RuntimeError(self.shutdown_error)
+        errors=[]
+        if self.client is not None:
+            try:
+                self.client.disable()
+            except Exception as exc:
+                errors.append('停用未确认: '+str(exc))
+            if self.client.feedback.positions is not None:
+                self.last_positions=list(self.client.feedback.positions)
+        try:
+            terminate_launch(self.proc)
+            self.proc=None  # Only release serial ownership after the whole group exits.
+            if self.disable_pending:
+                disable_motors(self.helper,self.urdf,self.run,self.record,
+                               [m['id'] for m in self.policy.motors])
+                self.disable_pending=False
+                report_safely(self.record,'backend_disabled')
+        except Exception as exc:
+            errors.append('框架退出或电机失能未确认: '+str(exc))
+        finally:
+            self.ready=False
+            if self.proc is None and self.client is not None:
+                try:
+                    self.client.node.destroy_node()
+                except Exception as exc:
+                    errors.append('ROS节点关闭失败: '+str(exc))
+                self.client=None
+            if self.proc is None:
+                for name in ('output','events'):
+                    stream=getattr(self,name)
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception as exc:
+                            errors.append('日志关闭失败: '+str(exc))
+                        setattr(self,name,None)
+        if errors:
+            self.shutdown_error='；'.join(errors)
+            raise RuntimeError(self.shutdown_error)
+
+    def status(self):
+        if self.client is not None:
+            return self.client.status()
+        lines=['电机已失能；会话保留，输入enable重新使能 | 后台已停止，无新鲜反馈']
+        angles=None if self.last_positions is None else self.policy.device_angles(self.last_positions)
+        for i,m in enumerate(self.policy.motors):
+            actual='未知' if angles is None else f'{angles[i]:.2f}°'
+            lines.append(f"{m['id']} 上次测量 {actual} | 当前角度/速度未知")
+        return '\n'.join(lines)
+
+
 def main():
-    parser=argparse.ArgumentParser(description='双电机位置试验，使用现有ROS控制框架')
+    parser=argparse.ArgumentParser(description='104/105双机或105单机位置试验，使用现有ROS控制框架')
     parser.add_argument('--config',required=True)
     parser.add_argument('--run-dir',required=True)
+    parser.add_argument('--disable-helper',help='已部署的servo_disable程序')
+    parser.add_argument('--motor-id',type=int,choices=[105],help='仅控制105；省略时维持104/105双机')
     parser.add_argument('--check',action='store_true',help='只校验配置，不启动ROS或设备')
     args=parser.parse_args()
     config=load_config(args.config)
-    policy=MotionPolicy(config)
-    description=config_tools.generate_urdf(config)
+    policy=MotionPolicy(config,args.motor_id)
+    description=(config_tools.generate_urdf(config) if args.motor_id is None else
+                 config_tools.generate_urdf(config,motor_id=args.motor_id))
     if args.check:
-        print('配置有效；双电机目标将受已标定限位约束，未打开设备。')
+        print('配置有效；所选电机 '+', '.join(str(m['id']) for m in policy.motors)+
+              ' 的目标将受已标定限位约束，未打开设备。')
         return 0
+    if not args.disable_helper or not os.access(args.disable_helper,os.X_OK):
+        raise ValueError('缺少电机失能程序；拒绝启动运动，请使用已更新的servo-move入口')
     if not sys.stdin.isatty():
         raise ValueError('运动入口需要交互终端，不接受管道批量运动指令')
     run=Path(args.run_dir)/('move-'+time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
     run.mkdir(parents=True)
-    (run/'config.json').write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
-    urdf=run/'control.urdf'; urdf.write_text(description)
-    ready_file=run/'controllers.ready'
     import rclpy
     from rclpy.signals import SignalHandlerOptions
     rclpy.init(args=[],signal_handler_options=SignalHandlerOptions.NO)
@@ -512,23 +665,19 @@ def main():
         nonlocal interrupted
         interrupted=True
     old={sig:signal.signal(sig,interrupt) for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP)}
-    proc=None; client=None; keyboard=None; result=0
+    keyboard=None; selector=None; result=0
     display=config_tools.TerminalDisplay(sys.stdout)
-    with (run/'events.jsonl').open('w',buffering=1) as events, (run/'framework.log').open('w') as output:
+    with (run/'events.jsonl').open('w',buffering=1) as events:
         def record(event,**data):
-            events.write(json.dumps(dict(event=event,monotonic_s=time.monotonic(),**data),ensure_ascii=False,allow_nan=False)+'\n')
+            data.setdefault('monotonic_s',time.monotonic())
+            events.write(json.dumps(dict(event=event,**data),ensure_ascii=False,allow_nan=False)+'\n')
+        backend=BackendSession(config,policy,description,args.disable_helper,run,record)
         try:
-            namespace='servo_move_'+uuid.uuid4().hex[:8]
-            proc=subprocess.Popen(['ros2','launch',str(Path(__file__).with_name('servo_pair.launch.py')),
-                                   'urdf:='+str(urdf),'namespace:='+namespace,'ready_file:='+str(ready_file)],
-                                  stdout=output,stderr=subprocess.STDOUT,start_new_session=True,
-                                  env={**os.environ,'MECH_SERVO_TRACE_PATH':str(run/'serial-trace.jsonl'),
-                                       'MECH_SERVO_CHAIN_PATH':str(run/'command-chain.jsonl')})
-            client=RosControl(policy,namespace,record)
+            backend.start()
             display.message('输入设备绝对角度（与servo-status一致）；不会设置零点。\n'
-                            'enable：使能并保持当前位置\nmove 104角度 105角度 秒数：绝对移动\n'
-                            'step 104增量 105增量 秒数：从当前实际角度增量移动\n'
-                            'stop：请求保持当前测量位置；disable：停用；quit：退出\n'
+                            'enable：使能并保持当前位置\n'+policy.command_format('move')+'：绝对移动\n'+
+                            policy.command_format('step')+'：从当前实际角度增量移动\n'
+                            'stop：请求保持当前测量位置；disable：电机失能，保留会话；quit：失能并退出\n'
                             '软件停止不等同于机械急停。日志：'+str(run))
             for m in policy.motors:
                 limits=sorted(p*m['target_scale']+m['target_offset'] for p in (m['position_min_rad'],m['position_max_rad']))
@@ -536,31 +685,25 @@ def main():
             selector=selectors.DefaultSelector(); selector.register(sys.stdin,selectors.EVENT_READ)
             keyboard=CommandInput(sys.stdin)
             next_display=0.; next_state=0.
-            startup_deadline=time.monotonic()+20.
-            ready=False
+            enable_pending=False
             while not interrupted:
-                if proc.poll() is not None:
-                    raise RuntimeError('控制框架已退出，请查看framework.log')
-                client.poll()
+                backend.poll()
+                client=backend.client
                 now=time.monotonic()
-                if not ready:
-                    ready=ready_file.exists() and client.feedback.fresh(now)
-                    if ready:
-                        client.check_hardware()
-                        client.message='控制器已就绪；输入enable使能'
-                    if not ready and now>startup_deadline:
-                        raise RuntimeError('启动20秒后双电机反馈或控制器仍未就绪，请检查framework.log')
+                if enable_pending and backend.ready:
+                    backend.enable()
+                    enable_pending=False
                 if now>=next_display:
-                    display.update(client.status(),'命令> '+keyboard.buffer)
-                    if client.feedback.fresh(now):
-                        record('feedback',positions_rad=client.feedback.positions,
+                    display.update(backend.status(),'命令> '+keyboard.buffer)
+                    if client is not None and client.feedback.fresh(now):
+                        backend.record('feedback',positions_rad=client.feedback.positions,
                                estimated_velocity_rad_s=client.feedback.velocity)
                     next_display=now+.2
-                if client.active and now>=next_state:
+                if client is not None and client.active and now>=next_state:
                     if client.state() != 'active':
                         raise RuntimeError('轨迹控制器不再active')
                     next_state=now+1.
-                if selector.select(timeout=0):
+                if selector.select(timeout=0 if client is not None else .02):
                     line=keyboard.read()
                     next_display=0.
                     if line is None:
@@ -568,45 +711,52 @@ def main():
                     words=line.split()
                     if not words:
                         continue
-                    record('operator_input',words=words)
                     command=words[0].lower()
+                    restarting=command=='enable' and len(words)==1 and client is None
+                    input_record=backend.record('operator_input',words=words,
+                        backend=backend.index+1 if restarting else backend.index)
                     try:
                         if command=='quit' and len(words)==1:
                             break
+                        elif command=='disable' and len(words)==1:
+                            enable_pending=False
+                            backend.stop()
                         elif command=='enable' and len(words)==1:
-                            if not ready:
-                                raise ValueError('控制器尚未就绪，请等待启动完成')
-                            client.enable()
+                            if client is None:
+                                backend.start(enabling_input=input_record)
+                                enable_pending=True
+                            else:
+                                if not backend.ready:
+                                    raise ValueError('控制器尚未就绪，请等待启动完成')
+                                backend.enable()
                         elif command=='move':
+                            if client is None:
+                                raise ValueError('请先enable；电机已失能')
                             if client.goal is not None:
                                 raise ValueError('当前运动尚未完成，请等待或stop')
                             target,seconds=policy.move(words[1:])
                             client.send(target,seconds)
                         elif command=='step':
+                            if client is None:
+                                raise ValueError('请先enable；电机已失能')
                             client.move_relative(words[1:])
                         elif command=='stop' and len(words)==1:
-                            client.stop()
-                        elif command=='disable' and len(words)==1:
-                            client.disable()
+                            if client is not None:
+                                client.stop()
                         else:
-                            raise ValueError('命令：enable / move 角度104 角度105 秒数 / step 增量104 增量105 秒数 / stop / disable / quit')
+                            raise ValueError('命令：enable / '+policy.command_format('move')+' / '+policy.command_format('step')+' / stop / disable / quit')
                     except ValueError as exc:
                         display.message('拒绝：'+str(exc))
-            selector.close()
         except Exception as exc:
             result=1
             report_safely(display.message,'结束本次操作：'+str(exc))
             report_safely(record,'error',error=str(exc))
         finally:
-            errors=cleanup(client,proc,keyboard,display)
+            errors=cleanup(backend,keyboard,display,selector)
             if errors:
                 result=1
                 report_safely(print,'；'.join(errors)+'；请现场确认机构状态。',file=sys.stderr)
                 report_safely(record,'cleanup_unconfirmed',errors=errors)
-            elif client is not None:
-                report_safely(print,client.message)
-            if client is not None:
-                client.node.destroy_node()
             rclpy.shutdown()
             for sig,handler in old.items():
                 signal.signal(sig,handler)

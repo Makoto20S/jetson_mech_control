@@ -52,11 +52,20 @@ def validate_config(config, observe=False):
     # Existing valid limits can be checked in isolation, but motion generation must be calibrated.
     return config
 
-def generate_urdf(config, observe=False):
+def select_motors(config, motor_id=None, observe=False):
+    # Always validate the complete persistent pair before deriving a run subset.
+    validate_config(config, observe)
+    if motor_id is not None and motor_id != 105:
+        raise ValueError('单机试验仅支持电机105')
+    return sorted((m for m in config['motors'] if motor_id is None or m['id']==motor_id),
+                  key=lambda m: m['id'])
+
+def generate_urdf(config, observe=False, motor_id=None):
     validate_config(config,observe)
     if not observe and config.get('calibrated') is not True: raise ValueError('尚未完成标定，不能生成运动配置')
+    motors=select_motors(config,motor_id,observe)
     root=ET.Element('robot',name='servo_pair'); ET.SubElement(root,'link',name='base')
-    for m in config['motors']:
+    for m in motors:
         link=f"link_{m['id']}"; ET.SubElement(root,'link',name=link)
         j=ET.SubElement(root,'joint',name=m['joint_name'],type='continuous')
         ET.SubElement(j,'parent',link='base'); ET.SubElement(j,'child',link=link)
@@ -67,7 +76,7 @@ def generate_urdf(config, observe=False):
             'control_period_ns':2_000_000,'command_ttl_ns':3_000_000,
             'command_hard_ttl_ns':6_000_000,'feedback_ttl_ns':FRESH_NS if observe else 60_000_000}
     for k,v in params.items(): ET.SubElement(hw,'param',name=k).text=str(v)
-    for m in config['motors']:
+    for m in motors:
         j=ET.SubElement(control,'joint',name=m['joint_name'])
         p={k:m[k] for k in ('target_scale','target_offset','target_mapping_verified','feedback_scale','feedback_offset','feedback_mapping_verified','speed_erpm','acceleration_raw','position_max_error_rad')}
         p.update(drive_id=m['id'],position_min_rad=-1e6 if observe else m['position_min_rad'],position_max_rad=1e6 if observe else m['position_max_rad'])

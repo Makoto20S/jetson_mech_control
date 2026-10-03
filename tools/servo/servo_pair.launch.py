@@ -1,7 +1,8 @@
-"""Load the calibrated servo pair; leave the trajectory controller inactive."""
+"""Load calibrated selected servo joints; leave the trajectory controller inactive."""
 from pathlib import Path
 import tempfile
 import yaml
+import xml.etree.ElementTree as ET
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
@@ -13,6 +14,15 @@ from launch_ros.parameter_descriptions import ParameterFile, ParameterValue
 
 def read_description(path):
     return Path(path).read_text(encoding='utf-8')
+
+
+def controller_config(description):
+    names=[joint.attrib['name'] for joint in ET.fromstring(description).findall('./ros2_control/joint')]
+    if names not in (['motor104_joint','motor105_joint'],['motor105_joint']):
+        raise ValueError('Expected calibrated 104/105 pair or selected motor105 URDF')
+    controllers=yaml.safe_load(Path(__file__).with_name('servo_controllers.yaml').read_text())
+    controllers['servo_trajectory_controller']['ros__parameters']['joints']=names
+    return controllers
 
 
 def mark_ready(completed, name, returncode, path):
@@ -27,7 +37,7 @@ def setup(context):
     description = read_description(LaunchConfiguration('urdf').perform(context))
     namespace = LaunchConfiguration('namespace', default='').perform(context).strip('/')
     ready_file = LaunchConfiguration('ready_file', default='').perform(context)
-    controllers = yaml.safe_load(Path(__file__).with_name('servo_controllers.yaml').read_text())
+    controllers = controller_config(description)
     prefix = '/' + namespace if namespace else ''
     scoped = {prefix + '/' + name: values for name, values in controllers.items()}
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as stream:
