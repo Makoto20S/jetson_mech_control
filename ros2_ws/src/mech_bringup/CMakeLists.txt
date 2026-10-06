@@ -25,6 +25,7 @@ add_library(${PROJECT_NAME} SHARED
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
   src/command_trace.cpp
+  src/trace_snapshot.cpp
   src/ak30_force_runtime.cpp
   src/ak30_servo_runtime.cpp
   src/ak30_servo_runtime_params.cpp
@@ -140,6 +141,7 @@ if(BUILD_TESTING)
     test/test_servo_feedback_reader.cpp
     test/test_serial_trace.cpp
     test/test_command_trace.cpp
+    test/test_trace_snapshot.cpp
     test/test_ak30_servo_runtime.cpp
     test/test_ak30_servo_runtime_params.cpp
     test/test_ak30_servo_system_plugin.cpp
@@ -173,6 +175,7 @@ if(BUILD_TESTING)
     test/test_usb_cdc_pty_isolation.cpp
     src/posix_cdc_serial_port.cpp
     src/command_trace.cpp
+    src/trace_snapshot.cpp
     src/pass_through_init.cpp)
   target_include_directories(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE include)
   ament_target_dependencies(${PROJECT_NAME}_usb_cdc_pty_isolation_test mech_control_core)
@@ -293,7 +296,7 @@ if(BUILD_TESTING)
     TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
-  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit)
+  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit trace_storage)
     set(servo_tool_timeout 35)
     if(servo_tool_test STREQUAL "motion_ros")
       # Includes the real 31-second single-motor manual-lifetime acceptance.

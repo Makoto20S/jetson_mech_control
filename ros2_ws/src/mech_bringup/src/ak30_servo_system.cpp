@@ -1,9 +1,11 @@
 #include "mech_bringup/ak30_servo_system.hpp"
 
 #include <chrono>
+#include <charconv>
 #include <cinttypes>
 #include <cstdlib>
 #include <fstream>
+#include <stdexcept>
 #include "mech_bringup/serial_trace.hpp"
 
 #include "rclcpp/logging.hpp"
@@ -39,10 +41,27 @@ mech_control_core::UsbCdcOptions transport_options(std::uint16_t logical_bus) {
   return options;
 }
 
+std::size_t trace_capacity(const char* value) {
+  if (!value || value[0] < '1' || value[0] > '9')
+    throw std::invalid_argument("trace capacities must be positive decimal integers");
+  const auto end = value + std::char_traits<char>::length(value);
+  std::size_t capacity = 0;
+  const auto parsed = std::from_chars(value, end, capacity);
+  if (parsed.ec != std::errc{} || parsed.ptr != end)
+    throw std::invalid_argument("invalid trace capacity");
+  return capacity;
+}
+
 }  // namespace
 
 Ak30ServoSystem::~Ak30ServoSystem() {
   if (runtime_view_ != nullptr) runtime_view_->stop();
+  if (snapshot_mode_) {
+    // No formatting, compression or disk writes before the operator's mode15
+    // helper. Shared tmpfs storage outlives this process for deferred export.
+    seal_snapshots();
+    return;
+  }
   if (command_trace_) {
     try {
       std::ofstream output(command_trace_path_);
@@ -67,6 +86,24 @@ Ak30ServoSystem::~Ak30ServoSystem() {
   }
 }
 
+void Ak30ServoSystem::seal_snapshots() noexcept {
+  if (!snapshot_mode_ || !trace_initialized_) return;
+  if (command_trace_) command_trace_->seal_snapshot();
+  if (const auto trace = std::dynamic_pointer_cast<SerialTrace>(serial_))
+    trace->seal_snapshot();
+}
+
+hardware_interface::CallbackReturn Ak30ServoSystem::on_shutdown(
+    const rclcpp_lifecycle::State&) {
+  // Humble can finish the hardware lifecycle and exit on SIGINT without
+  // destroying this plugin. The manager serializes this terminal callback
+  // with read/write; FINALIZED prevents later updates. Ordinary deactivate
+  // must not seal because a component can be activated again.
+  if (runtime_view_) runtime_view_->stop();
+  seal_snapshots();
+  return hardware_interface::CallbackReturn::SUCCESS;
+}
+
 void Ak30ServoSystem::set_serial_port_factory_for_testing(
     SerialPortFactory factory) noexcept {
   if (!init_attempted_) serial_factory_ = std::move(factory);
@@ -89,18 +126,65 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_init(
   const auto parsed = Ak30ServoRuntimeParams::parse(info);
   if (!parsed) return hardware_interface::CallbackReturn::ERROR;
 
+  std::size_t chain_capacity = 524288;
+  std::size_t raw_capacity = 32768;
+  std::shared_ptr<SerialTrace> mapped_serial;
+  try {
+    const auto snapshot_dir = std::getenv("MECH_SERVO_SNAPSHOT_DIR");
+    if (snapshot_dir) {
+      if (!*snapshot_dir) throw std::invalid_argument("empty snapshot directory");
+      snapshot_mode_ = true;
+      command_trace_path_ = std::string(snapshot_dir) + "/chain.snapshot";
+      serial_trace_path_ = std::string(snapshot_dir) + "/serial.snapshot";
+      chain_capacity = kDefaultSnapshotChainCapacity;
+      raw_capacity = kDefaultSnapshotRawCapacity;
+    } else {
+      if (const auto path = std::getenv("MECH_SERVO_CHAIN_PATH"); path && *path)
+        command_trace_path_ = path;
+      if (const auto path = std::getenv("MECH_SERVO_TRACE_PATH"); path && *path)
+        serial_trace_path_ = path;
+      if (!command_trace_path_.empty()) raw_capacity = 131072;
+    }
+    const auto chain_env = std::getenv("MECH_SERVO_CHAIN_CAPACITY");
+    const auto raw_env = std::getenv("MECH_SERVO_RAW_CAPACITY");
+    if (chain_env || raw_env) {
+      if (!chain_env || !raw_env)
+        throw std::invalid_argument("both trace capacity variables are required together");
+      chain_capacity = trace_capacity(chain_env);
+      raw_capacity = trace_capacity(raw_env);
+    }
+    if (chain_capacity > kTraceSnapshotBudget / CommandTrace::record_bytes ||
+        raw_capacity > kTraceSnapshotBudget / SerialTrace::record_bytes)
+      throw std::invalid_argument("trace capacity exceeds memory budget");
+    const auto bytes = chain_capacity * CommandTrace::record_bytes +
+        raw_capacity * SerialTrace::record_bytes + 2 * sizeof(TraceSnapshotHeader);
+    if (bytes > kTraceSnapshotBudget)
+      throw std::invalid_argument("combined trace memory exceeds 1536 MiB");
+    if (snapshot_mode_) admit_trace_snapshots(snapshot_dir, bytes);
+    if (!command_trace_path_.empty())
+      command_trace_ = std::make_unique<CommandTrace>(chain_capacity,
+          snapshot_mode_ ? command_trace_path_ : std::string{});
+    if (snapshot_mode_) {
+      mapped_serial = std::make_shared<SerialTrace>(nullptr, raw_capacity,
+          command_trace_.get(), serial_trace_path_);
+      serial_ = mapped_serial;
+    }
+  } catch (const std::exception& error) {
+    RCLCPP_ERROR(rclcpp::get_logger("mech_bringup.ak30_servo"),
+                 "Trace admission failed before serial construction: %s", error.what());
+    return hardware_interface::CallbackReturn::ERROR;
+  }
+
   if (!serial_factory_) {
     serial_factory_ = [](const std::string& path) {
       return std::make_shared<PosixCdcSerialPort>(path);
     };
   }
-  serial_ = serial_factory_(parsed->device_path);
-  if (!serial_) return hardware_interface::CallbackReturn::ERROR;
-  if (const auto path = std::getenv("MECH_SERVO_CHAIN_PATH"); path && *path) {
-    command_trace_path_ = path;
-    command_trace_ = std::make_unique<CommandTrace>();
-    if (auto port = std::dynamic_pointer_cast<PosixCdcSerialPort>(serial_))
-      port->set_command_trace(command_trace_.get());
+  auto port = serial_factory_(parsed->device_path);
+  if (!port) return hardware_interface::CallbackReturn::ERROR;
+  if (command_trace_) {
+    if (auto posix = std::dynamic_pointer_cast<PosixCdcSerialPort>(port))
+      posix->set_command_trace(command_trace_.get());
     for (std::size_t i = 0; i < parsed->config.joints.size(); ++i) {
       const auto& j = parsed->config.joints[i];
       command_trace_->record("config_target", i, 0, j.target_rad_to_deg.scale,
@@ -111,10 +195,13 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_init(
           j.feedback_deg_to_rad.offset, 0, j.feedback_ttl_ns);
     }
   }
-  if (const auto path = std::getenv("MECH_SERVO_TRACE_PATH"); path && *path) {
-    serial_trace_path_ = path;
-    serial_ = std::make_shared<SerialTrace>(serial_, command_trace_ ? 131072U : 32768U,
-                                            command_trace_.get());
+  if (snapshot_mode_) {
+    if (!mapped_serial->attach_port(std::move(port)))
+      return hardware_interface::CallbackReturn::ERROR;
+  } else {
+    serial_ = std::move(port);
+    if (!serial_trace_path_.empty())
+      serial_ = std::make_shared<SerialTrace>(serial_, raw_capacity, command_trace_.get());
   }
   // Chain capture also works without the separate raw RX/TX file.
   if (command_trace_ && !std::dynamic_pointer_cast<SerialTrace>(serial_))
@@ -137,6 +224,7 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
   const auto result = CompositeSystem::on_init(info);
+  trace_initialized_ = result == hardware_interface::CallbackReturn::SUCCESS;
   if (command_trace_ && result == hardware_interface::CallbackReturn::SUCCESS) {
     trace_commands_ = CompositeSystem::export_command_interfaces();
     trace_states_ = CompositeSystem::export_state_interfaces();

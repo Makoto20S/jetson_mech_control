@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Position operator: standard ROS services/actions, never device I/O."""
+import sys
+if __name__ == '__main__':
+    sys.path.pop(0)
 import argparse
 from collections import deque
 import importlib.util
@@ -18,6 +21,9 @@ import uuid
 _spec = importlib.util.spec_from_file_location('servo_config', Path(__file__).with_name('operator.py'))
 config_tools = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(config_tools)
+_storage_spec = importlib.util.spec_from_file_location('servo_trace_storage', Path(__file__).with_name('trace_storage.py'))
+storage = importlib.util.module_from_spec(_storage_spec)
+_storage_spec.loader.exec_module(storage)
 CONTROLLER = 'servo_trajectory_controller'
 FEEDBACK_TIMEOUT = .25
 
@@ -525,6 +531,11 @@ class BackendSession:
         self.disable_pending=False
         self.shutdown_error=None
         self.last_positions=None
+        self.snapshot=None
+        self.snapshot_finished=False
+        self.chain_capacity=storage.CHAIN_CAPACITY
+        self.raw_capacity=storage.RAW_CAPACITY
+        self.parent_events=None
 
     def record(self, event, **data):
         row=dict(event=event,backend=data.pop('backend',self.index),
@@ -539,25 +550,46 @@ class BackendSession:
             raise RuntimeError('上次失能未确认，禁止再次使能；请退出并现场检查')
         if self.proc is not None:
             raise RuntimeError('控制框架仍在运行')
+        if self.snapshot is not None and not self.snapshot_finished:
+            raise RuntimeError('上次快照尚未恢复，禁止再次使能：'+str(self.snapshot))
+        storage.admit(self.root)
         self.index+=1
         self.run=self.root if self.index==1 else self.root/f'backend-{self.index:03d}'
         self.run.mkdir(parents=True,exist_ok=True)
-        (self.run/'config.json').write_text(json.dumps(self.config,ensure_ascii=False,indent=2)+'\n')
-        self.urdf=self.run/'control.urdf'; self.urdf.write_text(self.description)
+        config_text=json.dumps(self.config,ensure_ascii=False,indent=2)+'\n'
+        if any(len(text.encode('utf-8')) > 65536 for text in (config_text,self.description)):
+            raise ValueError('配置或生成描述超过64 KiB诊断元数据额度；拒绝启动设备')
+        with (self.run/'config.json').open('x',encoding='utf-8',newline='\n') as stream:
+            stream.write(config_text)
+        self.urdf=self.run/'control.urdf'
+        with self.urdf.open('x',encoding='utf-8',newline='\n') as stream:
+            stream.write(self.description)
         self.ready_file=self.run/'controllers.ready'
         if self.index>1:
-            self.events=(self.run/'events.jsonl').open('w',buffering=1)
+            self.events=storage.BoundedEvents(self.run/'events.jsonl',
+                min(2*storage.MIB, storage.SESSION_LIMIT-storage.directory_bytes(self.root)-8*storage.MIB))
             if enabling_input is not None:
                 # Same physical input and timestamp as the parent timeline.
                 self.events.write(json.dumps(enabling_input,ensure_ascii=False,allow_nan=False)+'\n')
-        self.output=(self.run/'framework.log').open('w')
+        self.snapshot=storage.make_snapshots(self.run,self.chain_capacity,self.raw_capacity,self.root)
+        self.snapshot_finished=False
         namespace='servo_move_'+uuid.uuid4().hex[:8]
-        self.proc=subprocess.Popen(['ros2','launch',str(Path(__file__).with_name('servo_pair.launch.py')),
-            'urdf:='+str(self.urdf),'namespace:='+namespace,'ready_file:='+str(self.ready_file)],
-            stdout=self.output,stderr=subprocess.STDOUT,start_new_session=True,
-            env={**os.environ,'MECH_SERVO_TRACE_PATH':str(self.run/'serial-trace.jsonl'),
-                 'MECH_SERVO_CHAIN_PATH':str(self.run/'command-chain.jsonl')})
+        try:
+            self.proc=subprocess.Popen([sys.executable,str(Path(__file__).with_name('bounded_launch.py')),
+                str(Path(__file__).with_name('servo_pair.launch.py')),
+                'urdf:='+str(self.urdf),'namespace:='+namespace,'ready_file:='+str(self.ready_file)],
+                stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True,
+                env={**os.environ,'MECH_SERVO_SNAPSHOT_DIR':str(self.snapshot),
+                     'MECH_SERVO_CHAIN_CAPACITY':str(self.chain_capacity),
+                     'MECH_SERVO_RAW_CAPACITY':str(self.raw_capacity),
+                     'MECH_SERVO_BOUNDED_LOGGING':'1'})
+        except Exception:
+            storage.abandon_prelaunch(self.snapshot,self.run)
+            self.snapshot=None
+            raise
         self.disable_pending=True
+        self.output=storage.FrameworkDrain(self.proc.stdout,self.run/'framework.log')
+        storage.register_writer(self.snapshot,self.proc.pid)
         self.ready=False
         self.startup_deadline=time.monotonic()+20.
         self.client=RosControl(self.policy,namespace,self.record)
@@ -612,6 +644,7 @@ class BackendSession:
                     errors.append('ROS节点关闭失败: '+str(exc))
                 self.client=None
             if self.proc is None:
+                diagnostics=dict(disable_confirmed=not self.disable_pending)
                 for name in ('output','events'):
                     stream=getattr(self,name)
                     if stream is not None:
@@ -619,7 +652,27 @@ class BackendSession:
                             stream.close()
                         except Exception as exc:
                             errors.append('日志关闭失败: '+str(exc))
+                        if name == 'output':
+                            diagnostics.update(framework_discarded=stream.discarded,framework_error=stream.error)
+                        else:
+                            diagnostics.update(events_dropped=stream.dropped,events_error=stream.error)
                         setattr(self,name,None)
+                if self.parent_events is not None:
+                    diagnostics['events_dropped']=diagnostics.get('events_dropped',0)+self.parent_events.dropped
+                    diagnostics['events_error']=diagnostics.get('events_error') or self.parent_events.error
+                # Never perform compression until the old serial owner exited and
+                # the formal disable helper was attempted (even if it failed).
+                if self.snapshot is not None and not self.snapshot_finished:
+                    try:
+                        report_safely(print,'框架已退出，失能步骤已执行；正在压缩保存诊断记录，请等待。')
+                        report=storage.finalize(self.snapshot,self.run,self.root,diagnostics,confirmed_exit=True)
+                        self.snapshot_finished=not report['snapshot_retained']
+                        if not self.snapshot_finished:
+                            errors.append('快照导出失败；保留待恢复：'+str(self.snapshot))
+                        elif report['diagnostic_status'] != 'complete':
+                            report_safely(print,'诊断记录不完整；查看capture-manifest.json',file=sys.stderr)
+                    except Exception as exc:
+                        errors.append('快照导出失败；保留待恢复：'+str(self.snapshot)+': '+str(exc))
         if errors:
             self.shutdown_error='；'.join(errors)
             raise RuntimeError(self.shutdown_error)
@@ -642,7 +695,10 @@ def main():
     parser.add_argument('--disable-helper',help='已部署的servo_disable程序')
     parser.add_argument('--motor-id',type=int,choices=[105],help='仅控制105；省略时维持104/105双机')
     parser.add_argument('--check',action='store_true',help='只校验配置，不启动ROS或设备')
+    parser.add_argument('--chain-capacity',type=int,default=storage.CHAIN_CAPACITY,help='诊断链记录条数，默认4194304')
+    parser.add_argument('--raw-capacity',type=int,default=storage.RAW_CAPACITY,help='原始串口记录条数，默认524288')
     args=parser.parse_args()
+    storage.capture_bytes(args.chain_capacity,args.raw_capacity)
     config=load_config(args.config)
     policy=MotionPolicy(config,args.motor_id)
     description=(config_tools.generate_urdf(config) if args.motor_id is None else
@@ -656,10 +712,12 @@ def main():
     if not sys.stdin.isatty():
         raise ValueError('运动入口需要交互终端，不接受管道批量运动指令')
     run=Path(args.run_dir)/('move-'+time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8])
+    storage.admit(run)
     run.mkdir(parents=True)
     import rclpy
     from rclpy.signals import SignalHandlerOptions
-    rclpy.init(args=[],signal_handler_options=SignalHandlerOptions.NO)
+    rclpy.init(args=['--ros-args','--disable-external-lib-logs'],
+               signal_handler_options=SignalHandlerOptions.NO)
     interrupted=False
     def interrupt(signum, frame):
         nonlocal interrupted
@@ -667,11 +725,15 @@ def main():
     old={sig:signal.signal(sig,interrupt) for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP)}
     keyboard=None; selector=None; result=0
     display=config_tools.TerminalDisplay(sys.stdout)
-    with (run/'events.jsonl').open('w',buffering=1) as events:
+    events=storage.BoundedEvents(run/'events.jsonl')
+    try:
         def record(event,**data):
             data.setdefault('monotonic_s',time.monotonic())
             events.write(json.dumps(dict(event=event,**data),ensure_ascii=False,allow_nan=False)+'\n')
         backend=BackendSession(config,policy,description,args.disable_helper,run,record)
+        backend.chain_capacity=args.chain_capacity
+        backend.raw_capacity=args.raw_capacity
+        backend.parent_events=events
         try:
             backend.start()
             display.message('输入设备绝对角度（与servo-status一致）；不会设置零点。\n'
@@ -760,6 +822,10 @@ def main():
             rclpy.shutdown()
             for sig,handler in old.items():
                 signal.signal(sig,handler)
+    finally:
+        events.close()
+        report_safely((run/'events-manifest.json').write_text,json.dumps(dict(
+            size_bytes=events.size,dropped=events.dropped,error=events.error))+'\n')
     return result
 
 

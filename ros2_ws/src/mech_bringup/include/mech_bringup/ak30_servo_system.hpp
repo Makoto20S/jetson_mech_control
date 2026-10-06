@@ -28,6 +28,8 @@ class Ak30ServoSystem final : public mech_hardware_ros2_control::CompositeSystem
       const hardware_interface::HardwareInfo& info) override;
   hardware_interface::CallbackReturn on_activate(
       const rclcpp_lifecycle::State& previous_state) override;
+  hardware_interface::CallbackReturn on_shutdown(
+      const rclcpp_lifecycle::State& previous_state) override;
 
   hardware_interface::return_type perform_command_mode_switch(
       const std::vector<std::string>& start, const std::vector<std::string>& stop) override;
@@ -55,6 +57,7 @@ class Ak30ServoSystem final : public mech_hardware_ros2_control::CompositeSystem
       mech_control_core::BusOwnershipRegistry& registry) noexcept;
 
  private:
+  void seal_snapshots() noexcept;
   void report_first_fault();
   void capture_interfaces(const char* stage);
   std::unique_ptr<CommandTrace> command_trace_;
@@ -62,6 +65,8 @@ class Ak30ServoSystem final : public mech_hardware_ros2_control::CompositeSystem
   std::vector<hardware_interface::CommandInterface> trace_commands_;
   std::vector<hardware_interface::StateInterface> trace_states_;
   std::string serial_trace_path_;
+  bool snapshot_mode_{false};
+  bool trace_initialized_{false};
   bool first_fault_reported_{false};
   SerialPortFactory serial_factory_;
   Ak30ServoRuntime::Clock clock_;

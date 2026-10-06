@@ -4,8 +4,12 @@
 A complete result proves captured host-chain consistency, not board CAN delivery,
 motor acceptance, or correctness of the firmware's mode-6 lifecycle semantics.
 """
+import sys
+if __name__ == '__main__':
+    sys.path.pop(0)
 import argparse
 import collections
+import gzip
 import json
 import math
 from pathlib import Path
@@ -66,6 +70,8 @@ def audit_records(records):
         issue('unsupported/missing schema')
     if meta.get('dropped', 0):
         issue('dropped trace records: evidence incomplete')
+    if meta.get('closed', True) is not True:
+        issue('snapshot was not closed: evidence incomplete')
     for r in records:
         total += 1
         stage = r['stage']; counts[stage] += 1
@@ -265,15 +271,22 @@ def main():
     parser.add_argument('--hardware-only', action='store_true', help='explicitly omit operator/service correlation (offline component tests)')
     args = parser.parse_args()
     try:
-        with args.trace.open() as stream:
+        opener = gzip.open if args.trace.suffix == '.gz' else open
+        with opener(args.trace, 'rt', encoding='utf-8') as stream:
             report = audit_records(json.loads(line) for line in stream)
+        manifest_path = args.trace.with_name('capture-manifest.json')
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+            if manifest.get('diagnostic_status') != 'complete':
+                report['issues'].append('capture manifest reports incomplete diagnostics')
+                report['complete'] = False
         if not args.hardware_only:
             events = [json.loads(line) for line in args.trace.with_name('events.jsonl').open()]
             operator_issues = audit_operator(events, report['acquisitions'])
             report['issues'].extend(operator_issues)
             report['complete'] = report['complete'] and not operator_issues
             report['operator_events_verified'] = not operator_issues
-    except (ValueError, KeyError, TypeError, OSError, OverflowError, struct.error) as error:
+    except (ValueError, KeyError, TypeError, OSError, EOFError, OverflowError, struct.error) as error:
         report = dict(complete=False, issues=[f'invalid/incomplete trace: {error}'])
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report['complete'] else 1

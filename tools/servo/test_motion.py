@@ -125,6 +125,56 @@ class MotionTests(unittest.TestCase):
                 disabler.assert_not_called()
         self.assertTrue(errors)
 
+    def test_snapshot_export_only_after_exit_and_formal_disable_attempt(self):
+        for disable_fails in (False,True):
+            backend=self.backend_fixture(); backend.snapshot=Path('/owned-snapshot')
+            order=[]
+            def disable(*args):
+                order.append('mode15')
+                if disable_fails: raise RuntimeError('no acknowledgement')
+            with patch.object(motion,'terminate_launch',side_effect=lambda p:order.append('exit')), \
+                    patch.object(motion,'disable_motors',side_effect=disable), \
+                    patch.object(motion.storage,'finalize',side_effect=lambda *a,**k:
+                        (order.append('export') or dict(snapshot_retained=False,diagnostic_status='complete'))):
+                if disable_fails:
+                    with self.assertRaises(RuntimeError):backend.stop()
+                else: backend.stop()
+            self.assertEqual(order,['exit','mode15','export'])
+
+    def test_group_survivor_prevents_export_and_device_access(self):
+        backend=self.backend_fixture(); backend.snapshot=Path('/owned-snapshot')
+        with patch.object(motion,'terminate_launch',side_effect=RuntimeError('group present')), \
+                patch.object(motion,'disable_motors') as disable, \
+                patch.object(motion.storage,'finalize') as export:
+            with self.assertRaises(RuntimeError):backend.stop()
+            disable.assert_not_called(); export.assert_not_called()
+
+    def test_export_failure_latches_reenable_after_disable(self):
+        backend=self.backend_fixture(); backend.snapshot=Path('/owned-snapshot')
+        with patch.object(motion,'terminate_launch'), patch.object(motion,'disable_motors') as disable, \
+                patch.object(motion.storage,'finalize',side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(RuntimeError,'disk full'):backend.stop()
+            disable.assert_called_once()
+        with self.assertRaises(RuntimeError):backend.start()
+
+    def test_log_admission_rejects_backend_before_device_process_launch(self):
+        backend=self.backend_fixture(); backend.proc=None; backend.client=None; backend.disable_pending=False
+        with patch.object(motion.storage,'admit',side_effect=ValueError('quota exhausted')), \
+                patch.object(motion.subprocess,'Popen') as launch:
+            with self.assertRaisesRegex(ValueError,'quota'):backend.start()
+            launch.assert_not_called()
+
+    def test_launch_failure_removes_only_empty_prelaunch_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend=motion.BackendSession(self.config,self.policy,'urdf','helper',Path(directory),Mock())
+            with patch.object(motion.storage,'admit'), \
+                    patch.object(motion.storage,'make_snapshots',return_value=Path('/owned-empty')), \
+                    patch.object(motion.storage,'abandon_prelaunch') as abandon, \
+                    patch.object(motion.subprocess,'Popen',side_effect=OSError('cannot launch')):
+                with self.assertRaisesRegex(OSError,'cannot launch'):backend.start()
+                abandon.assert_called_once_with(Path('/owned-empty'),Path(directory))
+            self.assertIsNone(backend.snapshot); self.assertFalse(backend.disable_pending)
+
     def test_disable_ack_failure_is_not_success(self):
         backend=self.backend_fixture()
         with patch.object(motion,'terminate_launch'):

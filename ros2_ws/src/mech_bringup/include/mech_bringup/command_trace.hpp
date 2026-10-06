@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <iomanip>
 #include <ostream>
+#include <string>
 #include <vector>
+#include "mech_bringup/trace_snapshot.hpp"
 #include "mech_control_core/transport.hpp"
 
 namespace mech::mech_bringup {
@@ -16,7 +18,11 @@ namespace mech::mech_bringup {
 // Exhaustion preserves the beginning and reports every omitted record.
 class CommandTrace final {
  public:
-  explicit CommandTrace(std::size_t capacity = 524288U) : records_(capacity) {}
+  explicit CommandTrace(std::size_t capacity = 524288U,
+                        const std::string& snapshot_path = {})
+      : records_(capacity, snapshot_path, 1) {}
+  static constexpr std::size_t record_bytes = 216;
+  void seal_snapshot() noexcept { records_.seal(); }
   std::uint64_t cycle{0}, generation{0}, io{0};
   std::size_t joint{0};
   static std::int64_t now() noexcept {
@@ -31,6 +37,7 @@ class CommandTrace final {
     r->joint = index; r->generation = gen; r->position = position;
     r->feedback = feedback; r->flags = flags; r->deadline = deadline;
     r->result = result;
+    records_.publish(total_, false);
   }
   void bytes(const char* stage, const std::uint8_t* data, std::size_t length,
              std::int64_t result, std::size_t requested, int error = 0,
@@ -42,18 +49,21 @@ class CommandTrace final {
     r->captured = data ? std::min(length, r->data.size()) : 0;
     r->length = length;
     if (data && r->captured) std::copy_n(data, r->captured, r->data.begin());
+    records_.publish(total_, false);
   }
   void frame(const char* stage, const mech_control_core::RawCanFrame& f,
              int result = 0) noexcept {
-    bytes(stage, f.payload.data(), f.payload_size, result, f.payload_size,
-          0, 0, f.id.value);
-    if (total_ <= records_.size() && total_ != 0) {
-      auto& r = records_[total_ - 1];
-      r.flags = (f.id.format == mech_control_core::CanFrameFormat::Extended ? 4 : 0)
+    auto* r = append(stage);
+    if (!r) return;
+    r->result = result; r->requested = f.payload_size;
+    r->id = f.id.value; r->length = f.payload_size;
+    r->captured = std::min(static_cast<std::size_t>(f.payload_size), r->data.size());
+    std::copy_n(f.payload.data(), r->captured, r->data.begin());
+    r->flags = (f.id.format == mech_control_core::CanFrameFormat::Extended ? 4 : 0)
           | (f.type == mech_control_core::CanFrameType::FlexibleDataRate ? 2 : 0)
           | (f.bitrate_switch ? 1 : 0) | (f.remote_request ? 16 : 0);
-      r.deadline = f.logical_bus;
-    }
+    r->deadline = f.logical_bus;
+    records_.publish(total_, false);
   }
   void dump(std::ostream& out) const {
     out << std::setprecision(17)
@@ -63,7 +73,7 @@ class CommandTrace final {
     constexpr char hex[] = "0123456789abcdef";
     for (std::size_t i = 0; i < std::min(total_, records_.size()); ++i) {
       const auto& r = records_[i];
-      out << "{\"seq\":" << i << ",\"stage\":\"" << r.stage
+      out << "{\"seq\":" << i << ",\"stage\":\"" << r.stage.data()
           << "\",\"ns\":" << r.ns << ",\"begin_ns\":" << r.begin
           << ",\"cycle\":" << r.cycle << ",\"joint\":" << r.joint
           << ",\"generation\":" << r.generation << ",\"io\":" << r.io
@@ -82,7 +92,11 @@ class CommandTrace final {
   }
  private:
   struct Record {
-    const char* stage{};  // all callers supply static string literals
+    // Snapshot offsets: stage0, ns32, begin40, deadline48, result56,
+    // cycle64, generation72, io80, joint88, requested96, length104,
+    // captured112, position120, feedback128, flags136, error140, id144,
+    // data148..211, padding212..215. Stride216, little-endian LP64.
+    std::array<char, 32> stage{};  // fixed ASCII field; no process-local pointer
     std::int64_t ns{}, begin{}, deadline{}, result{};
     std::uint64_t cycle{}, generation{}, io{};
     std::size_t joint{}, requested{}, length{}, captured{};
@@ -91,8 +105,12 @@ class CommandTrace final {
     std::uint32_t id{};
     std::array<std::uint8_t, 64> data{};
   };
+  static_assert(sizeof(Record) == record_bytes);
+  static_assert(offsetof(Record, ns) == 32);
+  static_assert(offsetof(Record, position) == 120);
+  static_assert(offsetof(Record, data) == 148);
   Record* append(const char* stage) noexcept;
-  std::vector<Record> records_;
+  TraceRecordStorage<Record> records_;
   std::size_t total_{0};
 };
 

@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -650,6 +651,168 @@ TEST(Ak30ServoSystemPlugin, OptionalSerialTraceFlushesAfterShutdown) {
   EXPECT_NE(records.str().find("\"hex\":\"ffff8ad000640032\""), std::string::npos);
   unlink((std::string(path) + ".chain").c_str());
   unlink(path);
+}
+
+namespace {
+class TraceEnvironment final {
+ public:
+  TraceEnvironment() {
+    for (std::size_t i = 0; i < names.size(); ++i) {
+      const auto value = ::getenv(names[i]);
+      if (value) prior[i] = value;
+      ::unsetenv(names[i]);
+    }
+  }
+  ~TraceEnvironment() {
+    for (std::size_t i = 0; i < names.size(); ++i) {
+      if (prior[i]) ::setenv(names[i], prior[i]->c_str(), 1);
+      else ::unsetenv(names[i]);
+    }
+  }
+ private:
+  const std::array<const char*, 5> names{{"MECH_SERVO_SNAPSHOT_DIR", "MECH_SERVO_CHAIN_CAPACITY",
+      "MECH_SERVO_RAW_CAPACITY", "MECH_SERVO_CHAIN_PATH", "MECH_SERVO_TRACE_PATH"}};
+  std::array<std::optional<std::string>, 5> prior;
+};
+}
+
+TEST(Ak30ServoSystemPlugin, TraceAdmissionFailsBeforeSerialFactoryOrDeviceOpen) {
+  for (const auto bad : {"", "0", "-1", "garbage", "1.5", "1000000000"}) {
+    SCOPED_TRACE(bad);
+    TraceEnvironment environment;
+    ::setenv("MECH_SERVO_SNAPSHOT_DIR", "/dev/shm", 1);
+    ::setenv("MECH_SERVO_CHAIN_CAPACITY", bad, 1);
+    ::setenv("MECH_SERVO_RAW_CAPACITY", "2", 1);
+    bool factory_called = false;
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([&](const std::string&) {
+      factory_called = true; return std::make_shared<FakeSerial>();
+    });
+    EXPECT_EQ(plugin.on_init(info()), CallbackReturn::ERROR);
+    EXPECT_FALSE(factory_called);
+  }
+  for (const auto directory : {"", "/tmp", "/dev/shm/no-such-servo-directory"}) {
+    TraceEnvironment environment;
+    ::setenv("MECH_SERVO_SNAPSHOT_DIR", directory, 1);
+    ::setenv("MECH_SERVO_CHAIN_CAPACITY", "2", 1);
+    ::setenv("MECH_SERVO_RAW_CAPACITY", "2", 1);
+    bool factory_called = false;
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([&](const std::string&) {
+      factory_called = true; return std::make_shared<FakeSerial>();
+    });
+    EXPECT_EQ(plugin.on_init(info()), CallbackReturn::ERROR);
+    EXPECT_FALSE(factory_called);
+  }
+  TraceEnvironment environment;
+  ::setenv("MECH_SERVO_CHAIN_CAPACITY", "2", 1);
+  bool factory_called = false;
+  Ak30ServoSystem plugin;
+  plugin.set_serial_port_factory_for_testing([&](const std::string&) {
+    factory_called = true; return std::make_shared<FakeSerial>();
+  });
+  EXPECT_EQ(plugin.on_init(info()), CallbackReturn::ERROR);
+  EXPECT_FALSE(factory_called);
+}
+
+TEST(Ak30ServoSystemPlugin, SnapshotShutdownSealsWithoutLegacyJsonDump) {
+  TraceEnvironment environment;
+  char directory[] = "/dev/shm/mech-plugin-trace-XXXXXX";
+  ASSERT_NE(::mkdtemp(directory), nullptr);
+  const std::string chain = std::string(directory) + "/chain.snapshot";
+  const std::string raw = std::string(directory) + "/serial.snapshot";
+  const std::string legacy = std::string(directory) + "/unexpected.jsonl";
+  ::setenv("MECH_SERVO_SNAPSHOT_DIR", directory, 1);
+  ::setenv("MECH_SERVO_CHAIN_CAPACITY", "32", 1);
+  ::setenv("MECH_SERVO_RAW_CAPACITY", "8", 1);
+  ::setenv("MECH_SERVO_CHAIN_PATH", legacy.c_str(), 1);
+  ::setenv("MECH_SERVO_TRACE_PATH", legacy.c_str(), 1);
+  auto serial = std::make_shared<FakeSerial>();
+  {
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([&](const std::string&) {
+      // Both complete mappings already exist before constructing the port.
+      EXPECT_TRUE(std::ifstream(chain).good()); EXPECT_TRUE(std::ifstream(raw).good());
+      return serial;
+    });
+    ASSERT_EQ(plugin.on_init(info()), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_configure(rclcpp_lifecycle::State()), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_activate(rclcpp_lifecycle::State()), CallbackReturn::SUCCESS);
+  }
+  EXPECT_FALSE(serial->is_open());
+  EXPECT_FALSE(std::ifstream(legacy).good());
+  for (const auto& path : {chain, raw}) {
+    mech::mech_bringup::TraceSnapshotHeader h{};
+    std::ifstream input(path, std::ios::binary);
+    input.read(reinterpret_cast<char*>(&h), sizeof(h));
+    ASSERT_TRUE(input.good());
+    EXPECT_EQ(std::string(h.magic, 8), "MCHTRC01"); EXPECT_EQ(h.closed, 1U);
+    ::unlink(path.c_str());
+  }
+  ::rmdir(directory);
+}
+
+TEST(Ak30ServoSystemPlugin, TerminalShutdownSealsBeforeDestructionButDeactivateDoesNot) {
+  TraceEnvironment environment;
+  char directory[] = "/dev/shm/mech-plugin-terminal-trace-XXXXXX";
+  ASSERT_NE(::mkdtemp(directory), nullptr);
+  ::setenv("MECH_SERVO_SNAPSHOT_DIR", directory, 1);
+  ::setenv("MECH_SERVO_CHAIN_CAPACITY", "64", 1);
+  ::setenv("MECH_SERVO_RAW_CAPACITY", "16", 1);
+  auto serial = std::make_shared<FakeSerial>();
+  const auto headers = [&](std::uint64_t expected) {
+    for (const auto* name : {"chain.snapshot", "serial.snapshot"}) {
+      mech::mech_bringup::TraceSnapshotHeader header{};
+      std::ifstream input(std::string(directory) + "/" + name, std::ios::binary);
+      input.read(reinterpret_cast<char*>(&header), sizeof(header));
+      EXPECT_TRUE(input.good());
+      EXPECT_EQ(header.closed, expected);
+    }
+  };
+  {
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([&](const std::string&) { return serial; });
+    const rclcpp_lifecycle::State state;
+    ASSERT_EQ(plugin.on_init(info()), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_configure(state), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+    ASSERT_EQ(plugin.on_deactivate(state), CallbackReturn::SUCCESS);
+    headers(0);
+    ASSERT_EQ(plugin.on_activate(state), CallbackReturn::SUCCESS);
+    headers(0);
+    ASSERT_EQ(plugin.on_shutdown(state), CallbackReturn::SUCCESS);
+    EXPECT_FALSE(serial->is_open());
+    headers(1);  // Must be published while the plugin object still exists.
+  }
+  headers(1);
+  ::unlink((std::string(directory) + "/chain.snapshot").c_str());
+  ::unlink((std::string(directory) + "/serial.snapshot").c_str());
+  ::rmdir(directory);
+}
+
+TEST(Ak30ServoSystemPlugin, FailedSnapshotInitializationNeverClaimsClosedEvidence) {
+  TraceEnvironment environment;
+  char directory[] = "/dev/shm/mech-plugin-failed-trace-XXXXXX";
+  ASSERT_NE(::mkdtemp(directory), nullptr);
+  ::setenv("MECH_SERVO_SNAPSHOT_DIR", directory, 1);
+  ::setenv("MECH_SERVO_CHAIN_CAPACITY", "2", 1);
+  ::setenv("MECH_SERVO_RAW_CAPACITY", "2", 1);
+  {
+    Ak30ServoSystem plugin;
+    plugin.set_serial_port_factory_for_testing([](const std::string&) {
+      return std::shared_ptr<mech::mech_control_core::CdcSerialPort>{};
+    });
+    ASSERT_EQ(plugin.on_init(info()), CallbackReturn::ERROR);
+  }
+  for (const auto* name : {"chain.snapshot", "serial.snapshot"}) {
+    const auto path = std::string(directory) + "/" + name;
+    mech::mech_bringup::TraceSnapshotHeader h{};
+    std::ifstream input(path, std::ios::binary);
+    input.read(reinterpret_cast<char*>(&h), sizeof(h));
+    ASSERT_TRUE(input.good()); EXPECT_EQ(h.closed, 0U);
+    ::unlink(path.c_str());
+  }
+  ::rmdir(directory);
 }
 
 #include <fcntl.h>

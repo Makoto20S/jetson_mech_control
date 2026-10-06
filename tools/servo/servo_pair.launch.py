@@ -1,5 +1,6 @@
 """Load calibrated selected servo joints; leave the trajectory controller inactive."""
 from pathlib import Path
+import os
 import tempfile
 import yaml
 import xml.etree.ElementTree as ET
@@ -51,11 +52,12 @@ def setup(context):
         return []
 
     manager = prefix + '/controller_manager'
+    log_args = ['--ros-args','--disable-external-lib-logs'] if os.environ.get('MECH_SERVO_BOUNDED_LOGGING') == '1' else []
     state = Node(package='controller_manager', executable='spawner', namespace=namespace,
-                 arguments=['joint_state_broadcaster', '-c', manager], output='screen')
+                 arguments=['joint_state_broadcaster', '-c', manager], output='screen', ros_arguments=log_args[1:])
     trajectory = Node(package='controller_manager', executable='spawner', namespace=namespace,
                       arguments=['servo_trajectory_controller', '--inactive', '-c', manager],
-                      output='screen')
+                      output='screen', ros_arguments=log_args[1:])
     completed = set()
 
     def finished(name):
@@ -71,7 +73,7 @@ def setup(context):
         Node(package='controller_manager', executable='ros2_control_node', namespace=namespace,
              parameters=[ParameterFile(params_path),
                          {'robot_description': ParameterValue(description, value_type=str)}],
-             output='screen'),
+             output='screen', ros_arguments=log_args[1:]),
         state,
         trajectory,
     ]

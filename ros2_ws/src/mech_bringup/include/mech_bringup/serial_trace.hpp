@@ -17,8 +17,17 @@ namespace mech::mech_bringup {
 class SerialTrace final : public mech_control_core::CdcSerialPort {
  public:
   explicit SerialTrace(std::shared_ptr<mech_control_core::CdcSerialPort> port,
-                       std::size_t capacity = 32768U, CommandTrace* chain = nullptr)
-      : port_(std::move(port)), records_(std::max(std::size_t{1}, capacity)), chain_(chain) {}
+                       std::size_t capacity = 32768U, CommandTrace* chain = nullptr,
+                       const std::string& snapshot_path = {})
+      : port_(std::move(port)), records_(std::max(std::size_t{1}, capacity), snapshot_path, 2),
+        chain_(chain) {}
+  static constexpr std::size_t record_bytes = 1064;
+  void seal_snapshot() noexcept { records_.seal(); }
+  // Startup only: mapped buffers must exist before constructing a real port.
+  bool attach_port(std::shared_ptr<mech_control_core::CdcSerialPort> port) noexcept {
+    if (port_ || !port) return false;
+    port_ = std::move(port); return true;
+  }
   bool is_open() const noexcept override { return port_->is_open(); }
   bool open() noexcept override { return port_->open(); }
   void close() noexcept override { port_->close(); }
@@ -64,25 +73,32 @@ class SerialTrace final : public mech_control_core::CdcSerialPort {
   }
  private:
   struct Record {
+    // Snapshot offsets: begin0, end8, size16, captured24, result32,
+    // tx33, bytes34..1057, padding1058..1063. Stride1064.
     std::int64_t begin{}, end{};
     std::size_t size{}, captured{};
     mech_control_core::TransportResult result{};
     bool tx{};
     std::array<std::uint8_t, 1024U> bytes{};
   };
+  static_assert(sizeof(Record) == record_bytes);
+  static_assert(offsetof(Record, result) == 32);
+  static_assert(offsetof(Record, bytes) == 34);
   static std::int64_t now() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
   }
   void capture(bool tx, std::int64_t begin, mech_control_core::TransportResult result,
                const std::uint8_t* data, std::size_t size, std::size_t readable) noexcept {
-    auto& r = records_[total_++ % records_.size()];
+    auto& r = records_[total_ % records_.size()];
     r.tx = tx; r.begin = begin; r.end = now(); r.result = result; r.size = size;
     r.captured = data ? std::min(readable, r.bytes.size()) : 0U;
     if (r.captured) std::copy_n(data, r.captured, r.bytes.begin());
+    ++total_;
+    records_.publish(total_, true);
   }
   std::shared_ptr<mech_control_core::CdcSerialPort> port_;
-  std::vector<Record> records_;
+  TraceRecordStorage<Record> records_;
   std::uint64_t total_{};
   CommandTrace* chain_{nullptr};
 };

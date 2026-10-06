@@ -1,5 +1,6 @@
-"""Real controller_manager/JTC offline acceptance; only the loopback plugin is used."""
+"""Offline controller acceptance with loopback and production-plugin synthetic PTYs."""
 import importlib.util
+import gzip
 import math
 import os
 import pty
@@ -108,6 +109,7 @@ class RosMotionTests(unittest.TestCase):
             driver=Path(directory)/'loopback_cli.py'
             # Test-only substitution: production entry has no simulation bypass flag.
             driver.write_text("import importlib.util\n"
+                +"import struct\n"
                 +"s=importlib.util.spec_from_file_location('motion',"+repr(str(ROOT/'motion.py'))+")\n"
                 +"m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n"
                 +"original=m.config_tools.generate_urdf\n"
@@ -118,6 +120,15 @@ class RosMotionTests(unittest.TestCase):
                 +"    device_urdf.write_text(urdf.read_text().replace('mech_hardware_ros2_control/CompositeSystem','mech_bringup/Ak30ServoSystem'))\n"
                 +"    original_disable(helper,device_urdf,run,record,ids)\n"
                 +"m.disable_motors=disable\n"
+                +"original_finalize=m.storage.finalize\n"
+                +"def finalize(snapshot,run,session_root,*args,**kwargs):\n"
+                +"    # CompositeSystem intentionally has no servo recorder. Test-only closed empty snapshots.\n"
+                +"    for name,kind,stride in [('chain.snapshot',1,216),('serial.snapshot',2,1064)]:\n"
+                +"        header=bytearray(128);header[:8]=b'MCHTRC01'\n"
+                +"        struct.pack_into('<4I6Q',header,8,1,kind,stride,128,1,0,0,0,0,1)\n"
+                +"        (snapshot/name).write_bytes(header+bytes(stride))\n"
+                +"    return original_finalize(snapshot,run,session_root,*args,**kwargs)\n"
+                +"m.storage.finalize=finalize\n"
                 +"raise SystemExit(m.main())\n")
             master,slave=pty.openpty()
             proc=subprocess.Popen(['/usr/bin/python3',str(driver),'--config',str(path),
@@ -200,6 +211,10 @@ class RosMotionTests(unittest.TestCase):
                 os.close(master)
                 serial_done.set();gateway.join(timeout=1.)
                 os.close(serial_master);os.close(serial_slave)
+                artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
+                if artifact:
+                    destination=Path(artifact)/('loopback-lifecycle-'+uuid.uuid4().hex[:8])
+                    shutil.copytree(directory,destination)
 
     def single_105_workflow(self):
         """Production Ak30ServoSystem and helper share a synthetic USB gateway."""
@@ -319,18 +334,28 @@ class RosMotionTests(unittest.TestCase):
                 self.assertAlmostEqual(relative[1]['base_positions_rad'][0],math.radians(15),delta=math.radians(.2))
                 self.assertEqual(len([p for p in serial_packets if p[7:]!=bytes(6) and int.from_bytes(p[7:11],'little')==0xf69]),2)
                 self.assertEqual({int.from_bytes(p[7:11],'little') for p in serial_packets if p[7:]!=bytes(6)},{0x669,0xf69})
-                traces=list(run.glob('**/command-chain.jsonl'))
+                traces=list(run.glob('**/command-chain.jsonl.gz'))
                 self.assertEqual(len(traces),2)
                 for trace in traces:
-                    for filename,loss_key in (('serial-trace.jsonl','overwritten'),('disable-trace.jsonl','dropped')):
+                    for filename,loss_key in (('serial-trace.jsonl.gz','overwritten'),('disable-trace.jsonl','dropped')):
                         trace_path=trace.with_name(filename)
                         self.assertTrue(trace_path.exists(),str(trace_path))
-                        metadata=json.loads(trace_path.read_text().splitlines()[0])
+                        opener=gzip.open if trace_path.suffix == '.gz' else open
+                        with opener(trace_path,'rt') as stream:metadata=json.loads(next(stream))
                         self.assertEqual(metadata[loss_key],0,metadata)
-                    report=audit.audit_records(json.loads(line) for line in trace.read_text().splitlines())
+                    with gzip.open(trace,'rt') as stream:
+                        report=audit.audit_records(json.loads(line) for line in stream)
                     events=[json.loads(line) for line in trace.with_name('events.jsonl').read_text().splitlines()]
                     report['issues']+=audit.audit_operator(events,report['acquisitions'])
-                    self.assertTrue(report['complete'] and not report['issues'],report['issues'])
+                    if not report['complete'] or report['issues']:
+                        with gzip.open(trace,'rt') as stream: chain_header=json.loads(next(stream))
+                        manifest=json.loads(trace.with_name('capture-manifest.json').read_text())
+                        with trace.with_name('framework.log').open('rb') as stream:
+                            stream.seek(max(0,trace.with_name('framework.log').stat().st_size-4000))
+                            tail=stream.read().decode(errors='replace')
+                        self.fail(json.dumps(dict(issues=report['issues'],chain_header=chain_header,
+                            snapshots=manifest.get('snapshots'),diagnostics=manifest.get('diagnostics'),
+                            framework_tail=tail),ensure_ascii=False,indent=2))
                     self.assertEqual(set(report['drives']),{105})
                     trace.with_name('chain-audit.json').write_text(json.dumps(report,indent=2))
                 self.assertFalse(gateway_errors,gateway_errors)
@@ -340,9 +365,8 @@ class RosMotionTests(unittest.TestCase):
                 os.close(serial_master);os.close(serial_slave)
                 artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
                 if artifact:
-                    destination=Path(artifact)/'single-lifecycle'
-                    if destination.exists():shutil.rmtree(destination)
-                    shutil.copytree(directory,destination,dirs_exist_ok=True)
+                    destination=Path(artifact)/('single-lifecycle-'+uuid.uuid4().hex[:8])
+                    shutil.copytree(directory,destination)
                     (destination/'terminal.txt').write_bytes(transcript)
                     (destination/'loaded-libraries.json').write_text(json.dumps(sorted(loaded),indent=2))
                     (destination/'gateway-tx.json').write_text(json.dumps([dict(monotonic_s=t,hex=p.hex()) for t,p in zip(packet_times,serial_packets)],indent=2))

@@ -15,10 +15,12 @@ case "${1:-}" in
   ./servo-move check          离线校验运动配置，不打开串口
   ./servo-move --motor-id 105  仅105单机；move/step 一个角度加秒数；disable 失能留窗，quit 失能退出
   ./servo-move check --motor-id 105  离线校验完整双机配置及105单机选择，不打开串口
+  ./servo-move --chain-capacity 4194304 --raw-capacity 524288  调整诊断缓存条数（默认约1396 MiB RAM）
   ./servo-control             使用已标定限位加载框架，轨迹控制器保持 inactive
   ./servo-status check        离线校验配置和实际插件解析，不打开串口
   ./servo-control check       离线校验已标定运动配置，不打开串口
 配置：config/servo_pair.json。标定和监视不发送电机运动命令。
+servo-move日志：每窗口128 MiB、全部运行目录2 GiB，磁盘额外保留1 GiB；已有日志不会自动删除。
 一次运行一个入口；运行前退出已有电机控制程序。
 HELP
     exit 0 ;;
@@ -55,6 +57,11 @@ case "$mode" in
   servo-status)
     exec /usr/bin/python3 "$operator" monitor --config "$config" --reader "$reader" "$@" ;;
   servo-move)
+    for diagnostic_tool in trace_storage.py bounded_launch.py; do
+      if [[ ! -f "${release}/src/tools/servo/${diagnostic_tool}" ]]; then
+        echo "缺少诊断工具 ${diagnostic_tool}；请更新完整部署。" >&2; exit 2
+      fi
+    done
     if [[ "${1:-}" == check ]]; then
       shift
       exec /usr/bin/python3 "${release}/src/tools/servo/motion.py" --config "$config" --run-dir "${root}/runs/servo" --disable-helper "$disabler" --check "$@"
