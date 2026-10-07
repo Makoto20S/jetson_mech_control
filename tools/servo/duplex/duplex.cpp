@@ -52,6 +52,11 @@ std::string content_json(const Content& c) {
 }  // namespace
 
 void Config::validate() const {
+  replay.validate();
+  require(!feedback_sequence || mixed_receive, "sequence_requires_mixed_receive");
+  require(!mixed_receive || !replay.events.empty(), "mixed_requires_replay");
+  require(replay.events.empty() || (seconds==5 && hz==500 && feedback_hz==50 &&
+          !feedback_reverse && feedback_phase_ms==0 && rx_gate_ms==0), "replay_requires_fixed_5s_500_50");
   require(seconds >= 1 && seconds <= 60, "seconds_outside_1_60");
   require(hz >= 1 && hz <= 500, "command_hz_outside_1_500");
   require(feedback_hz <= 50, "feedback_hz_outside_0_50");
@@ -83,6 +88,14 @@ RawCanFrame frame(bool feedback, unsigned lane) {
   return *RawCanFrame::create(1, *CanId::create(0x2968U+lane, CanFrameFormat::Extended),
       CanFrameType::Classic, FrameDirection::Tx, 8, payload, time);
 }
+RawCanFrame sequenced_feedback(unsigned lane, unsigned ordinal) {
+  require(lane<2 && ordinal<250, "feedback_sequence_range");
+  auto out=frame(true,lane);
+  const auto tag=0x4000U|(lane<<8)|(ordinal+1);
+  out.payload[2]=static_cast<std::uint8_t>(tag>>8);
+  out.payload[3]=static_cast<std::uint8_t>(tag);
+  return out;
+}
 std::array<Bytes, 2> packets(bool feedback) {
   return {dual_board::encode(frame(feedback, 0)), dual_board::encode(frame(feedback, 1))};
 }
@@ -91,6 +104,8 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
            Capture& capture_a, Capture& capture_b,
            const std::function<bool()>& stop, const std::function<void()>& ready) {
   Result result;
+  result.mixed_receive = c.mixed_receive;
+  result.feedback_sequence = c.feedback_sequence;
   struct Close {
     CdcSerialPort& a; CdcSerialPort& b; Result& result;
     void close() {
@@ -116,14 +131,22 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
     require(!capture_a.count_only() && !capture_b.count_only(), "full_capture_required");
     result.a.ids.reserve(kMaxIds); result.b.ids.reserve(kMaxIds);
     const auto command_packets = packets(false), feedback_packets = packets(true);
+    std::array<std::array<Bytes,250>,2> sequence_packets{};
+    std::array<std::array<unsigned,250>,2> sequence_received{};
+    if(c.feedback_sequence) for(unsigned lane=0;lane<2;++lane) for(unsigned n=0;n<250;++n)
+      sequence_packets[lane][n]=dual_board::encode(sequenced_feedback(lane,n));
     const std::array<std::array<RawCanFrame, 2>, 2> expected{{
         {frame(true,0), frame(true,1)}, {frame(false,0), frame(false,1)}}};
+    std::uint64_t replay_deadline=0, last_write_begin=0;
     auto write = [&](unsigned port, const Bytes& bytes) {
       stop_check(stop);
       auto& board = *boards[port];
       auto& capture = *captures[port];
       capture.reserve_record(bytes.size(), 1);
       const auto begin = observer::now_ns();
+      require(!replay_deadline || replay_deadline_allowed(replay_deadline,begin),
+              "replay_deadline_missed_no_catchup");
+      last_write_begin=begin;
       const auto outcome = ports[port]->write_all(bytes.data(), bytes.size());
       const auto end = observer::now_ns();
       ++board.write_calls;
@@ -187,13 +210,24 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
           require(board.ids.size() < kMaxIds, "unique_id_capacity");
           board.ids.push_back({received.id.value, extended, 1});
         } else ++it->frames;
-        auto& content = *contents[port];
-        const auto lane = received.id.value == expected[port][0].id.value ? 0 :
-            (received.id.value == expected[port][1].id.value ? 1 : -1);
+        const bool mixed_feedback = c.mixed_receive && port==1 &&
+            (received.id.value==0x2968 || received.id.value==0x2969);
+        auto& content = mixed_feedback ? result.content_b_feedback : *contents[port];
+        const auto expected_port = mixed_feedback ? 0U : port;
+        const auto lane = received.id.value == expected[expected_port][0].id.value ? 0 :
+            (received.id.value == expected[expected_port][1].id.value ? 1 : -1);
         if (lane < 0) ++content.unexpected_ids;
         else {
           ++content.received_per_id[static_cast<unsigned>(lane)];
-          const auto& wanted = expected[port][static_cast<unsigned>(lane)];
+          auto wanted = expected[expected_port][static_cast<unsigned>(lane)];
+          if(c.feedback_sequence && mixed_feedback) {
+            const auto tag=(unsigned(received.payload[2])<<8)|received.payload[3];
+            const auto ordinal=tag&255U;
+            if((tag&0xff00U)==(0x4000U|(unsigned(lane)<<8)) && ordinal>=1 && ordinal<=250) {
+              wanted=sequenced_feedback(static_cast<unsigned>(lane),ordinal-1);
+              ++sequence_received[static_cast<unsigned>(lane)][ordinal-1];
+            }
+          }
           if (!extended || received.logical_bus != 1 || received.type != CanFrameType::Classic ||
               received.error_frame || received.remote_request || received.bitrate_switch)
             ++content.format_mismatches;
@@ -230,6 +264,45 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
     result.epoch_ns = ns(epoch);
     const auto transmit_end = epoch+std::chrono::seconds(c.seconds);
     result.transmit_end_ns = ns(transmit_end);
+    if (!c.replay.events.empty()) {
+      std::array<std::uint64_t,2> last{};
+      for(const auto& event:c.replay.events) {
+        const auto deadline=result.epoch_ns+event.offset_ns;
+        for(;;) {
+          stop_check(stop);
+          const auto now=observer::now_ns();
+          if(now>=deadline) break;
+          const auto remaining=deadline-now;
+          if(remaining>kReplayReadGuardNs) {
+            pump_both();
+            const auto after=observer::now_ns();
+            if(after<deadline && deadline-after>kReplayReadGuardNs)
+              std::this_thread::sleep_for(std::chrono::nanoseconds(
+                  std::min<std::uint64_t>(1000000ULL,deadline-after-kReplayReadGuardNs)));
+          }
+          // Within the guard, bounded busy waiting avoids inserting reads or
+          // millisecond sleeps between nearby planned A/B submissions.
+        }
+        replay_deadline=deadline;
+        const unsigned physical_port=c.mixed_receive?0U:event.port;
+        const auto& packet=c.feedback_sequence && event.port ?
+            sequence_packets[event.lane][result.sent_b[event.lane]] :
+            (event.port?feedback_packets:command_packets)[event.lane];
+        const auto ended=write(physical_port,packet);
+        auto& board=*boards[physical_port];
+        board.max_lateness_ns=std::max(board.max_lateness_ns,last_write_begin-deadline);
+        if(last[physical_port]) {
+          const auto interval=last_write_begin-last[physical_port];
+          board.min_send_interval_ns=board.min_send_interval_ns?std::min(board.min_send_interval_ns,interval):interval;
+        }
+        last[physical_port]=last_write_begin;
+        ++board.tx_frames;
+        ++(event.port?result.sent_b:result.sent_a)[event.lane];
+        require(ended<result.transmit_end_ns,"replay_write_outside_window");
+      }
+      replay_deadline=0;
+      while(Clock::now()<transmit_end) { pump_both();sleep_until(transmit_end); }
+    } else {
     const auto period_a = std::chrono::nanoseconds(1000000000LL/c.hz);
     const auto period_b = std::chrono::nanoseconds(c.feedback_hz ? 1000000000LL/c.feedback_hz : 0);
     const auto epoch_b = epoch+std::chrono::milliseconds(c.feedback_phase_ms);
@@ -284,6 +357,7 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
       sleep_until(next);
     }
     require(tick_a == c.command_ticks() && tick_b == c.feedback_ticks(), "schedule_not_completed_no_catchup");
+    }
     const auto finish = transmit_end+std::chrono::milliseconds(c.drain_ms);
     while (Clock::now() < finish) { pump_both(); sleep_until(finish); }
     parsers[0].finish(); parsers[1].finish();
@@ -292,7 +366,12 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
       return content.received_per_id == sent && content.unexpected_ids == 0 &&
           content.payload_mismatches == 0 && content.format_mismatches == 0;
     };
-    result.content_match = matches(result.content_a,result.sent_b) && matches(result.content_b,result.sent_a);
+    result.feedback_sequence_match=c.feedback_sequence;
+    if(c.feedback_sequence) for(const auto& lane:sequence_received) for(const auto count:lane)
+      if(count!=1) result.feedback_sequence_match=false;
+    result.content_match = (!c.feedback_sequence || result.feedback_sequence_match) && (c.mixed_receive ? matches(result.content_a,{0,0}) &&
+        matches(result.content_b_feedback,result.sent_b) : matches(result.content_a,result.sent_b)) &&
+        matches(result.content_b,result.sent_a);
   } catch (const std::exception& error) {
     result.error = result.a.error = result.b.error = error.what();
     if (result.quiet_begin_ns && !result.quiet_end_ns) result.quiet_end_ns = observer::now_ns();
@@ -305,8 +384,11 @@ Result run(CdcSerialPort& a, CdcSerialPort& b, const Config& c,
 std::string plan_json(const Config& c) {
   c.validate();
   const auto commands = packets(false), feedback = packets(true);
-  const unsigned feedback_first = c.feedback_reverse ? 1 : 0;
-  const unsigned feedback_second = 1-feedback_first;
+  std::array<std::array<unsigned,2>,2> first_lanes{{{0,1},{c.feedback_reverse?1U:0U,c.feedback_reverse?0U:1U}}};
+  if(!c.replay.events.empty()) {
+    std::array<unsigned,2> counts{};
+    for(const auto& e:c.replay.events) if(counts[e.port]<2) first_lanes[e.port][counts[e.port]++]=e.lane;
+  }
   std::ostringstream out;
   out << "{\"schema\":2,\"role\":\"duplex\",\"seconds\":" << c.seconds
       << ",\"command_hz\":" << c.hz << ",\"feedback_hz\":" << c.feedback_hz
@@ -322,16 +404,20 @@ std::string plan_json(const Config& c) {
       << ",\"max_read_calls_per_port\":1000000,\"max_frames_per_port\":1000000,\"max_unique_ids_per_port\":256"
       << ",\"packing\":\"separate\",\"command_ticks\":" << c.command_ticks()
       << ",\"feedback_ticks\":" << c.feedback_ticks()
-      << ",\"a_tx_ids\":[1640,1641],\"b_tx_ids\":[10600,10601]"
+      << (c.mixed_receive ? ",\"a_tx_ids\":[1640,1641,10600,10601],\"b_tx_ids\":[]" : ",\"a_tx_ids\":[1640,1641],\"b_tx_ids\":[10600,10601]")
       << ",\"command_payloads_hex\":[\"000cd528000a000a\",\"000ea218000a000a\"]"
       << ",\"feedback_payloads_hex\":[\"03490000ffff2a00\",\"03be000000252a00\"]"
       << ",\"synthetic_feedback\":true,\"feedback_provenance\":\"synthetic_fixture\""
       << ",\"firmware_verified\":false,\"bitrate_verified\":false,\"listen_only_verified\":false"
       << ",\"init_hex\":" << quote(dual_board::hex(mech::mech_bringup::kPassThroughInitFrame.data(),13))
-      << ",\"a_first_writes_hex\":[" << quote(dual_board::hex(commands[0].data(),commands[0].size()))
-      << ',' << quote(dual_board::hex(commands[1].data(),commands[1].size())) << ']'
-      << ",\"b_first_writes_hex\":[" << quote(dual_board::hex(feedback[feedback_first].data(),feedback[feedback_first].size()))
-      << ',' << quote(dual_board::hex(feedback[feedback_second].data(),feedback[feedback_second].size())) << ']' << '}';
+      << ",\"a_first_writes_hex\":[" << quote(dual_board::hex(commands[first_lanes[0][0]].data(),commands[first_lanes[0][0]].size()))
+      << ',' << quote(dual_board::hex(commands[first_lanes[0][1]].data(),commands[first_lanes[0][1]].size())) << ']'
+      << ",\"b_first_writes_hex\":[" << quote(dual_board::hex(feedback[first_lanes[1][0]].data(),feedback[first_lanes[1][0]].size()))
+      << ',' << quote(dual_board::hex(feedback[first_lanes[1][1]].data(),feedback[first_lanes[1][1]].size())) << ']';
+  if(c.feedback_sequence) out << ",\"feedback_sequence\":true,\"feedback_tag_scheme\":\"u16be_bytes2_3_0x4000_lane8_ordinal1to250\"";
+  if(c.mixed_receive) out << ",\"mixed_receive\":true,\"replay_port_semantics\":\"frame_family_0_command_1_feedback_all_from_A\"";
+  if(!c.replay.events.empty()) out << ",\"replay\":" << replay_json(c.replay);
+  out << '}';
   return out.str();
 }
 std::string result_json(const Result& r, std::size_t capture_a_bytes, std::size_t capture_b_bytes) {
@@ -351,6 +437,9 @@ std::string result_json(const Result& r, std::size_t capture_a_bytes, std::size_
       << ",\"b\":" << observer::result_json(r.b,capture_b_bytes)
       << ",\"fixed_payload_sequence_observable\":false,\"can_delivery_verified\":false"
       << ",\"motor_feedback_verified\":false}";
+  if(r.mixed_receive) { auto json=out.str(); json.pop_back();
+    if(r.feedback_sequence) json+=",\"feedback_sequence\":true,\"feedback_sequence_match\":"+std::string(r.feedback_sequence_match?"true":"false");
+    return json+",\"mixed_receive\":true,\"content_b_feedback\":"+content_json(r.content_b_feedback)+"}"; }
   return out.str();
 }
 }  // namespace duplex

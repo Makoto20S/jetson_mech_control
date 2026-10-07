@@ -6,6 +6,7 @@
 #include <string>
 
 #include "../observer/observer.hpp"
+#include "replay_schedule.hpp"
 
 namespace duplex {
 using observer::Bytes;
@@ -15,6 +16,9 @@ using observer::Clock;
 using observer::RawCanFrame;
 
 struct Config {
+  ReplaySchedule replay;
+  bool feedback_sequence{false};
+  bool mixed_receive{false};  // Replay family1 feedback also leaves A; B sends no CAN.
   unsigned seconds{60}, hz{500}, feedback_hz{0}, log_mib{64};
   unsigned quiet_ms{2000}, drain_ms{1000};
   std::uint32_t nonce{0};  // Run metadata only; fixed CAN payloads have no nonce.
@@ -33,7 +37,8 @@ struct Content {
 
 struct Result {
   observer::Result a, b;  // role="A"/"B", all I/O and all received CAN IDs.
-  Content content_a, content_b;
+  Content content_a, content_b, content_b_feedback;
+  bool mixed_receive{false}, feedback_sequence{false}, feedback_sequence_match{false};
   std::string error;
   bool finished{false}, closed{false}, content_match{false};
   std::uint64_t quiet_begin_ns{0}, quiet_end_ns{0}, epoch_ns{0}, transmit_end_ns{0};
@@ -47,6 +52,7 @@ struct Result {
 // 0x2968 payload03490000ffff2a00 (84.1deg,0ERPM,-.01A,42C,status0),
 // 0x2969 payload03be000000252a00 (95.8deg,0ERPM,.37A,42C,status0).
 RawCanFrame frame(bool feedback, unsigned lane);
+RawCanFrame sequenced_feedback(unsigned lane, unsigned ordinal);
 std::array<Bytes, 2> packets(bool feedback);
 
 // Caller has opened both ports. Exactly one fixed initialization write per

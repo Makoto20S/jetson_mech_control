@@ -2,6 +2,23 @@
 import json,os,pathlib,subprocess,sys,tempfile,unittest
 EXE=pathlib.Path(sys.argv.pop(1)).resolve() if len(sys.argv)>1 else None
 class Cli(unittest.TestCase):
+    def test_replay_inert_and_malformed(self):
+        path=self.root/'schedule.txt'
+        events=[]
+        for i in range(2500):
+            events.extend([(i*2000000+100000,0,0),(i*2000000+120000,0,1)])
+            if i%10==0:events.extend([(i*2000000+1000000,1,0),(i*2000000+1020000,1,1)])
+        text='SERVO_REPLAY_V1 fixed_forward__paired 5000000000 5500\n'+''.join(f'{t} {p} {l}\n' for t,p,l in events)
+        flags=('--seconds','5','--command-hz','500','--feedback-hz','50','--replay-schedule',path)
+        path.write_text(text,encoding='ascii')
+        result=json.loads(self.call(*flags).stdout)
+        self.reject('--mixed-receive');self.reject('--feedback-sequence');self.reject(*flags,'--feedback-sequence')
+        sequenced=json.loads(self.call(*flags,'--mixed-receive','--feedback-sequence').stdout);self.assertTrue(sequenced['feedback_sequence'])
+        mixed=json.loads(self.call(*flags,'--mixed-receive').stdout);self.assertTrue(mixed['mixed_receive']);self.assertEqual(mixed['b_tx_ids'],[])
+        self.assertFalse(result['run_requested']);self.assertEqual(result['replay']['events'],[list(e) for e in events])
+        self.reject('--replay-schedule',path)
+        for changed in (text+'extra',text.replace('100000 0 0','-1 0 0',1),text.replace('100000 0 0','100000 2 0',1),text[:100],'X'*200001):
+            path.write_text(changed,encoding='ascii');self.reject(*flags)
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='duplex-cli-');self.root=pathlib.Path(self.temp.name);self.out=self.root/'must-not-exist'
     def tearDown(self):self.temp.cleanup()

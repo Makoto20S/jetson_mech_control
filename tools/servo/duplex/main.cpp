@@ -64,17 +64,20 @@ Options parse(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     const std::string key = argv[i];
     require(seen.insert(key).second, "duplicate option: " + key);
+    if (key == "--feedback-sequence") { o.config.feedback_sequence = true; continue; }
+    if (key == "--mixed-receive") { o.config.mixed_receive = true; continue; }
     if (key == "--run") { o.run = true; continue; }
     if (key == "--motors-disconnected") { o.disconnected = true; continue; }
     if (key == "--help") { o.help = true; continue; }
     require(key == "--port-a" || key == "--port-b" || key == "--output" ||
         key == "--command-hz" || key == "--feedback-hz" || key == "--feedback-order" ||
         key == "--feedback-phase-ms" || key == "--rx-gate-ms" || key == "--seconds" ||
-        key == "--drain-ms" || key == "--log-mib" || key == "--nonce", "unknown option: " + key);
+        key == "--drain-ms" || key == "--log-mib" || key == "--nonce" || key == "--replay-schedule", "unknown option: " + key);
     require(i + 1 < argc, "missing value: " + key);
     const std::string value = argv[++i];
     require(!value.empty() && value.rfind("--", 0) != 0, "missing value: " + key);
-    if (key == "--port-a") o.port_a = value;
+    if (key == "--replay-schedule") o.config.replay = duplex::load_replay_schedule(value);
+    else if (key == "--port-a") o.port_a = value;
     else if (key == "--port-b") o.port_b = value;
     else if (key == "--output") o.output = value;
     else if (key == "--command-hz") o.config.hz = decimal(value);
@@ -124,6 +127,7 @@ const char* help =
     "--feedback-order forward|reverse (default forward; B writes only)\n"
     "--feedback-phase-ms 0|5 (default 0; B deadline offset only)\n"
     "--rx-gate-ms 0|6 (default 0; 6 requires 2s, 10/10Hz, forward)\n"
+    "--replay-schedule FILE (reviewed 5500-event file; requires 5s,500/50Hz,no phase/gate/reverse)\n"
     "--drain-ms 1000..5000 --log-mib 1..64 (per port) --nonce 0..4294967295 --help\n"
     "Fixed separate 21-byte CAN writes, mode6 104=84.1/105=95.9, quiet preflight 2s.\n"
     "Live execution is Linux-only; root is required for complete /proc inspection.\n";

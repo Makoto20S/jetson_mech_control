@@ -30,7 +30,7 @@ def main():
     if sys.platform != "win32" and not linux:
         parser.error("supported build hosts: Windows offline, Linux offline/live")
     includes = [here, core / "include", cube / "include", bringup / "include"]
-    shared = [here / "duplex.cpp", here.parent / "observer" / "observer.cpp", here.parent / "dual_board" / "diagnostic.cpp",
+    shared = [here / "duplex.cpp", here / "replay_schedule.cpp", here.parent / "observer" / "observer.cpp", here.parent / "dual_board" / "diagnostic.cpp",
               core / "src" / "usb_cdc_transport.cpp",
               cube / "src" / "ak30_servo_wire.cpp"]
     live_sources = [bringup / "src" / name for name in
@@ -42,7 +42,7 @@ def main():
         flags += ["-static-libgcc", "-static-libstdc++"]
     extension = ".exe" if sys.platform == "win32" else ""
     targets = [("servo_duplex", [here / "main.cpp", *shared, *(live_sources if linux else [])])]
-    tests = [("test_duplex", here / "test_duplex.cpp")]
+    tests = [("test_duplex", here / "test_duplex.cpp"), ("test_replay", here / "test_replay.cpp")]
     if linux:
         tests += [("test_posix", here / "test_posix.cpp")]
         if (here / "test_supervisor.cpp").exists():
@@ -78,6 +78,7 @@ def main():
         commands += [("test_cli", [sys.executable, str(here / "test_cli.py"),
                                    str(output / ("servo_duplex" + extension))])]
         commands += [("test_audit", [sys.executable, "-X", "utf8", str(here / "test_audit.py")])]
+        commands += [("test_replay_audit", [sys.executable, "-X", "utf8", str(here / "test_replay_audit.py")])]
         for name, command in commands:
             completed = subprocess.run(command, text=True, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, timeout=120)
