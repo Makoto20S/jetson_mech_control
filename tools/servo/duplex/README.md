@@ -52,3 +52,19 @@ Live仅Linux：按by-path实际解析ttyACM/sysfs的caf1:ffff USB父设备，拒
 父进程不打开TTY，监督上界为发送时长+2秒静默+drain+15秒导出；中断转发停止，最多5秒后强杀并有限收尸。子进程安装parent-death SIGKILL以防父进程意外死亡后继续发送。强杀会丢失尚在内存的raw，明确不完整不可恢复；不可中断内核状态不能承诺有限close。成功须同时核对退出、summary、supervisor、逐文件SHA及独立原始完整性审计，文件存在不等于导出完整。
 
 当前此文档只描述实现和计划，现场是否执行及结果以各次独立证据目录为准；不修改生产部署、系统配置或旧诊断工具。
+
+## 有界时序重放
+
+`--replay-schedule FILE` 可替换周期发送安排；必须同时指定 `--seconds 5 --command-hz 500 --feedback-hz 50`，且 feedback-order=forward、phase=0、rx-gate=0。默认仍只输出计划，不打开设备。载荷由程序固定，输入文件不能指定目标或任意 CAN 数据。
+
+文件不超过200000字节，由空白分隔的十进制字段组成：首行为 `SERVO_REPLAY_V1 PROFILE 5000000000 5500`，随后5500条 `offset_ns port lane`。port=0/1代表A/B，lane=0/1代表104/105。offset须非递减且小于5秒；A每ID2500条、B每ID250条，相邻同ID至少间隔1.5ms/15ms。PROFILE允许 `fixed_forward__paired`、`observed_order__paired`、`fixed_forward__observed_separation`、`observed_order__observed_separation`。名称只标记类别，不证明文件来自历史记录，也不是输入哈希。
+
+每次实际write开始前检查deadline；早发或迟到超过250µs即终止，不追赶补发。距下一事件200µs以内不插入read，其余时间采集双口。静默预检、身份/占用检查、完整原始记录、尾接收与退出监督沿用原实现。时间均为主机提交边界，不代表USB事务或CAN线上的时间；历史反馈读取时间只能作为待检验的调度假设。
+
+审计重放证据必须另提供事前保存的JSON输入：`python tools/servo/duplex/audit.py EVIDENCE --replay-recipe RECIPE.json --output AUDIT.json`。JSON包含 `profile`、`duration_ns` 和 `events`；每事件含 `offset_ns`、`port`（A/B）、`id`（十六进制字符串）。审计逐项对照完整计划、实际跨端口顺序、正确载荷、发送数量和迟到上限；不能只相信采集程序自己的摘要。输入文件与构建源应事前冻结并核验哈希，尤其不能仅凭同PROFILE合并不同时间序列的复现率。反馈缺失与命令错配分别统计。
+
+
+`--mixed-receive` 仅可与上述5秒重放组合使用：时间表第二列在此模式表示帧族（0命令、1合成反馈），两者均从A发出，B初始化后不发送CAN。默认未启用此标志时保持原路由。计划明确记录 mixed_receive 和 replay_port_semantics，a_tx_ids含四ID、b_tx_ids为空；a/b_first_writes_hex在混合模式仅是两个帧族的固定前两包，不是物理B发送。summary.sent_a/sent_b亦为命令/反馈帧族数量，实际端口发送见summary.a/b.tx_frames；新增content_b_feedback单独计数。审计必须显式给出 `--mixed-receive --replay-recipe FILE`，防止仅信采集端自报路由。B四ID数量、内容、反馈/命令同包邻接须分别核验；改变发送源/负载不构成固件定位或等价真实多节点总线。
+
+
+`--feedback-sequence` 仅允许上述mixed-receive模式，默认关闭。只把合成反馈字节2..3替换为大端16位标记 `0x4000 | (lane << 8) | (ordinal + 1)`，lane=0/1，ordinal=0..249；其余六字节、命令目标和时间表不变。500个反馈包在静默前构造，发送环只索引预构造包。此模式的feedback_payloads_hex及first_writes是未加标记的基础模板，实际载荷由feedback_tag_scheme和事件每ID序号唯一决定；nonce仍不进入载荷。审计须同时指定 `--feedback-sequence --mixed-receive --replay-recipe FILE`，逐标记检查重复/缺失，包括总数量相等但一丢一重；只可识别本槽合成反馈，命令仍固定而无法逐帧唯一关联。标记改变字节和CRC，未复现不代表故障修复。
