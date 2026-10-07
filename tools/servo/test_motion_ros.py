@@ -148,8 +148,8 @@ class RosMotionTests(unittest.TestCase):
                         except OSError:break
                 self.fail('Missing '+text+'; output='+received.decode(errors='replace'))
             try:
-                expect('控制器已就绪')
-                os.write(master,b'enable\n');expect('已使能')
+                expect('控制器已就绪',timeout=25.)
+                os.write(master,b'enable\n');expect('已使能',timeout=25.)
                 os.write(master,b'move 5 -3 0.6\n');expect('轨迹到达容差内')
                 received.clear()
                 os.write(master,b'step 2 -1 0.6\n');expect('运动中');expect('轨迹到达容差内')
@@ -161,7 +161,7 @@ class RosMotionTests(unittest.TestCase):
                 os.write(master,b'move 1 1 0.6\n');expect('拒绝：请先enable')
                 os.write(master,b'step 1 1 0.6\n');expect('拒绝：请先enable')
                 self.assertFalse((run/'backend-002').exists())
-                os.write(master,b'enable\n');expect('已使能')
+                os.write(master,b'enable\n');expect('已使能',timeout=25.)
                 os.write(master,b'step 2 -1 0.6\n');expect('运动中');expect('轨迹到达容差内')
                 os.write(master,b'disable\n');expect('电机已失能；会话保留')
                 self.assertIsNone(proc.poll())

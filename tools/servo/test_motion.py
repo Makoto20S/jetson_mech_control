@@ -77,6 +77,48 @@ class MotionTests(unittest.TestCase):
         backend.disable_pending=True
         return backend
 
+    def test_startup_health_query_uses_remaining_budget_and_rechecks_feedback(self):
+        backend=self.backend_fixture()
+        backend.proc.poll.return_value=None
+        backend.ready_file=Mock()
+        backend.startup_deadline=20.
+        with patch.object(motion.time,'monotonic',return_value=7.):backend.poll()
+        backend.client.check_hardware.assert_called_once_with(timeout=13.)
+        backend.client.ready_feedback.assert_called_once()
+        self.assertTrue(backend.ready)
+
+    def test_startup_deadline_cannot_be_extended_by_ready_file_or_feedback(self):
+        backend=self.backend_fixture()
+        backend.proc.poll.return_value=None
+        backend.ready_file=Mock()
+        backend.startup_deadline=20.
+        with patch.object(motion.time,'monotonic',return_value=20.):
+            with self.assertRaisesRegex(RuntimeError,'启动20秒'):backend.poll()
+        backend.client.check_hardware.assert_not_called()
+        self.assertFalse(backend.ready)
+
+    def test_startup_never_becomes_ready_with_stale_feedback_after_query(self):
+        backend=self.backend_fixture()
+        backend.proc.poll.return_value=None
+        backend.ready_file=Mock()
+        backend.startup_deadline=20.
+        backend.client.ready_feedback.side_effect=ValueError('stale')
+        with patch.object(motion.time,'monotonic',return_value=7.):
+            with self.assertRaisesRegex(ValueError,'stale'):backend.poll()
+        self.assertFalse(backend.ready)
+
+    def test_normal_hardware_check_retains_one_second_and_latches_timeout(self):
+        client=object.__new__(motion.RosControl)
+        client.hardware_error=None;client.hardware_future=None
+        client.hardware_client=Mock();client.feedback=Mock()
+        client.await_future=Mock(side_effect=RuntimeError('timeout'))
+        service=NS(ListHardwareComponents=NS(Request=Mock()))
+        with patch.dict('sys.modules',{'controller_manager_msgs.srv':service}):
+            with self.assertRaisesRegex(RuntimeError,'timeout'):client.check_hardware()
+        self.assertEqual(client.await_future.call_args.args[1],1.)
+        self.assertIsNotNone(client.hardware_error)
+        self.assertEqual(client.feedback.received,-math.inf)
+
     def test_terminal_failure_cannot_skip_controller_or_process_cleanup(self):
         backend=self.backend_fixture()
         client=backend.client

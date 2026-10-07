@@ -260,7 +260,7 @@ class RosControl:
         if not status['healthy']:
             self.hardware_failed('硬件状态或位置命令接口不可用；停止接受目标，请查看framework.log首次故障记录')
 
-    def check_hardware(self):
+    def check_hardware(self, timeout=1.):
         from controller_manager_msgs.srv import ListHardwareComponents
         if self.hardware_error:
             raise RuntimeError(self.hardware_error)
@@ -272,7 +272,7 @@ class RosControl:
                 self.hardware_future.cancel()
                 self.hardware_future=None
             # A new request is required before each enable/goal, not a cached healthy flag.
-            response=self.await_future(self.hardware_client.call_async(ListHardwareComponents.Request()),1.)
+            response=self.await_future(self.hardware_client.call_async(ListHardwareComponents.Request()),timeout)
             self.accept_hardware(response)
             self.monitor_hardware=True
         except Exception as exc:
@@ -603,12 +603,16 @@ class BackendSession:
         self.client.poll()
         now=time.monotonic()
         if not self.ready:
+            if now>=self.startup_deadline:
+                raise RuntimeError('启动20秒后所选电机反馈或控制器仍未就绪，请检查framework.log')
             if self.ready_file.exists() and self.client.feedback.fresh(now):
-                self.client.check_hardware()
+                # A new manager's DDS service response may lag topic discovery.
+                # Only this first read-only query uses the remaining startup budget;
+                # enable/goal checks and running health monitoring retain 1 second.
+                self.client.check_hardware(timeout=self.startup_deadline-now)
+                self.client.ready_feedback()
                 self.ready=True
                 self.client.message='控制器已就绪；输入enable使能'
-            elif now>self.startup_deadline:
-                raise RuntimeError('启动20秒后所选电机反馈或控制器仍未就绪，请检查framework.log')
 
     def stop(self):
         if self.shutdown_error and self.proc is None:
