@@ -296,7 +296,96 @@ def content_counts(capture, expected):
             'format_mismatches':sum(x['id'] in expected and x['flags'] not in (4,12) for x in frames)}
 
 
-def audit_directory(directory, manifest=None):
+def feedback_payload(ident, ordinal):
+    if ident not in FEEDBACK or not 0<=ordinal<250: raise ValueError('sequence range')
+    b=bytearray(FEEDBACK[ident]);b[2:4]=(0x4000|((ident-0x2968)<<8)|(ordinal+1)).to_bytes(2,'big');return bytes(b)
+
+
+def feedback_ordinal(frame):
+    if frame['id'] not in FEEDBACK or len(frame['payload'])!=8:return None
+    tag=int.from_bytes(frame['payload'][2:4],'big');n=(tag&255)-1
+    return n if 0<=n<250 and tag==(0x4000|((frame['id']-0x2968)<<8)|(n+1)) else None
+
+
+def normalize_feedback(scan):
+    def norm(f):
+        if feedback_ordinal(f) is None:return f
+        b=bytearray(f['payload']);b[2:4]=b'\x00\x00';return {**f,'payload':bytes(b)}
+    return {**scan,'_frames':{direction:[norm(f) for f in frames] for direction,frames in scan['_frames'].items()}}
+
+
+def sequence_report(a,b):
+    sent=Counter();received=Counter();invalid=[]
+    for direction,scan,counts in [('TX',a,sent),('RX',b,received)]:
+        for f in scan['_frames'][direction]:
+            if f['id'] not in FEEDBACK:continue
+            n=feedback_ordinal(f)
+            if n is None:invalid.append({'direction':direction,'id':f['id'],'payload_hex':f['payload'].hex()})
+            else:counts[(f['id'],n)]+=1
+    keys=sorted(set(sent)|set(received))
+    deviations=[{'id':hex(i),'ordinal':n,'sent':sent[(i,n)],'received':received[(i,n)]} for i,n in keys if sent[(i,n)]!=1 or received[(i,n)]!=1]
+    return {'content_match':not invalid and not deviations,'invalid_tags':invalid,'deviations':deviations,
+            'sent_tags':sum(sent.values()),'received_tags':sum(received.values()),'unique_sent_tags':len(sent),'unique_received_tags':len(received),
+            'limitation':'tags identify synthetic feedback within this run, not CAN delivery or unique command frames'}
+
+
+def replay_contract(recipe):
+    """External reviewed JSON recipe, not metadata from the captured program."""
+    return {'profile':recipe['profile'],'duration_ns':recipe['duration_ns'],
+            'max_lateness_ns':250000,'read_guard_ns':200000,
+            'timestamp_basis':'host_schedule_not_CAN_wire_time',
+            'events':[[e['offset_ns'],int(e['port']=='B'),int(e['id'],16)&1] for e in recipe['events']]}
+
+
+def verify_replay(plan, summary, a, b, expected, findings):
+    r=plan['replay']
+    mixed=plan.get('mixed_receive',False)
+    findings.check(expected is not None and r == expected, 'replay_external_recipe_mismatch')
+    findings.check(r['profile'] in ('fixed_forward__paired','observed_order__paired',
+                   'fixed_forward__observed_separation','observed_order__observed_separation') and
+                   (plan['seconds'],plan['command_hz'],plan['feedback_hz'],plan['feedback_order'],
+                    plan['feedback_phase_ms'],plan['rx_gate_ms'])==(5,500,50,'forward',0,0) and
+                   r['duration_ns']==5000000000 and r['max_lateness_ns']==250000 and
+                   r['read_guard_ns']==200000, 'replay_contract_invalid')
+    events=r['events']
+    findings.check(len(events)==5500 and all(len(e)==3 and all(type(v) is int for v in e) and
+                   0<=e[0]<5000000000 and e[1] in (0,1) and e[2] in (0,1) for e in events), 'replay_events_invalid')
+    findings.check(events==sorted(events,key=lambda e:(e[0],e[1])), 'replay_event_order')
+    report={}
+    actual=[]
+    ordinals=[0,0]
+    for port,scan in enumerate((a,b)):
+        selected=events if mixed and port==0 else ([] if mixed else [e for e in events if e[1]==port])
+        writes=scan['_frames']['TX']
+        findings.check(len(writes)==len(selected) if summary['collection_complete'] else len(writes)<=len(selected),
+                       'replay_tx_count',detail=str(port))
+        lates=[]
+        for i,(write,e) in enumerate(zip(writes,selected)):
+            ident=(0x2968 if e[1] else 0x668)+e[2]
+            payload=(FEEDBACK if e[1] else COMMANDS)[ident]
+            if plan.get('feedback_sequence') and e[1]:
+                payload=feedback_payload(ident,ordinals[e[2]]);ordinals[e[2]]+=1
+            deadline=summary['epoch_ns']+e[0]
+            late=write['begin_ns']-deadline
+            findings.check(write['id']==ident and write['payload']==payload and write['flags']==12 and
+                           write['result']==0, 'replay_actual_tx_differs', detail=f'{port}:{i}')
+            findings.check(0<=late<=250000,'replay_submission_lateness',detail=f'{port}:{i}:{late}')
+            actual.append((write['begin_ns'],e));lates.append(late)
+        intervals=[y['begin_ns']-x['begin_ns'] for x,y in zip(writes,writes[1:])]
+        board=summary['b' if port else 'a']
+        findings.check(board['max_lateness_ns']==max(lates,default=0) and
+                       board['min_send_interval_ns']==min(intervals,default=0),'replay_timing_summary',detail=str(port))
+        first=[e for e in events if e[1]==port][:2]
+        golden=FEEDBACK_PACKETS_HEX if port else COMMAND_PACKETS_HEX
+        findings.check(plan['b_first_writes_hex' if port else 'a_first_writes_hex']==[golden[e[2]] for e in first],
+                       'replay_first_write_plan')
+        report['B' if port else 'A']={'events':len(writes),'lateness_ns':describe(lates),'actual_submission_interval_ns':describe(intervals)}
+    actual.sort(key=lambda e:e[0])
+    findings.check([e for _,e in actual]==events[:len(actual)], 'replay_global_submission_order')
+    return report
+
+
+def audit_directory(directory, manifest=None, expected_replay=None, expected_mixed=False, expected_sequence=False):
     directory = Path(directory)
     findings = Findings()
     hashes = {}
@@ -327,6 +416,23 @@ def audit_directory(directory, manifest=None):
                 'errors':findings.errors,'evidence_hashes':hashes,'A':public(a),'B':public(b),
                 'A_to_B':a_to_b,'B_to_A':b_to_a,'limitation':FIXED_LIMITATION}
     plan,summary = documents['plan.json'],documents['summary.json']
+    sequence=plan.get('feedback_sequence',False)
+    findings.check(type(sequence) is bool and sequence==expected_sequence,'sequence_external_expectation')
+    sequence_check={}
+    norm_a,norm_b=a,b
+    if sequence:
+        findings.check(plan.get('mixed_receive') is True and summary.get('feedback_sequence') is True and
+                       plan.get('feedback_tag_scheme')=='u16be_bytes2_3_0x4000_lane8_ordinal1to250','sequence_contract')
+        sequence_check=sequence_report(a,b);norm_a,norm_b=normalize_feedback(a),normalize_feedback(b)
+        findings.check(summary.get('feedback_sequence_match')==(sequence_check['content_match'] if summary['collection_complete'] else False),'sequence_summary_match')
+    mixed=plan.get('mixed_receive',False)
+    findings.check(type(mixed) is bool and mixed==expected_mixed,'mixed_route_external_expectation')
+    if mixed:
+        findings.check(plan.get('replay_port_semantics')=='frame_family_0_command_1_feedback_all_from_A' and
+                       summary.get('mixed_receive') is True and plan.get('replay') is not None,'mixed_contract')
+        a_to_b,b_to_a=compare_direction(norm_a,norm_b,{**COMMANDS,**FEEDBACK}),compare_direction(norm_b,norm_a,{})
+        content_match=a_to_b['content_match'] and b_to_a['content_match'] and (not sequence or sequence_check['content_match'])
+    replay = plan.get('replay')
     ready,supervisor,exit_record = documents['ready.json'],documents['supervisor.json'],documents['exit.json']
     findings.check(documents['admission.json'] == plan, 'admission_plan_mismatch')
     findings.check(plan['schema'] == summary['schema'] == 2 and plan['role'] == summary['role'] == ready['role'] == 'duplex', 'schema_or_role')
@@ -341,7 +447,7 @@ def audit_directory(directory, manifest=None):
                    plan['command_ticks'] == plan['command_hz']*plan['seconds'] and
                    plan['feedback_ticks'] == plan['feedback_hz']*plan['seconds'] and
                    1048576 <= plan['capture_limit_bytes_per_port'] <= 64*1048576, 'plan_limits')
-    findings.check(plan['a_tx_ids'] == list(COMMANDS) and plan['b_tx_ids'] == list(FEEDBACK) and
+    findings.check(plan['a_tx_ids'] == (list(COMMANDS)+list(FEEDBACK) if mixed else list(COMMANDS)) and plan['b_tx_ids'] == ([] if mixed else list(FEEDBACK)) and
                    plan['command_payloads_hex'] == [x.hex() for x in COMMANDS.values()] and
                    plan['feedback_payloads_hex'] == [x.hex() for x in FEEDBACK.values()] and
                    plan['synthetic_feedback'] is True and plan['feedback_provenance'] == 'synthetic_fixture', 'plan_golden_fixture')
@@ -359,10 +465,15 @@ def audit_directory(directory, manifest=None):
                        plan.get('rx_gate_scope') == 'transmit_only_both_ports', 'rx_gate_contract')
     ordered_ids = list(FEEDBACK)[::-1] if feedback_order == 'reverse' else list(FEEDBACK)
     expected_b_packets = FEEDBACK_PACKETS_HEX[::-1] if feedback_order == 'reverse' else FEEDBACK_PACKETS_HEX
-    findings.check(plan['a_first_writes_hex'] == COMMAND_PACKETS_HEX and
-                   plan['b_first_writes_hex'] == expected_b_packets, 'first_writes_plan_order')
-    findings.check(all(frame['id'] == ordered_ids[index % 2] for index,frame in enumerate(b['_frames']['TX'])),
-                   'feedback_write_order')
+    replay_report = {}
+    if replay is not None:
+        replay_report = verify_replay(plan,summary,a,b,expected_replay,findings)
+    else:
+        findings.check(expected_replay is None,'expected_replay_missing_from_capture')
+        findings.check(plan['a_first_writes_hex'] == COMMAND_PACKETS_HEX and
+                       plan['b_first_writes_hex'] == expected_b_packets, 'first_writes_plan_order')
+        findings.check(all(frame['id'] == ordered_ids[index % 2] for index,frame in enumerate(b['_frames']['TX'])),
+                       'feedback_write_order')
     findings.check(plan['run_requested'] is True and plan['motors_disconnected_declared'] is True, 'run_isolation_admission')
     boot = plan['boot_id']
     findings.check(isinstance(boot,str) and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',boot) is not None and
@@ -391,14 +502,22 @@ def audit_directory(directory, manifest=None):
                    summary['fixed_payload_sequence_observable'] is False, 'unsupported_observability_claim')
     for scan,reported in ((a,summary['a']),(b,summary['b'])):
         verify_board(scan,reported,plan,findings)
-    findings.check(summary['content_a'] == content_counts(a,FEEDBACK) and summary['content_b'] == content_counts(b,COMMANDS), 'content_counter_summary')
+    if mixed:
+        def without_feedback(scan):
+            return {**scan,'_frames':{**scan['_frames'],'RX':[x for x in scan['_frames']['RX'] if x['id'] not in FEEDBACK]}}
+        feedback_only={**norm_b,'_frames':{**norm_b['_frames'],'RX':[x for x in norm_b['_frames']['RX'] if x['id'] in FEEDBACK]}}
+        findings.check(summary['content_a']==content_counts(a,FEEDBACK) and
+                       summary['content_b']==content_counts(without_feedback(b),COMMANDS) and
+                       summary['content_b_feedback']==content_counts(feedback_only,FEEDBACK),'mixed_content_counters')
+    else:
+        findings.check(summary['content_a'] == content_counts(a,FEEDBACK) and summary['content_b'] == content_counts(b,COMMANDS), 'content_counter_summary')
     findings.check(summary['sent_a'] == [a_to_b['per_id'][f'{ident:#x}']['successful_hostwrite_frames'] for ident in COMMANDS] and
-                   summary['sent_b'] == [b_to_a['per_id'][f'{ident:#x}']['successful_hostwrite_frames'] for ident in FEEDBACK], 'successful_send_summary')
+                   summary['sent_b'] == [(a_to_b if mixed else b_to_a)['per_id'][f'{ident:#x}']['successful_hostwrite_frames'] for ident in FEEDBACK], 'successful_send_summary')
     quiet_begin,quiet_end,epoch,transmit_end = (summary[key] for key in ('quiet_begin_ns','quiet_end_ns','epoch_ns','transmit_end_ns'))
     findings.check(all(frame['begin_ns'] >= epoch+feedback_phase_ms*1000000 for frame in b['_frames']['TX']),
                    'feedback_write_before_phase')
     read_gate_report = {}
-    if gate_valid and type(plan['command_hz']) is int and 1 <= plan['command_hz'] <= 500:
+    if replay is None and gate_valid and type(plan['command_hz']) is int and 1 <= plan['command_hz'] <= 500:
         gate_ns, period_ns = rx_gate_ms*1000000, 1000000000//plan['command_hz']
         for label,scan in scans.items():
             active_reads = [r for r in scan['_io'] if r['direction'] == 'RX' and epoch <= r['begin_ns'] < transmit_end]
@@ -454,7 +573,7 @@ def audit_directory(directory, manifest=None):
                        transmit_end+plan['drain_ms']*1000000 <= summary['a']['end_ns'] == summary['b']['end_ns'], 'quiet_ready_epoch_drain_window')
         findings.check(exit_record['started_monotonic_ns'] <= summary['a']['start_ns'] and
                        summary['a']['end_ns'] <= exit_record['exited_monotonic_ns'], 'wrapper_time_window')
-        for label,scan,expected_ticks in (('A',a,plan['command_ticks']),('B',b,plan['feedback_ticks'])):
+        for label,scan,expected_ticks in (('A',a,plan['command_ticks']+(plan['feedback_ticks'] if mixed else 0)),('B',b,0 if mixed else plan['feedback_ticks'])):
             findings.check(scan['valid'] and len(scan['_init']) == 1 and scan['_init'][0]['result'] == 0 and
                            scan['_init'][0]['end_ns'] <= quiet_begin, 'initialization_before_quiet', detail=label)
             quiet_reads = [x for x in scan['_io'] if x['direction'] == 'RX' and x['begin_ns'] < epoch]
@@ -465,7 +584,7 @@ def audit_directory(directory, manifest=None):
             findings.check(all(epoch <= x['begin_ns'] <= x['end_ns'] < transmit_end for x in writes), 'write_outside_active_window', detail=label)
             findings.check(len(writes) == expected_ticks*2 and all(x['result'] == 0 for x in writes), 'planned_writes_not_completed', detail=label)
             hz = plan['command_hz'] if label == 'A' else plan['feedback_hz']
-            if type(hz) is int and hz > 0:
+            if replay is None and type(hz) is int and hz > 0:
                 phase_ns = feedback_phase_ms*1000000 if label == 'B' else 0
                 for index,write in enumerate(writes):
                     deadline = epoch+phase_ns+(index//2)*(1000000000//hz)
@@ -482,6 +601,7 @@ def audit_directory(directory, manifest=None):
             'metadata_errors':findings.errors,'evidence_hashes':hashes,'boot_id':boot,'nonce':plan['nonce'],
             'feedback_order':feedback_order,
             'feedback_phase_ms':feedback_phase_ms,
+            'replay_timing':replay_report,'feedback_sequence_audit':sequence_check,
             'rx_gate_ms':rx_gate_ms,'independent_read_gate':read_gate_report,
             'A':public(a),'B':public(b),'A_to_B':a_to_b,'B_to_A':b_to_a,
             'A_host_io_timing':timing(a),'B_host_io_timing':timing(b),
@@ -494,10 +614,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory',type=Path)
     parser.add_argument('--manifest',type=Path)
+    parser.add_argument('--replay-recipe',type=Path)
+    parser.add_argument('--mixed-receive',action='store_true')
+    parser.add_argument('--feedback-sequence',action='store_true')
     parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args()
     try:
-        result = audit_directory(args.directory,args.manifest)
+        expected = replay_contract(read_json(args.replay_recipe)) if args.replay_recipe else None
+        result = audit_directory(args.directory,args.manifest,expected,args.mixed_receive,args.feedback_sequence)
     except (OSError,ValueError,TypeError,KeyError,struct.error,OverflowError) as error:
         result = {'valid':False,'acquisition_complete':False,'content_match':False,
                   'first_failure':{'category':'evidence_schema_or_file','detail':str(error)}}
