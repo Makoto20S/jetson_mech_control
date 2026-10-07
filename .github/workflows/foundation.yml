@@ -36,8 +36,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build pinned Humble image
+        # Servo PTY acceptance uses the production trace allocation (~1397 MiB).
+        # Keep its memory admission checks enabled inside Docker build RUNs.
         run: >-
           docker build
+          --shm-size=2g
           --file docker/ros_humble_jammy/Dockerfile
           --tag jetson-mech-control-foundation:${{ github.sha }}
           .

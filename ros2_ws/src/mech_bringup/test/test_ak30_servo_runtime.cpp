@@ -394,6 +394,9 @@ TEST(Ak30ServoRuntime, ReceiveBudgetDoesNotPostponeHardWatchdog) {
     ASSERT_EQ(f.transport.inject_receive(feedback(106, f.now)), TransportResult::Ok);
   EXPECT_FALSE(f.runtime.read(f.states.data(), 2));
   EXPECT_EQ(f.transport.pending_transmit(), 2U);
+  ASSERT_TRUE(f.runtime.first_fault());
+  EXPECT_EQ(f.runtime.first_fault()->reason, Ak30ServoFaultReason::HardDeadline);
+  EXPECT_EQ(f.runtime.first_fault()->now.nanoseconds(), 6000100);
 }
 
 TEST(Ak30ServoRuntime, OneAcceptedPeerCannotCarryUnsentPeerIntoHolding) {
@@ -520,6 +523,10 @@ TEST(Ak30ServoRuntime, StalePeerFaultsGroupEvenWithoutPendingCommands) {
   EXPECT_FALSE(f.runtime.read(f.states.data(), 2));
   EXPECT_FALSE(f.runtime.has_valid_sample());
   EXPECT_EQ(f.transport.pending_transmit(), 0U);
+  ASSERT_TRUE(f.runtime.first_fault());
+  EXPECT_EQ(f.runtime.first_fault()->reason, Ak30ServoFaultReason::FeedbackUnavailable);
+  EXPECT_EQ(f.runtime.first_fault()->feedback.availability,
+            mech::mech_protocol_cubemars::ServoPositionAvailability::Stale);
 }
 
 TEST(Ak30ServoRuntime, RejectsConfigurationAndSharedOwnership) {
@@ -570,5 +577,66 @@ TEST(Ak30ServoRuntime, ReceiveFailureCancelsGroup) {
   f.transport.force_next_receive_results({TransportResult::Disconnected});
   EXPECT_FALSE(f.runtime.read(f.states.data(), 2));
   EXPECT_EQ(f.transport.pending_transmit(), 0U);
+  ASSERT_TRUE(f.runtime.first_fault());
+  EXPECT_EQ(f.runtime.first_fault()->reason, Ak30ServoFaultReason::ReceiveFailure);
+  EXPECT_EQ(f.runtime.first_fault()->runtime_result, RuntimeResult::Disconnected);
 }
+TEST(Ak30ServoRuntime, FirstFaultRetainsWatchdogEvidenceUntilRestart) {
+  Fixture f;
+  f.start();
+  f.sample(100);
+  CommandDispatch commands[2]{fresh(1), fresh(1)};
+  ASSERT_TRUE(f.runtime.write(commands, 2));
+  f.now = 4000100;
+  ASSERT_FALSE(f.runtime.read(f.states.data(), 2));
+  ASSERT_TRUE(f.runtime.first_fault());
+  const auto fault = *f.runtime.first_fault();
+  EXPECT_EQ(fault.reason, Ak30ServoFaultReason::UnsentSoftDeadline);
+  EXPECT_EQ(fault.phase, Ak30ServoFaultPhase::Watchdog);
+  EXPECT_EQ(fault.index, 0U);
+  EXPECT_EQ(fault.drive_id, 0U);
+  EXPECT_EQ(fault.now.nanoseconds(), 4000100);
+  EXPECT_EQ(fault.soft_deadline_ns, 4000100);
+  EXPECT_EQ(fault.hard_deadline_ns, 6000100);
+  EXPECT_DOUBLE_EQ(fault.target_position_rad, 1.0);
+  EXPECT_DOUBLE_EQ(fault.feedback.position_rad, 0.0);
+  f.runtime.stop();
+  ASSERT_TRUE(f.runtime.first_fault());
+  EXPECT_EQ(f.runtime.first_fault()->now, fault.now);
+  ASSERT_TRUE(f.runtime.start());
+  EXPECT_FALSE(f.runtime.first_fault());
+}
+
+TEST(Ak30ServoRuntime, PreparationFailureCapturesMappingAndAdapterEvidence) {
+  Fixture f;
+  f.start();
+  f.sample(100);
+  CommandDispatch commands[2]{fresh(3), fresh(1)};
+  ASSERT_TRUE(f.runtime.write(commands, 2));
+  ASSERT_FALSE(f.runtime.read(f.states.data(), 2));
+  ASSERT_TRUE(f.runtime.first_fault());
+  EXPECT_EQ(f.runtime.first_fault()->reason, Ak30ServoFaultReason::PositionPreparation);
+  EXPECT_EQ(f.runtime.first_fault()->adapter_result, AdapterResult::InvalidCommand);
+  EXPECT_DOUBLE_EQ(f.runtime.first_fault()->target_position_rad, 3.0);
+  EXPECT_DOUBLE_EQ(f.runtime.first_fault()->feedback.position_rad, 0.0);
+  EXPECT_DOUBLE_EQ(f.runtime.first_fault()->max_target_error_rad, 2.0);
+  f.now = 9000000;
+  EXPECT_FALSE(f.runtime.read(f.states.data(), 2));
+  EXPECT_EQ(f.runtime.first_fault()->now.nanoseconds(), 100);
+}
+
+TEST(Ak30ServoRuntime, CallbackFaultRemainsFirstCauseAfterBusReceiveFails) {
+  Fixture f;
+  f.start();
+  f.sample(100);
+  ASSERT_EQ(f.transport.inject_receive(feedback(105, 101, 1)), TransportResult::Ok);
+  f.now = 101;
+  ASSERT_FALSE(f.runtime.read(f.states.data(), 2));
+  ASSERT_TRUE(f.runtime.first_fault());
+  EXPECT_EQ(f.runtime.first_fault()->reason, Ak30ServoFaultReason::FeedbackRejected);
+  EXPECT_EQ(f.runtime.first_fault()->phase, Ak30ServoFaultPhase::ReceiveObserver);
+  EXPECT_EQ(f.runtime.first_fault()->index, 1U);
+  EXPECT_EQ(f.runtime.first_fault()->drive_id, 105U);
+}
+
 }  // namespace

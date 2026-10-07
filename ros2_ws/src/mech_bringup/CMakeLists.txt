@@ -24,10 +24,13 @@ add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
   src/posix_cdc_serial_port.cpp
+  src/command_trace.cpp
+  src/trace_snapshot.cpp
   src/ak30_force_runtime.cpp
   src/ak30_servo_runtime.cpp
   src/ak30_servo_runtime_params.cpp
   src/ak30_servo_system.cpp
+  src/servo_feedback_reader.cpp
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
@@ -50,6 +53,17 @@ ament_target_dependencies(
 
 pluginlib_export_plugin_description_file(
   hardware_interface mech_bringup_plugins.xml)
+
+add_executable(servo_feedback_reader src/servo_feedback_reader_main.cpp)
+target_link_libraries(servo_feedback_reader ${PROJECT_NAME})
+ament_target_dependencies(servo_feedback_reader hardware_interface)
+install(TARGETS servo_feedback_reader RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+add_executable(servo_disable src/servo_disable_main.cpp)
+target_link_libraries(servo_disable ${PROJECT_NAME})
+ament_target_dependencies(servo_disable hardware_interface)
+install(TARGETS servo_disable RUNTIME DESTINATION lib/${PROJECT_NAME})
+
 
 # First real-device entry point: drives a motor through the repository's own
 # UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
@@ -124,6 +138,10 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
+    test/test_servo_feedback_reader.cpp
+    test/test_serial_trace.cpp
+    test/test_command_trace.cpp
+    test/test_trace_snapshot.cpp
     test/test_ak30_servo_runtime.cpp
     test/test_ak30_servo_runtime_params.cpp
     test/test_ak30_servo_system_plugin.cpp
@@ -151,6 +169,17 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_posix_port_lock_test
     test/test_posix_cdc_serial_port.cpp)
   target_link_libraries(${PROJECT_NAME}_posix_port_lock_test ${PROJECT_NAME})
+  # Compile the actual port into this test executable so GNU ld's syscall
+  # seam can force short writes without wrapping writes in production DSOs.
+  ament_add_gtest(${PROJECT_NAME}_usb_cdc_pty_isolation_test
+    test/test_usb_cdc_pty_isolation.cpp
+    src/posix_cdc_serial_port.cpp
+    src/command_trace.cpp
+    src/trace_snapshot.cpp
+    src/pass_through_init.cpp)
+  target_include_directories(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE include)
+  ament_target_dependencies(${PROJECT_NAME}_usb_cdc_pty_isolation_test mech_control_core)
+  target_link_options(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE "-Wl,--wrap=write")
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
     test/test_velocity_controller_manager.cpp
@@ -251,6 +280,34 @@ if(BUILD_TESTING)
         ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
     endif()
   endif()
+
+  ament_add_test(${PROJECT_NAME}_servo_reader_check
+    COMMAND /usr/bin/python3
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/servo_operator.py check
+      --reader $<TARGET_FILE:servo_feedback_reader>
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/config.example.json
+    TIMEOUT 35
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_servo_disable
+    COMMAND /usr/bin/python3
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_disable.py
+      $<TARGET_FILE:servo_disable>
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit trace_storage)
+    set(servo_tool_timeout 35)
+    if(servo_tool_test STREQUAL "motion_ros")
+      # Includes the real 31-second single-motor manual-lifetime acceptance.
+      set(servo_tool_timeout 120)
+    endif()
+    ament_add_test(${PROJECT_NAME}_servo_${servo_tool_test}
+      COMMAND /usr/bin/python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_${servo_tool_test}.py
+      TIMEOUT ${servo_tool_timeout}
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+  endforeach()
 
   ament_lint_cmake()
   ament_xmllint()

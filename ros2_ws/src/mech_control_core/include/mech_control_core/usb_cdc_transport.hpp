@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -113,7 +114,13 @@ class UsbCdcCodec final {
 // tests independent of /dev/ttyACM* and keeping device ownership outside core.
 class UsbCdcTransport final : public Transport {
  public:
-  UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options);
+  using Clock = std::function<MonotonicTime()>;
+
+  // The default stamps complete decoded packets with the host steady clock.
+  // Injected callbacks must not throw and must read shared external time
+  // without advancing it, in the same domain as the consumer. Queued frames
+  // retain their decode-time arrival stamp when popped later.
+  UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options, Clock clock = {});
 
   [[nodiscard]] TransportKind kind() const noexcept override;
   [[nodiscard]] const TransportCapabilities& capabilities() const noexcept override;
@@ -128,6 +135,7 @@ class UsbCdcTransport final : public Transport {
   [[nodiscard]] TransportResult fill_rx() noexcept;
   CdcSerialPort& serial_;
   UsbCdcOptions options_;
+  Clock clock_;
   TransportCapabilities capabilities_;
   std::array<std::uint8_t, 1024U> input_{};
   std::array<std::uint8_t, 4096U> pending_{};
