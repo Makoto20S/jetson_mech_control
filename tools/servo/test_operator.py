@@ -2,14 +2,32 @@ import copy
 import importlib.util
 import json
 import math
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location('servo_operator', Path(__file__).with_name('operator.py'))
+SPEC = importlib.util.spec_from_file_location('servo_operator', Path(__file__).with_name('servo_operator.py'))
 
 class OperatorTests(unittest.TestCase):
+    def test_cold_start_preserves_stdlib_operator(self):
+        # Site startup can preload operator and hide an adjacent name collision.
+        result = subprocess.run(
+            [sys.executable, '-S', '-c',
+             'import collections, operator; '
+             'assert operator.eq(1, 1); assert collections.namedtuple("Point", "x")(1).x == 1'],
+            cwd=Path(__file__).resolve().parent, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_direct_cli_help_without_site_initialization(self):
+        result = subprocess.run(
+            [sys.executable, '-X', 'utf8', '-S', str(Path(__file__).with_name('servo_operator.py')), '--help'],
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('calibrate', result.stdout)
+
     @classmethod
     def setUpClass(cls):
         cls.op = importlib.util.module_from_spec(SPEC)
@@ -129,7 +147,7 @@ class OperatorTests(unittest.TestCase):
             reader=Path(d)/'reader'
             reader.write_text("#!/usr/bin/env python3\nimport json,time\nstart=time.monotonic()\nwhile True:\n t=time.monotonic_ns(); elapsed=time.monotonic()-start\n p=1 if elapsed<1.2 else -1\n unknown=elapsed<.1\n print(json.dumps({'schema_version':1,'monotonic_ns':t,'motor_command_frames':0,'motors':[{'id':i,'position_rad':None if unknown else p,'electrical_speed_erpm':0,'raw_status':0,'availability':'unknown' if unknown else 'fresh','host_rx_ns':t,'sequence':t} for i in (104,105)]}),flush=True)\n time.sleep(.05)\n")
             reader.chmod(0o755)
-            proc=subprocess.Popen([sys.executable,str(Path(__file__).with_name('operator.py')),'calibrate','--config',str(config),'--reader',str(reader)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            proc=subprocess.Popen([sys.executable,str(Path(__file__).with_name('servo_operator.py')),'calibrate','--config',str(config),'--reader',str(reader)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             try:
                 time.sleep(.85); proc.stdin.write('\n'); proc.stdin.flush()
                 time.sleep(1); proc.stdin.write('\n'); proc.stdin.flush()

@@ -1,8 +1,4 @@
 """Bounded, shutdown-only diagnostic storage; never opens a device."""
-import sys
-if __name__ == '__main__':
-    # Adjacent operator.py is an application module, not the stdlib operator.
-    sys.path.pop(0)
 import argparse
 import gzip
 import json

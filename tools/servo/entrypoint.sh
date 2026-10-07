@@ -44,7 +44,7 @@ set +u
 source /opt/ros/humble/setup.bash
 source "${release}/output/install/setup.bash"
 set -u
-operator="${release}/src/tools/servo/operator.py"
+operator="${release}/src/tools/servo/servo_operator.py"
 reader="${release}/output/install/mech_bringup/lib/mech_bringup/servo_feedback_reader"
 disabler="${release}/output/install/mech_bringup/lib/mech_bringup/servo_disable"
 if [[ "${1:-}" == check && "$mode" != servo-control && "$mode" != servo-move ]]; then

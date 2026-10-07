@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 """Position operator: standard ROS services/actions, never device I/O."""
-import sys
-if __name__ == '__main__':
-    sys.path.pop(0)
 import argparse
 from collections import deque
 import importlib.util
@@ -18,7 +15,7 @@ import termios
 import time
 import uuid
 
-_spec = importlib.util.spec_from_file_location('servo_config', Path(__file__).with_name('operator.py'))
+_spec = importlib.util.spec_from_file_location('servo_config', Path(__file__).with_name('servo_operator.py'))
 config_tools = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(config_tools)
 _storage_spec = importlib.util.spec_from_file_location('servo_trace_storage', Path(__file__).with_name('trace_storage.py'))

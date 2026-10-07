@@ -14,7 +14,7 @@ import unittest
 
 BINARY = sys.argv.pop(1) if len(sys.argv)>1 else 'servo_disable'
 ROOT=Path(__file__).resolve().parent
-spec=importlib.util.spec_from_file_location('servo_config',ROOT/'operator.py')
+spec=importlib.util.spec_from_file_location('servo_config',ROOT/'servo_operator.py')
 config_tools=importlib.util.module_from_spec(spec);spec.loader.exec_module(config_tools)
 
 def crc(data,poly,initial):

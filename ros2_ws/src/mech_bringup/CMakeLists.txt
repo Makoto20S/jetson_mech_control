@@ -283,7 +283,7 @@ if(BUILD_TESTING)
 
   ament_add_test(${PROJECT_NAME}_servo_reader_check
     COMMAND /usr/bin/python3
-      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/operator.py check
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/servo_operator.py check
       --reader $<TARGET_FILE:servo_feedback_reader>
       --config ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/config.example.json
     TIMEOUT 35
