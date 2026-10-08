@@ -54,6 +54,16 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
    enforce the unchanged 3 ms soft and 6 ms hard deadlines in logical time.
    These functional tests do not establish a real-time scheduling guarantee.
 
+   The FakeTransport force-control JTC fixture likewise advances its runtime
+   clock and 50 Hz feedback arrival stamps in logical time. Its JTC update
+   timestamp also advances by the declared 2 ms period, so host pauses cannot
+   change the per-cycle trajectory step under test. ROS node clocks, callbacks,
+   discovery and host pacing retain real time; `use_sim_time` is not enabled.
+   Both position and position+velocity deployments must survive a 20 ms host
+   pause during hold and trajectory interpolation. A separate regression
+   advances hardware time past the unchanged 4/6 ms command lease with fresh
+   feedback and requires command failure with no further transmission.
+
    E5 force-control process tests use the same 2 ms logical hardware cadence,
    while the controller's 100/106 ms target policy and manager update periods
    keep real time. They retain the first transmitted frame after each trace
