@@ -2,7 +2,9 @@
 
 面向 NVIDIA Jetson 与 ROS 2 的机电设备控制框架。项目以供应商无关的 C++ 核心为基础，通过统一的传输、协议和设备会话边界接入 CAN/CAN FD 电机与传感器，并以 `ros2_control` 提供标准化的控制接口。
 
-本项目当前处于研究开发阶段。硬件无关的 Foundation 与仿真链路已经建立，CubeMars AK3.0 等设备适配器正在按证据门控流程开发；真实电机与传感器的部署仍需完成逐台设备取证、总线验证和台架安全验收。
+本项目当前处于研究开发与台架验证阶段。Foundation RC2 已完成，AK3.0 力控及位置伺服链路已接入真实框架。当前伺服工具支持两台电机共用一条 CAN 总线，或分别连接同一 USB-to-CAN 通信板的两条独立总线；提供标定、反馈监视、绝对/相对移动、失能与诊断记录。
+
+截至 2026-10-08，双路适配及 CI 修复已随 [PR #26](https://github.com/Makoto20S/jetson_mech_control/pull/26) 合入主分支。两路原位保持、命令链审计和失能确认已完成，项目负责人另行确认实际脚本实验通过。该结论限于当前台架和操作范围，不等于通用设备即插即用、长期稳定性或原通信板异常根因已确认。
 
 ## 设计目标
 
@@ -47,7 +49,11 @@ flowchart TB
 - 单物理通道单写者的 `BusRuntime`；
 - 确定性虚拟时钟、Fake transport、模拟设备与故障注入；
 - SocketCAN/vcan 路径和可注入串口的 USB-CDC 帧传输实现；
-- 复合 `ros2_control::SystemInterface` 与有界 C++ controller 插件；
+- 复合 `ros2_control::SystemInterface` 与有界位置、速度、力矩 controller 插件；
+- AK3.0 力控 profile 和独立的伺服位置 profile，复用厂商 codec/session 与传输边界；
+- 一个 controller_manager/JTC 管理两个伺服硬件实例，按总线聚合反馈、逐路失能；
+- `servo-move/status/range/control` 操作入口、显式标定映射和限位、105 单机选择；
+- 按总线记录有界命令链与原始串口数据，支持独立审计及离线快照归档。
 
 以下内容尚不属于已完成能力：
 
@@ -65,9 +71,35 @@ flowchart TB
 | `mech_hardware_ros2_control` | 连接通用核心的复合 `ros2_control` 硬件插件 |
 | `mech_controllers` | 带边界、变化率和超时约束的 C++ controller 插件 |
 | `mech_bringup` | 仿真与部署组合、URDF/xacro、launch 和 controller 配置 |
-| `mech_protocol_cubemars` | CubeMars AK3.0 力控 profile：wire 编解码、证据门映射、会话与看门狗 |
+| `mech_protocol_cubemars` | CubeMars AK3.0 力控与位置伺服 profile：wire 编解码、映射、会话与看门狗 |
 
-`mech_protocol_cubemars` 是本分支新增的第六个包：CubeMars AK3.0 力控 profile 的实现，已在单电机取证台架上完成真机闭环验证（力矩、速度、位置三个子模式）。真实设备激活仍受硬件安全闸门（G0–G3）与 ADR-006 约束；HI12 等其他供应商协议包仍推迟。
+协议包本身不打开设备；真实串口、硬件插件及部署组合由 `mech_bringup` 负责。力控位置/速度/力矩子模式与伺服位置模式是不同 profile，不能混用其映射和控制入口。HI12 接入、统一安装初始化及完整 MVP 验收仍未完成，见[当前规划](docs/planning/README.md)。
+
+## 已部署台架的伺服操作
+
+以下入口适用于已经安装 `servo-current`、配置 `config/servo_pair.json` 并完成标定的 Jetson 部署目录，普通 clone 不会自动生成这些入口。
+
+```bash
+cd ~/jetson_mech_control
+./servo-move check       # 离线检查，不打开串口
+./servo-status          # 独占只读监视，Ctrl+C 退出
+./servo-move            # 等待就绪后，在窗口中输入下面的交互命令
+```
+
+进入控制窗口前先退出监视窗口；同一时刻只运行一个入口。
+
+| 交互命令 | 作用 |
+|---|---|
+| `enable` | 读取新鲜反馈，使能并保持当前位置 |
+| `move <104角度> <105角度> <秒数>` | 移动到设备绝对角度，单位为度 |
+| `step <104增量> <105增量> <秒数>` | 从当前实际位置做相对移动 |
+| `stop` | 取消轨迹并请求保持当前位置，仍可输出力矩 |
+| `disable` | 逐台确认失能，保留窗口；可再次 `enable` |
+| `quit` | 失能并退出；已经失能时不重复发送 |
+
+双路接线不改变参数顺序：始终为 **104、105、秒数**。`./servo-move --motor-id 105` 只选 105，移动命令相应只接受一个角度和时间。实际目标须同时满足已保存限位与机构允许范围；失能确认不等于机械制动。
+
+标定、双路配置迁移、故障退出、记录路径及恢复步骤见[伺服工具说明](tools/servo/README.md)。框架不会在首次部署时预填现场标定；不要从示例配置推断实际设备参数。
 
 ## 环境要求
 
@@ -89,7 +121,7 @@ MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build \
   bash tools/ci/build_workspace.sh
 ```
 
-该脚本会解析 ROS 依赖、构建全部包并运行测试。构建过程不会启用 CAN、打开真实设备或修改 Jetson 配置。更多主机配置与输出目录选项见 [ROS 2 workspace 说明](ros2_ws/README.md)。
+该脚本会解析 ROS 依赖、构建全部包并运行测试。测试使用模拟设备和虚拟串口，不打开真实电机端口；依赖解析会按 `rosdep` 安装软件包，已配好依赖的主机可设置 `MECH_SKIP_ROSDEP=1`。CI 将镜像构建与测试分开，测试容器提供实时调度权限并保留生产保护时限；最新 PR #26 CI 为六包、590 项测试全部通过。这不是实时性能认证。更多主机配置与输出目录选项见 [ROS 2 workspace 说明](ros2_ws/README.md)。
 
 可单独运行文档和仓库一致性检查：
 
@@ -114,6 +146,9 @@ git diff --check
 
 ## 文档导航
 
+- [伺服控制工具](tools/servo/README.md)：双机/双路配置、操作、诊断和快照恢复
+- [ROS workspace](ros2_ws/README.md)：六包构建、测试与 CI 环境
+- [位置伺服设计](docs/development/ak30_servo_position_design.md)：profile、映射及验收边界
 - [贡献指南](CONTRIBUTING.md)：分支、Issue、Pull Request、验证和信息边界
 - [架构决策记录](docs/adr/README.md)：已接受及待验证的架构约束
 - [AdapterContract v1](docs/development/adapter_contract_v1.md)：协议适配器与通用核心的冻结接口

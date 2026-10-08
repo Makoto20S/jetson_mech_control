@@ -48,7 +48,7 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 - **频率：** 当前两电机候选正常目标为 500 Hz，HI12 初始 100 Hz；100～200 Hz 用于模拟/首次 bring-up；代码支持 1 kHz 控制循环实验。控制循环、命令、反馈和 IMU 是独立频率，重复快照不得伪装成新样本。
 - **标准 effort：** 标准 AKE60-8 的 `Kt = 0.7382 N*m/A` 与输出端公式只是定制实机候选。只有实机固件、方向、减速比、字段和配置证据闭合后才暴露标准 `effort`；否则使用明确的 current/raw 接口。
 - **设备扩展：** 新 CAN 设备优先只增加 codec、device session、capability、配置和测试，不为品牌修改 core/controller 公共语义。
-- **实施顺序：** 缺少实机配置不阻塞 Foundation。**平台迁移已于 2026-08-23 完成**（HZHY 镜像 + `l4t_initrd_flash`，JetPack 6.2 / Ubuntu 22.04.5；ROS 2 Humble 已装），FND-004A 已无平台阻塞，是当前下一个可执行闸门。FND-004A 通过后才开始 FND-005，Foundation RC/AdapterContract v1 冻结后再接入真实 CubeMars/HI12 adapter。执行记录见 [升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)。
+- **实施顺序：** 缺少实机配置不阻塞 Foundation。**平台迁移已于 2026-08-23 完成**（HZHY 镜像 + `l4t_initrd_flash`，JetPack 6.2 / Ubuntu 22.04.5；ROS 2 Humble 已装），FND-004A 已于 2026-08-24 完成，Foundation RC2 已于 2026-08-31 收口；以下先后关系保留为历史实施约束。FND-004A 通过后才开始 FND-005，Foundation RC/AdapterContract v1 冻结后再接入真实 CubeMars/HI12 adapter。执行记录见 [升级教程](../development/jetson_orin_nx_jetpack6_upgrade_guide.md)。
 
 架构上下文见 [02](02_architecture_and_interfaces.md)，量化验收与总线预算见 [03](03_mvp_delivery_plan.md)，当前任务顺序见 [07](07_framework_bootstrap_plan.md)。
 
@@ -98,7 +98,7 @@ Accepted 只接受对应文件的架构或语义，不等于 ARM64、vcan、真�
 ## 6. 下一证据动作
 
 1. ~~平台迁移~~ **已完成（2026-08-23）**；~~FND-004A~~ **已完成（2026-08-24）**；~~Foundation RC~~ **已完成（2026-08-31，RC2 tag `9317d76`）**；~~AK3.0 力控第一切片~~ **已合并（PR #9 `f382324`，2026-09-05）**。
-2. **当前下一步：阶段 3 软件切片**——ros2_control hardware plugin 接线 + deployment 配置 + `command_stage()` 生产消费方（先离线/simulation）；B14 位置语义专项（连续低速旋转序列）与 §8 板卡/厂商问题并行推进。任何真实电机命令需逐次授权并遵守 ADR-006 Decision 7 台架边界。
+2. **当前实施状态（2026-10-08）**：硬件插件接线、AK3.0 力控控制器及 SERVO-001 双路伺服已实现，PR #26 已合并。下一项共享任务从[规划索引](README.md)和 Issues/Milestones 选择；统一安装初始化仍延期，HI12 尚未接入。旧位置语义、板卡能力及机构包络等未确认项保留，不把用户脚本实验认可扩大为供应商参数或全场景验收。
 3. Foundation 后的 G0 取证：motor1 已有部分台架实测（§7），仍需完整只读保存两台电机的连接/版本页、基础设置、`.AppParams` 和 `.McParams`；不得执行参数识别、写入、恢复默认或升级。
 4. 两台 HI12 必须逐台记录身份、交付协议、节点、位速率和输出 profile，再评估合并总线。
 5. 配置证据仍不能回答编码器来源、watchdog、定制 Kt 或终端时，再向供应商提出精确问题。
