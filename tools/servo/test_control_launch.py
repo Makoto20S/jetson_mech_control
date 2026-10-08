@@ -3,11 +3,24 @@ import os
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parent
 
 
 class ControlLaunchTests(unittest.TestCase):
+    def test_sanitizer_runtime_is_scoped_to_manager_environment(self):
+        spec=importlib.util.spec_from_file_location('servo_launch',ROOT/'servo_pair.launch.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(module.manager_environment(), {})
+        with patch.dict(os.environ, {'MECH_ASAN_RUNTIME': '/test/libasan.so',
+                                     'ASAN_OPTIONS': 'detect_leaks=0:halt_on_error=1'}, clear=True):
+            environment = module.manager_environment()
+            self.assertEqual(environment['LD_PRELOAD'], '/test/libasan.so')
+            self.assertEqual(environment['ASAN_OPTIONS'], 'detect_leaks=0:halt_on_error=1:new_delete_type_mismatch=0')
+            self.assertNotIn('LD_PRELOAD', os.environ)
+
     def test_controller_joint_list_follows_selected_urdf(self):
         spec=importlib.util.spec_from_file_location('servo_launch',ROOT/'servo_pair.launch.py')
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

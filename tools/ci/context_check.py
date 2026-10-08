@@ -217,6 +217,18 @@ def main() -> int:
                 fail("dependencies.json: base_image_tools contains an invalid entry")
             if not re.search(rf"(?m)^\s+{re.escape(tool)}\s+\\?$", dockerfile):
                 fail(f"Dockerfile is missing manifest build tool: {tool}")
+        # Every package manifest must be copied before source, or a new package
+        # can silently miss dependencies when the cached rosdep layer is reused.
+        copied_manifests = set(re.findall(
+            r"(?m)^COPY (ros2_ws/src/[^ /]+/package\.xml) ", dockerfile))
+        actual_manifests = {p.relative_to(root).as_posix()
+                            for p in (root / "ros2_ws/src").glob("*/package.xml")}
+        if copied_manifests != actual_manifests:
+            fail("Dockerfile dependency layer does not match workspace package manifests")
+        source_copy = dockerfile.find("COPY . /workspace")
+        dependency_install = dockerfile.find("rosdep install")
+        if min(source_copy, dependency_install) < 0 or source_copy < dependency_install:
+            fail("Dockerfile must resolve dependencies before copying source")
         if read_text(root, "manifests/dependencies.repos").strip().splitlines()[-1] != "repositories: {}":
             fail("dependencies.repos: expected an explicit empty repository set")
 
