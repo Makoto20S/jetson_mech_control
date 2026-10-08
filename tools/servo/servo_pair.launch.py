@@ -17,6 +17,17 @@ def read_description(path):
     return Path(path).read_text(encoding='utf-8')
 
 
+def manager_environment():
+    runtime = os.environ.get('MECH_ASAN_RUNTIME')
+    if not runtime:
+        return {}
+    # Match the existing E5/JTC test exception for Humble's upstream rclcpp
+    # allocator mismatch. Other ASan checks and UBSan remain enabled. Apply
+    # only to ros2_control_node, never to Python/spawners or unrelated commands.
+    return {'LD_PRELOAD': runtime, 'ASAN_OPTIONS': (
+        os.environ.get('ASAN_OPTIONS', '') + ':new_delete_type_mismatch=0').lstrip(':')}
+
+
 def controller_config(description):
     names=sorted(joint.attrib['name'] for joint in ET.fromstring(description).findall('./ros2_control/joint'))
     if names not in (['motor104_joint','motor105_joint'],['motor105_joint']):
@@ -71,6 +82,7 @@ def setup(context):
         RegisterEventHandler(OnProcessExit(target_action=state, on_exit=finished('state'))),
         RegisterEventHandler(OnProcessExit(target_action=trajectory, on_exit=finished('trajectory'))),
         Node(package='controller_manager', executable='ros2_control_node', namespace=namespace,
+             additional_env=manager_environment(),
              parameters=[ParameterFile(params_path),
                          {'robot_description': ParameterValue(description, value_type=str)}],
              output='screen', ros_arguments=log_args[1:]),
