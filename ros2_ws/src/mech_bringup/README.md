@@ -42,6 +42,10 @@ all three deployment xacro examples load it.
   plugin. Hardware parameters must include `profile=ak30_servo_extended`,
   `device_path`, `logical_bus`, `control_period_ns`,
   `command_ttl_ns`, `command_hard_ttl_ns`, and `feedback_ttl_ns`.
+  Optional `trace_name` (1–32 lowercase letters, digits or hyphens) partitions
+  bounded snapshot filenames when multiple servo components share one manager.
+  All other unknown parameters remain rejected. The operator admits the total
+  memory budget before starting any component and divides it across the buses.
   Each joint must explicitly supply `drive_id`, separate verified
   `target_scale`/`target_offset` and `feedback_scale`/`feedback_offset`,
   `speed_erpm`, `acceleration_raw`, and
