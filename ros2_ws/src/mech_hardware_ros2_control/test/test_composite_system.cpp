@@ -1171,7 +1171,7 @@ TEST(CompositeSystem, RejectsInvalidInterfacesAndStrictSwitchConflicts) {
   ASSERT_EQ(system.on_configure(state()),
             hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(system.on_activate(state()), hardware_interface::CallbackReturn::SUCCESS);
-  EXPECT_EQ(system.prepare_command_mode_switch({"unknown/position"}, {}),
+  EXPECT_EQ(system.prepare_command_mode_switch({"joint_1/unknown"}, {}),
             hardware_interface::return_type::ERROR);
   EXPECT_EQ(system.prepare_command_mode_switch({"joint_1/position"},
                                                 {"joint_1/position"}),
@@ -1180,6 +1180,38 @@ TEST(CompositeSystem, RejectsInvalidInterfacesAndStrictSwitchConflicts) {
             hardware_interface::return_type::OK);
   EXPECT_EQ(system.perform_command_mode_switch({"joint_1/position"}, {}),
             hardware_interface::return_type::ERROR);
+}
+
+TEST(CompositeSystem, SharedManagerSwitchOnlyChangesLocallyOwnedJoints) {
+  ActiveSystem first(1U);
+  auto second_info = info(1U);
+  second_info.joints[0].name = "other/joint";
+  ActiveSystem second(second_info);
+  const std::vector<std::string> both{"joint_1/position", "other/joint/position"};
+  for (auto* system : {&first.system, &second.system}) {
+    EXPECT_EQ(system->prepare_command_mode_switch(both, {}), hardware_interface::return_type::OK);
+    EXPECT_EQ(system->perform_command_mode_switch(both, {}), hardware_interface::return_type::OK);
+    EXPECT_TRUE(system->authorized(0));
+  }
+  // Releasing only the other system's joint must leave this claim intact.
+  EXPECT_EQ(first.system.perform_command_mode_switch({}, {"other/joint/position"}),
+            hardware_interface::return_type::OK);
+  EXPECT_TRUE(first.system.authorized(0));
+  EXPECT_EQ(first.system.prepare_command_mode_switch({"joint_1/unknown"}, {}),
+            hardware_interface::return_type::ERROR);
+  for (auto* system : {&first.system, &second.system}) {
+    EXPECT_EQ(system->perform_command_mode_switch({}, both), hardware_interface::return_type::OK);
+    EXPECT_FALSE(system->authorized(0));
+  }
+}
+
+TEST(CompositeSystem, UnrelatedSwitchDoesNotRequireThisComponentToBeActive) {
+  CompositeSystem system;
+  ASSERT_EQ(system.on_init(info(1U)), hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_EQ(system.prepare_command_mode_switch({"other/position"}, {}), hardware_interface::return_type::OK);
+  EXPECT_EQ(system.perform_command_mode_switch({"other/position"}, {}), hardware_interface::return_type::OK);
+  EXPECT_FALSE(system.authorized(0));
+  EXPECT_EQ(system.prepare_command_mode_switch({"malformed"}, {}), hardware_interface::return_type::ERROR);
 }
 
 TEST(CompositeSystem, RepeatsLifecycleAndLatchesInvalidCommandFault) {
