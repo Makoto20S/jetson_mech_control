@@ -1,6 +1,7 @@
 """Bounded, shutdown-only diagnostic storage; never opens a device."""
 import argparse
 import gzip
+import hashlib
 import json
 import math
 import os
@@ -125,8 +126,12 @@ def capture_bytes(chain_capacity, raw_capacity):
     return size
 
 
-def make_snapshots(run, chain_capacity=CHAIN_CAPACITY, raw_capacity=RAW_CAPACITY, session_root=None):
-    size = capture_bytes(chain_capacity, raw_capacity)
+def make_snapshots(run, chain_capacity=CHAIN_CAPACITY, raw_capacity=RAW_CAPACITY, session_root=None, trace_names=None):
+    trace_names = list(trace_names or [''])
+    snapshot_layout(trace_names)  # Validate names before any allocation.
+    size = capture_bytes(chain_capacity, raw_capacity) * len(trace_names)
+    if size > SNAPSHOT_LIMIT:
+        raise ValueError('所有总线快照总额必须在1536 MiB以内')
     shm = Path('/dev/shm')
     mounts = Path('/proc/mounts').read_text().splitlines()
     if not any(len(row.split()) > 2 and row.split()[1:3] == ['/dev/shm', 'tmpfs'] for row in mounts):
@@ -149,7 +154,7 @@ def make_snapshots(run, chain_capacity=CHAIN_CAPACITY, raw_capacity=RAW_CAPACITY
                 pass
     path = Path(tempfile.mkdtemp(prefix='servo-trace-', dir=shm))
     (path/'owner.json').write_text(json.dumps(dict(uid=os.getuid(), run=str(Path(run).resolve()),
-        run_root=str(Path(session_root or run).parent.resolve())))+'\n')
+        run_root=str(Path(session_root or run).parent.resolve()), trace_names=trace_names))+'\n')
     return path
 
 
@@ -258,6 +263,79 @@ def export_snapshot(source, destination, limit, kind):
     return meta
 
 
+def snapshot_layout(names):
+    if (not isinstance(names, list) or not 1 <= len(names) <= 2 or
+            len(set(names)) != len(names) or
+            any(not isinstance(n, str) or len(n) > 32 or
+                any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-' for c in n) for n in names) or
+            (len(names) > 1 and '' in names)):
+        raise ValueError('invalid trace names')
+    result = []
+    for name in names:
+        suffix = '-'+name if name else ''
+        result.extend([(f'chain{suffix}.snapshot', f'command-chain{suffix}.jsonl.gz', 1, 96*MIB//len(names)),
+                       (f'serial{suffix}.snapshot', f'serial-trace{suffix}.jsonl.gz', 2, 16*MIB//len(names))])
+    return result
+
+
+def archive_snapshot(snapshot, destination):
+    """Offline lossless raw recovery outside live quotas; never certifies capture validity."""
+    snapshot, destination = Path(snapshot).resolve(), Path(destination).resolve()
+    owner = json.loads((snapshot/'owner.json').read_text())
+    if owner['uid'] != os.getuid():
+        raise ValueError('snapshot ownership mismatch')
+    require_writer_exited(owner)
+    run_root = Path(owner.get('run_root', Path(owner['run']).parent)).resolve()
+    if (destination == snapshot or snapshot in destination.parents or
+            destination == run_root or run_root in destination.parents or
+            destination == Path('/dev/shm') or Path('/dev/shm') in destination.parents):
+        raise ValueError('archive must be outside snapshots, shared memory and live run root')
+    names = ['owner.json'] + [row[0] for row in snapshot_layout(owner.get('trace_names', ['']))]
+    if {p.name for p in snapshot.iterdir()} != set(names) or any(
+            not (snapshot/name).is_file() or (snapshot/name).is_symlink() for name in names):
+        raise ValueError('unexpected snapshot files')
+    metadata = {name: snapshot_metadata(snapshot/name, kind)
+                for name, _, kind, _ in snapshot_layout(owner.get('trace_names', ['']))}
+    size = sum((snapshot/name).stat().st_size for name in names)
+    if size > SNAPSHOT_LIMIT + MIB:
+        raise ValueError('archive exceeds bounded raw snapshot size')
+    if shutil.disk_usage(destination.parent).free < size + FREE_RESERVE:
+        raise ValueError('insufficient archive space including reserve')
+    destination.mkdir()  # Exclusive; failed attempts and old evidence stay intact.
+    def digest(path):
+        value = hashlib.sha256()
+        with path.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(MIB), b''):
+                value.update(chunk)
+        return value.hexdigest()
+    hashes = {}
+    for name in names:
+        source, target = snapshot/name, destination/name
+        before = digest(source)
+        with source.open('rb') as inp, target.open('xb') as out:
+            shutil.copyfileobj(inp, out, MIB)
+            out.flush(); os.fsync(out.fileno())
+        if digest(target) != before or digest(source) != before:
+            raise ValueError('archive verification failed; source retained')
+        hashes[name] = before
+    require_writer_exited(owner)
+    report = dict(recovery_status='raw_archived', diagnostic_status='not_audited',
+                  source=str(snapshot), run=owner['run'], bytes=size,
+                  sha256=hashes, metadata=metadata)
+    with (destination/'archive-manifest.json').open('x') as stream:
+        json.dump(report, stream, indent=2); stream.write('\n')
+        stream.flush(); os.fsync(stream.fileno())
+    # Persist directory entries before releasing RAM evidence (Linux recovery host).
+    for path in (destination, destination.parent):
+        directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    shutil.rmtree(snapshot)
+    return report
+
+
 def finalize(snapshot, run, session_root, diagnostics=None, confirmed_exit=False):
     """Caller guarantees serial owner exit and a completed/attempted disable helper."""
     snapshot, run, session_root = Path(snapshot), Path(run), Path(session_root)
@@ -270,9 +348,7 @@ def finalize(snapshot, run, session_root, diagnostics=None, confirmed_exit=False
                   quotas=dict(session_bytes=SESSION_LIMIT,root_bytes=ROOT_LIMIT,free_reserve=FREE_RESERVE),
                   diagnostics=diagnostics or {})
     errors = []; export_failed = False
-    for filename, output_name, kind, cap in (
-            ('chain.snapshot','command-chain.jsonl.gz',1,96*MIB),
-            ('serial.snapshot','serial-trace.jsonl.gz',2,16*MIB)):
+    for filename, output_name, kind, cap in snapshot_layout(owner.get('trace_names', [''])):
         try:
             output_path = run/output_name
             if output_path.exists():
@@ -312,9 +388,18 @@ def finalize(snapshot, run, session_root, diagnostics=None, confirmed_exit=False
 def main():
     parser = argparse.ArgumentParser(description='离线恢复已退出框架的快照；不访问电机。保留失败快照及既有日志。')
     parser.add_argument('--snapshot-dir', required=True, type=Path)
-    parser.add_argument('--run-dir', required=True, type=Path)
-    parser.add_argument('--session-root', required=True, type=Path)
+    parser.add_argument('--run-dir', type=Path)
+    parser.add_argument('--session-root', type=Path)
+    parser.add_argument('--archive-dir', type=Path, help='离线按原始格式归档并核验；不受在线压缩额度限制，不声明采集完整')
     args = parser.parse_args()
+    if args.archive_dir:
+        if args.run_dir or args.session_root:
+            parser.error('--archive-dir cannot be combined with live run paths')
+        report = archive_snapshot(args.snapshot_dir, args.archive_dir)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    if not args.run_dir or not args.session_root:
+        parser.error('--run-dir and --session-root are required for compressed recovery')
     report = finalize(args.snapshot_dir,args.run_dir,args.session_root)
     print(json.dumps(report,ensure_ascii=False,indent=2))
     return 0 if report['diagnostic_status'] == 'complete' else 1

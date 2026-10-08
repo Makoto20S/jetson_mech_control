@@ -41,6 +41,15 @@ jobs:
         run: >-
           docker build
           --shm-size=2g
+          --build-arg MECH_BUILD_ONLY=1
           --file docker/ros_humble_jammy/Dockerfile
           --tag jetson-mech-control-foundation:${{ github.sha }}
           .
+      - name: Run tests with controller scheduling permissions
+        # Keep production 6 ms hard deadlines. No device or host mounts.
+        run: >-
+          docker run --rm --shm-size=2g
+          --cap-add=SYS_NICE --ulimit rtprio=99 --ulimit memlock=-1
+          -e MECH_SKIP_ROSDEP=1
+          jetson-mech-control-foundation:${{ github.sha }}
+          bash /workspace/tools/ci/build_workspace.sh

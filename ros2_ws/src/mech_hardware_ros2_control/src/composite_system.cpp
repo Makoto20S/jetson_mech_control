@@ -460,17 +460,36 @@ bool CompositeSystem::validate_switch(
   return true;
 }
 
+std::vector<std::string> CompositeSystem::local_switch_interfaces(
+    const std::vector<std::string>& interfaces) const {
+  std::vector<std::string> local;
+  for (const auto& name : interfaces) {
+    // Humble passes every component the complete switch. Only the owner may
+    // validate/mutate a joint claim. Keep malformed and local unknown suffixes
+    // so strict validation still rejects them; the manager validates global keys.
+    if (name.rfind('/') == std::string::npos || resolve_joint_index(name))
+      local.push_back(name);
+  }
+  return local;
+}
+
 hardware_interface::return_type CompositeSystem::prepare_command_mode_switch(
-    const std::vector<std::string>& start_interfaces,
-    const std::vector<std::string>& stop_interfaces) {
+    const std::vector<std::string>& start,
+    const std::vector<std::string>& stop) {
+  const auto start_interfaces = local_switch_interfaces(start);
+  const auto stop_interfaces = local_switch_interfaces(stop);
   return validate_switch(start_interfaces, stop_interfaces)
              ? hardware_interface::return_type::OK
              : hardware_interface::return_type::ERROR;
 }
 
 hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
-    const std::vector<std::string>& start_interfaces,
-    const std::vector<std::string>& stop_interfaces) {
+    const std::vector<std::string>& start,
+    const std::vector<std::string>& stop) {
+  const auto start_interfaces = local_switch_interfaces(start);
+  const auto stop_interfaces = local_switch_interfaces(stop);
+  if (start_interfaces.empty() && stop_interfaces.empty())
+    return hardware_interface::return_type::OK;
   if (!active_ || !validate_switch(start_interfaces, stop_interfaces)) {
     return hardware_interface::return_type::ERROR;
   }

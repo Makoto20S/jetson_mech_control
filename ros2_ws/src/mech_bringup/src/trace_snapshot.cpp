@@ -127,7 +127,16 @@ TraceSnapshotMapping::TraceSnapshotMapping(const std::string& path,
   if (slash == std::string::npos) throw std::invalid_argument("absolute snapshot path required");
   DirectoryFd dir(path.substr(0, slash));
   const auto name = path.substr(slash + 1);
-  if ((kind == 1 && name != "chain.snapshot") || (kind == 2 && name != "serial.snapshot"))
+  const std::string prefix = kind == 1 ? "chain" : "serial";
+  bool supported = name == prefix + ".snapshot";
+  if (!supported && name.size() > prefix.size() + 10 &&
+      name.compare(0, prefix.size() + 1, prefix + "-") == 0 &&
+      name.compare(name.size() - 9, 9, ".snapshot") == 0) {
+    const auto suffix = name.substr(prefix.size() + 1, name.size() - prefix.size() - 10);
+    supported = suffix.size() <= 32 && suffix.find_first_not_of(
+        "abcdefghijklmnopqrstuvwxyz0123456789-") == std::string::npos;
+  }
+  if (!supported)
     throw std::invalid_argument("unsupported snapshot filename");
   const int fd = ::openat(dir.get(), name.c_str(),
       O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);

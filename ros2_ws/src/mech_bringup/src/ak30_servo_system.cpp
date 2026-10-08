@@ -134,8 +134,17 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_init(
     if (snapshot_dir) {
       if (!*snapshot_dir) throw std::invalid_argument("empty snapshot directory");
       snapshot_mode_ = true;
-      command_trace_path_ = std::string(snapshot_dir) + "/chain.snapshot";
-      serial_trace_path_ = std::string(snapshot_dir) + "/serial.snapshot";
+      std::string suffix;
+      const auto trace_name = info.hardware_parameters.find("trace_name");
+      if (trace_name != info.hardware_parameters.end()) {
+        const auto& name = trace_name->second;
+        if (name.empty() || name.size() > 32 ||
+            name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
+          throw std::invalid_argument("invalid trace_name");
+        suffix = "-" + name;
+      }
+      command_trace_path_ = std::string(snapshot_dir) + "/chain" + suffix + ".snapshot";
+      serial_trace_path_ = std::string(snapshot_dir) + "/serial" + suffix + ".snapshot";
       chain_capacity = kDefaultSnapshotChainCapacity;
       raw_capacity = kDefaultSnapshotRawCapacity;
     } else {

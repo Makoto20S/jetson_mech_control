@@ -1,6 +1,7 @@
 #include "mech_bringup/servo_feedback_reader.hpp"
 #include "mech_bringup/ak30_servo_system.hpp"
-#include "mech_bringup/ak30_servo_runtime_params.hpp"
+#include "mech_bringup/servo_resources.hpp"
+#include <memory>
 #include "hardware_interface/component_parser.hpp"
 #include <chrono>
 #include <cmath>
@@ -37,17 +38,22 @@ int main(int argc, char** argv) {
     if (!file) throw std::runtime_error("cannot read URDF file");
     const std::string xml((std::istreambuf_iterator<char>(file)), {});
     const auto resources = hardware_interface::parse_control_resources_from_urdf(xml);
-    if (resources.size() != 1 || resources[0].hardware_class_type != "mech_bringup/Ak30ServoSystem") throw std::runtime_error("URDF must declare exactly one Ak30ServoSystem");
-    const auto parsed = mech::mech_bringup::Ak30ServoRuntimeParams::parse(resources[0]);
-    if (!parsed) throw std::runtime_error("invalid servo hardware configuration");
-    // Check returns before constructing the plugin or serial port.
+    const auto configs = mech::mech_bringup::parse_servo_resources(resources);
+    // Check returns before constructing any plugin or serial port.
     if (check) { std::cout << "{\"schema_version\":1,\"configuration_valid\":true,\"motor_command_frames\":0}\n"; return 0; }
     std::vector<std::uint16_t> ids;
-    for (const auto& joint : parsed->config.joints) ids.push_back(joint.drive_id);
-    mech::mech_bringup::Ak30ServoSystem plugin;
+    std::vector<std::unique_ptr<mech::mech_bringup::Ak30ServoSystem>> plugins;
     const rclcpp_lifecycle::State state;
     using hardware_interface::CallbackReturn;
-    if (plugin.on_init(resources[0]) != CallbackReturn::SUCCESS || plugin.on_configure(state) != CallbackReturn::SUCCESS || plugin.on_activate(state) != CallbackReturn::SUCCESS) throw std::runtime_error("servo reader activation failed");
+    for (std::size_t bus = 0; bus < configs.size(); ++bus) {
+      for (const auto& joint : configs[bus].config.joints) ids.push_back(joint.drive_id);
+      auto plugin = std::make_unique<mech::mech_bringup::Ak30ServoSystem>();
+      if (plugin->on_init(resources[bus]) != CallbackReturn::SUCCESS ||
+          plugin->on_configure(state) != CallbackReturn::SUCCESS ||
+          plugin->on_activate(state) != CallbackReturn::SUCCESS)
+        throw std::runtime_error("servo reader activation failed");
+      plugins.push_back(std::move(plugin));
+    }
     std::signal(SIGINT, interrupt);
     std::signal(SIGTERM, interrupt);
     const auto start = now_ns();
@@ -56,20 +62,25 @@ int main(int argc, char** argv) {
     int result = 0;
     while (!interrupted) {
       const auto now = now_ns();
-      const auto read_result = plugin.read(rclcpp::Time(now), rclcpp::Duration(std::chrono::milliseconds(2)));
       std::vector<std::optional<mech::mech_protocol_cubemars::ServoPositionSnapshot>> samples;
-      bool fresh = true;
-      bool bad = read_result != hardware_interface::return_type::OK || plugin.motor_command_frames() != 0;
-      for (std::size_t i = 0; i < ids.size(); ++i) {
-        auto sample = plugin.diagnostic_snapshot(i);
-        fresh = fresh && sample && sample->availability == mech::mech_protocol_cubemars::ServoPositionAvailability::Fresh;
-        if (sample && sample->availability != mech::mech_protocol_cubemars::ServoPositionAvailability::Fresh && sample->availability != mech::mech_protocol_cubemars::ServoPositionAvailability::Unknown) bad = true;
-        samples.push_back(sample);
+      bool fresh = true, bad = false;
+      std::uint64_t command_frames = 0;
+      for (std::size_t bus = 0; bus < plugins.size(); ++bus) {
+        auto& plugin = *plugins[bus];
+        const auto read_result = plugin.read(rclcpp::Time(now), rclcpp::Duration(std::chrono::milliseconds(2)));
+        command_frames += plugin.motor_command_frames();
+        bad = bad || read_result != hardware_interface::return_type::OK || plugin.motor_command_frames() != 0;
+        for (std::size_t i = 0; i < configs[bus].config.joints.size(); ++i) {
+          auto sample = plugin.diagnostic_snapshot(i);
+          fresh = fresh && sample && sample->availability == mech::mech_protocol_cubemars::ServoPositionAvailability::Fresh;
+          if (sample && sample->availability != mech::mech_protocol_cubemars::ServoPositionAvailability::Fresh && sample->availability != mech::mech_protocol_cubemars::ServoPositionAvailability::Unknown) bad = true;
+          samples.push_back(sample);
+        }
       }
       acquired = acquired || fresh;
       const bool failed = bad || (!fresh && (acquired || now - start >= 3000000000LL));
       if (now >= next_output || failed) {
-        std::cout << mech::mech_bringup::format_servo_feedback(now_ns(), plugin.motor_command_frames(), ids, samples) << std::endl;
+        std::cout << mech::mech_bringup::format_servo_feedback(now_ns(), command_frames, ids, samples) << std::endl;
         next_output = now + 50000000;
       }
       if (failed) { result = 2; break; }
@@ -78,8 +89,10 @@ int main(int argc, char** argv) {
     }
     // These lifecycle callbacks only stop reception and release ownership;
     // no command claims, write(), implicit disable or reset are performed.
-    if (plugin.on_deactivate(state) != CallbackReturn::SUCCESS) result = 2;
-    if (plugin.on_cleanup(state) != CallbackReturn::SUCCESS) result = 2;
+    for (auto& plugin : plugins) {
+      if (plugin->on_deactivate(state) != CallbackReturn::SUCCESS) result = 2;
+      if (plugin->on_cleanup(state) != CallbackReturn::SUCCESS) result = 2;
+    }
     return result;
   } catch (const std::exception& error) {
     std::cerr << "servo_feedback_reader: " << error.what() << '\n';

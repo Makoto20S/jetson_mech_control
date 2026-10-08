@@ -80,6 +80,14 @@ Python 用合成反馈验证标定、失效状态和配置消费；C++ FakeSeria
 
 ## 双电机位置试验：servo-move
 
+旧快照因压缩额度耗尽而无法恢复时，可在确认写入进程退出后，使用
+`python3 trace_storage.py --snapshot-dir /dev/shm/servo-trace-... --archive-dir /持久磁盘/新的归档目录`。
+归档须在在线运行日志目录之外，父目录预先存在；操作期间持有部署根的
+`.servo-tools.lock`，防止控制入口并发启动。工具限制原始快照大小、保留磁盘余量，
+逐文件核对 SHA-256 并同步落盘后才释放原共享内存；失败保留原件及部分归档。
+原运行日志不修改，归档清单保留原 run 路径、快照计数和 closed 状态；
+`raw_archived` 只表示原始数据已保存，`not_audited` 不代表采集完整或实机通过。
+
 在部署目录运行 `./servo-move`。这个入口使用相同的标定配置和现有框架：
 `FollowJointTrajectory → servo_trajectory_controller → Ak30ServoSystem → session / BusRuntime`。
 它自行启动独立命名空间中的控制进程，控制器初始 inactive；不要同时运行
@@ -249,3 +257,40 @@ tmpfs掉电后消失，不能承诺掉电恢复。审计器虽流式解压，当
 随后保留窗口。`quit` 执行同样失能流程后退出；成功`disable`后直接`quit`
 不会重复失能发送。再次`enable`新建后台，以新鲜实测接管。
 反馈、硬件状态、目标限位及框架的命令有效期保护仍然有效；故障或失能未确认会报错。
+## 同一通信板的两个独立 CAN 端口
+
+`schema_version: 2` 用 `buses` 显式声明每个 USB CDC 设备路径和唯一
+`logical_bus`；每台电机也声明所属 `logical_bus`。旧版 schema 1 的单
+`device_path` 配置继续受支持。不同接线应使用对应配置，不能仅修改电机 ID。
+
+从已有标定配置生成候选（离线，不打开设备；输出文件必须不存在）：
+
+```bash
+python3 tools/servo/servo_operator.py split-buses \
+  --config config/servo_pair.json --output config/servo_pair.two-bus.json \
+  --port105 /dev/serial/by-path/PORT_FOR_105 \
+  --port104 /dev/serial/by-path/PORT_FOR_104
+```
+
+候选保留所有已标定限位、目标/反馈映射、证据和参数；总线 1 分配给 105，
+总线 2 分配给 104。路径应使用实际核对的 `by-path`，不要根据 `ttyACM` 数字
+猜测接线。更换 USB 插孔后要重新核对。迁移不会修改正在使用的配置或部署。
+
+框架仍为一个 controller_manager、一个轨迹控制器；每条总线使用独立的
+Ak30ServoSystem。`servo-move` 的 `move/step` 参数顺序仍为 **104、105、秒数**，
+`enable/stop/disable/quit` 及 `servo-range/status/control` 入口保持不变。
+`--motor-id 105` 只启动 105 所属总线，但先验证整份配置。
+
+反馈检查要求两路都新鲜；任一路缺失或异常会拒绝继续操作。退出先停止整个
+框架，再逐路发送失能并检查确认；一路打不开或没有确认，仍尝试另一条总线。
+任何一路未确认都报告失败并禁止再次使能，不自动重发。
+
+双路快照使用 `chain-bus-N.snapshot`、`serial-bus-N.snapshot`，导出为
+`command-chain-bus-N.jsonl.gz`、`serial-trace-bus-N.jsonl.gz`。两路共享原有
+1536 MiB 快照上限、128 MiB 会话磁盘上限；命令行容量参数为总条数，均分给
+参与运行的总线。单路记录窗口因此可能不同，应以 manifest 的丢弃/覆盖计数为准。
+任一路导出失败均保留整个快照目录供恢复；每路命令链可单独交给
+`chain_audit.py`，同目录的会话 manifest 会阻止把另一条总线不完整的记录当作完整证据。
+
+双路软件测试采用两个虚拟串口，覆盖分路目标、反馈、重新使能、独立失能及
+日志审计。软件验证不能证明实际通信板串错问题已经消失；上电后仍须单独验收。

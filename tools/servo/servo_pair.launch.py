@@ -18,7 +18,7 @@ def read_description(path):
 
 
 def controller_config(description):
-    names=[joint.attrib['name'] for joint in ET.fromstring(description).findall('./ros2_control/joint')]
+    names=sorted(joint.attrib['name'] for joint in ET.fromstring(description).findall('./ros2_control/joint'))
     if names not in (['motor104_joint','motor105_joint'],['motor105_joint']):
         raise ValueError('Expected calibrated 104/105 pair or selected motor105 URDF')
     controllers=yaml.safe_load(Path(__file__).with_name('servo_controllers.yaml').read_text())

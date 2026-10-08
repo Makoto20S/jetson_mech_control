@@ -42,3 +42,14 @@ position from accepted feedback; strong claims wait for a changed generation.
 Revocation cancels the pending tuple and clears auxiliary values. Position-only
 controllers still use a position-only declaration; they must not partially claim
 a larger bundle. See [design](../../../docs/development/position_feedforward_design.md).
+## Multiple hardware components in one manager
+
+Humble passes the full interface switch to every hardware component
+([SystemInterface contract](https://control.ros.org/humble/doc/api/classhardware__interface_1_1SystemInterface.html)).
+`CompositeSystem` filters switches by its declared joint names before validating
+or changing local claims. Requests concerning only another component are no-ops,
+including when this component is inactive. Unknown interfaces on a local joint,
+malformed names, duplicate local claims and conflicting local start/stop requests
+remain errors; global interface existence is checked by the resource manager.
+Filtering is shared by all derived hardware plugins, without vendor-specific
+branches or changes to the runtime command contract.

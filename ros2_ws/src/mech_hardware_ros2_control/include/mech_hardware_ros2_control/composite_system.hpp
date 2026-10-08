@@ -142,6 +142,8 @@ class CompositeSystem : public hardware_interface::SystemInterface {
   }
 
  private:
+  [[nodiscard]] std::vector<std::string> local_switch_interfaces(
+      const std::vector<std::string>& interfaces) const;
   [[nodiscard]] bool validate_info(
       const hardware_interface::HardwareInfo& info) const noexcept;
   [[nodiscard]] bool validate_switch(

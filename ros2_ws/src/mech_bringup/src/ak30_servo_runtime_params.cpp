@@ -45,6 +45,18 @@ bool exactly_keys(const Parameters& params,
   return true;
 }
 
+bool valid_hardware_keys(const Parameters& params) noexcept {
+  const auto trace = params.find("trace_name");
+  if (trace == params.end()) return exactly_keys(params, hardware_keys());
+  if (params.size() != hardware_keys().size() + 1U || trace->second.empty() ||
+      trace->second.size() > 32 || trace->second.find_first_not_of(
+          "abcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
+    return false;
+  for (const auto& key : hardware_keys())
+    if (params.count(key) != 1U) return false;
+  return true;
+}
+
 bool parse_uint(const std::string& source, std::uint64_t& value) noexcept {
   if (source.empty()) return false;
   const auto result = std::from_chars(source.data(),
@@ -148,7 +160,7 @@ std::optional<Ak30ServoRuntimeParams> Ak30ServoRuntimeParams::parse(
   if (info.name.empty() || info.type != "system" ||
       !info.sensors.empty() || !info.gpios.empty() ||
       info.joints.empty() || info.joints.size() > 6U ||
-      !exactly_keys(info.hardware_parameters, hardware_keys()) ||
+      !valid_hardware_keys(info.hardware_parameters) ||
       info.hardware_parameters.at("profile") != "ak30_servo_extended")
     return std::nullopt;
 

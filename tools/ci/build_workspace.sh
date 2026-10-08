@@ -55,6 +55,12 @@ env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" build \
     -DPython3_EXECUTABLE=/usr/bin/python3 \
     -DBUILD_SHARED_LIBS=ON
 
+# CI builds the image first, then runs the same tests with SYS_NICE so the
+# production controller can request SCHED_FIFO without weakening deadlines.
+if [[ "${MECH_BUILD_ONLY:-0}" == "1" ]]; then
+  exit 0
+fi
+
 env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" test \
   --base-paths "${REPO_ROOT}/ros2_ws/src" \
   --build-base "${OUTPUT_ROOT}/build" \

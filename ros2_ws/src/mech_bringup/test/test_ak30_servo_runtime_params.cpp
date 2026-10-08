@@ -65,6 +65,16 @@ hardware_interface::HardwareInfo valid_info() {
 
 using Params = mech::mech_bringup::Ak30ServoRuntimeParams;
 
+TEST(Ak30ServoRuntimeParams, OptionalTraceNameCannotEscapeItsCaptureDirectory) {
+  auto info = valid_info();
+  info.hardware_parameters["trace_name"] = "bus-2";
+  EXPECT_TRUE(Params::parse(info));
+  for (const auto& name : {"", "../other", "bus/2", "bus_2"}) {
+    info.hardware_parameters["trace_name"] = name;
+    EXPECT_FALSE(Params::parse(info));
+  }
+}
+
 TEST(Ak30ServoRuntimeParams, ParsesIndependentExplicitMappingsInJointOrder) {
   const auto parsed = Params::parse(valid_info());
   ASSERT_TRUE(parsed);

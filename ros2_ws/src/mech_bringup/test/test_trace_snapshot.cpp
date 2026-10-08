@@ -22,6 +22,8 @@ class SnapshotDirectory final {
     path_ = created;
   }
   ~SnapshotDirectory() {
+    ::unlink((path_ + "/chain-bus-1.snapshot").c_str());
+    ::unlink((path_ + "/chain-bus-2.snapshot").c_str());
     ::unlink((path_ + "/chain.snapshot").c_str());
     ::unlink((path_ + "/serial.snapshot").c_str());
     ::unlink((path_ + "/alias").c_str());
@@ -38,6 +40,18 @@ TraceSnapshotHeader header(const std::string& path) {
   input.read(reinterpret_cast<char*>(&value), sizeof(value));
   if (!input) throw std::runtime_error("snapshot header read failed");
   return value;
+}
+
+TEST(TraceSnapshot, NamedBusCapturesAreIndependentAndExclusive) {
+  SnapshotDirectory directory;
+  mech::mech_bringup::CommandTrace one(2, directory.file("chain-bus-1.snapshot"));
+  mech::mech_bringup::CommandTrace two(2, directory.file("chain-bus-2.snapshot"));
+  one.record("one"); two.record("two"); two.record("second");
+  EXPECT_EQ(header(directory.file("chain-bus-1.snapshot")).total, 1U);
+  EXPECT_EQ(header(directory.file("chain-bus-2.snapshot")).total, 2U);
+  EXPECT_THROW(mech::mech_bringup::CommandTrace(2, directory.file("chain-bus-1.snapshot")), std::runtime_error);
+  EXPECT_THROW(mech::mech_bringup::CommandTrace(2, directory.file("chain-.snapshot")), std::invalid_argument);
+  EXPECT_THROW(mech::mech_bringup::CommandTrace(2, directory.file("serial-bus-1.snapshot")), std::invalid_argument);
 }
 
 TEST(TraceSnapshot, SurvivesObjectDestructionAndPreservesFirstRecords) {

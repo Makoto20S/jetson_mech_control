@@ -296,9 +296,9 @@ if(BUILD_TESTING)
     TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 
-  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit trace_storage)
+  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit trace_storage two_bus_config two_bus_ros)
     set(servo_tool_timeout 35)
-    if(servo_tool_test STREQUAL "motion_ros")
+    if(servo_tool_test STREQUAL "motion_ros" OR servo_tool_test STREQUAL "two_bus_ros")
       # Includes the real 31-second single-motor manual-lifetime acceptance.
       set(servo_tool_timeout 120)
     endif()

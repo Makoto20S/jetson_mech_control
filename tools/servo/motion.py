@@ -492,9 +492,10 @@ def report_safely(callback, *args, **kwargs):
 
 def disable_motors(helper, urdf, run, record, ids):
     # Persistence failures must never prevent the shutdown command itself.
+    # Two independent buses each get the helper's bounded acknowledgement window.
     result=subprocess.run([helper,'--urdf',str(urdf),
         '--trace',str(run/'disable-trace.jsonl')],
-        capture_output=True,text=True,timeout=5.)
+        capture_output=True,text=True,timeout=8.)
     try:
         (run/'disable.log').write_text(result.stdout+result.stderr)
     except OSError as exc:
@@ -530,8 +531,10 @@ class BackendSession:
         self.last_positions=None
         self.snapshot=None
         self.snapshot_finished=False
-        self.chain_capacity=storage.CHAIN_CAPACITY
-        self.raw_capacity=storage.RAW_CAPACITY
+        self.trace_names=([''] if config['schema_version']==1 else
+                          [f"bus-{bus['logical_bus']}" for bus in config_tools.selected_buses(config,policy.motors)])
+        self.chain_capacity=storage.CHAIN_CAPACITY//len(self.trace_names)
+        self.raw_capacity=storage.RAW_CAPACITY//len(self.trace_names)
         self.parent_events=None
 
     def record(self, event, **data):
@@ -568,7 +571,11 @@ class BackendSession:
             if enabling_input is not None:
                 # Same physical input and timestamp as the parent timeline.
                 self.events.write(json.dumps(enabling_input,ensure_ascii=False,allow_nan=False)+'\n')
-        self.snapshot=storage.make_snapshots(self.run,self.chain_capacity,self.raw_capacity,self.root)
+        if self.trace_names == ['']:
+            self.snapshot=storage.make_snapshots(self.run,self.chain_capacity,self.raw_capacity,self.root)
+        else:
+            self.snapshot=storage.make_snapshots(self.run,self.chain_capacity,self.raw_capacity,self.root,
+                                                 trace_names=self.trace_names)
         self.snapshot_finished=False
         namespace='servo_move_'+uuid.uuid4().hex[:8]
         try:
@@ -732,8 +739,8 @@ def main():
             data.setdefault('monotonic_s',time.monotonic())
             events.write(json.dumps(dict(event=event,**data),ensure_ascii=False,allow_nan=False)+'\n')
         backend=BackendSession(config,policy,description,args.disable_helper,run,record)
-        backend.chain_capacity=args.chain_capacity
-        backend.raw_capacity=args.raw_capacity
+        backend.chain_capacity=args.chain_capacity//len(backend.trace_names)
+        backend.raw_capacity=args.raw_capacity//len(backend.trace_names)
         backend.parent_events=events
         try:
             backend.start()

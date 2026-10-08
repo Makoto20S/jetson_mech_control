@@ -25,7 +25,8 @@ RUN apt-get update \
 
 # rosdep resolves only package.xml keys from the pinned Jammy/Humble base.
 # The same build/test script is used by CI and matching native hosts.
+ARG MECH_BUILD_ONLY=0
 RUN apt-get update \
     && rosdep update --rosdistro "${ROS_DISTRO}" \
-    && bash /workspace/tools/ci/build_workspace.sh \
+    && MECH_BUILD_ONLY="${MECH_BUILD_ONLY}" bash /workspace/tools/ci/build_workspace.sh \
     && rm -rf /var/lib/apt/lists/*
