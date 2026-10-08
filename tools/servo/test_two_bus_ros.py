@@ -148,7 +148,9 @@ class TwoBusRosTests(unittest.TestCase):
                 if select.select([master],[],[],.05)[0]:
                     try: pending.extend(os.read(master,65536))
                     except OSError: break
-            self.fail('Missing '+text+': '+pending.decode(errors='replace'))
+            logs={p.name:p.read_text(errors='replace')[-6000:]
+                  for p in self.root.glob('runs/move-*/framework.log')}
+            self.fail('Missing '+text+': '+pending.decode(errors='replace')+'; framework='+json.dumps(logs))
         def command(text,expected):
             os.write(master,(text+'\n').encode());expect(expected)
         try:
@@ -163,8 +165,8 @@ class TwoBusRosTests(unittest.TestCase):
                 for gateway in self.gateways:
                     self.assertEqual(gateway.commands.count(0xf00+gateway.drive),1)
                 return
-            command('move 23 12 0.8','轨迹到达容差内')
-            command('step -1 1 0.8','轨迹到达容差内')
+            command('move 23 12 0.8','运动中');expect('轨迹到达容差内')
+            command('step -1 1 0.8','运动中');expect('轨迹到达容差内')
             command('disable','电机已失能；会话保留')
             command('enable','已使能')
             command('quit','失能步骤已执行')

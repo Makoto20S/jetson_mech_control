@@ -289,7 +289,7 @@ class RosMotionTests(unittest.TestCase):
                         try:data=os.read(master,65536)
                         except OSError:break
                         received.extend(data);transcript.extend(data)
-                self.fail('Missing '+text+'; output='+received.decode(errors='replace'))
+                unexpected_exit()
             def capture_loaded_library():
                 for pid in descendant_pids(proc.pid):
                     entry=Path('/proc')/str(pid)
