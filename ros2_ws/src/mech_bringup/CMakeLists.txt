@@ -262,11 +262,17 @@ if(BUILD_TESTING)
   add_launch_test(test/test_e5_process.launch.py
     TARGET ${PROJECT_NAME}_e5_process_feedback_loss
     TIMEOUT 35)
+  add_launch_test(test/test_e5_process.launch.py
+    TARGET ${PROJECT_NAME}_e5_process_host_pause
+    TIMEOUT 45)
   set_tests_properties(${PROJECT_NAME}_e5_process_lifetime PROPERTIES
     ENVIRONMENT "ROS_DOMAIN_ID=41"
     RUN_SERIAL TRUE)
   set_tests_properties(${PROJECT_NAME}_e5_process_feedback_loss PROPERTIES
     ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42"
+    RUN_SERIAL TRUE)
+  set_tests_properties(${PROJECT_NAME}_e5_process_host_pause PROPERTIES
+    ENVIRONMENT "E5_SCENARIO=host_pause;ROS_DOMAIN_ID=43"
     RUN_SERIAL TRUE)
   if(CMAKE_CXX_FLAGS MATCHES "fsanitize=address")
     execute_process(
@@ -278,6 +284,8 @@ if(BUILD_TESTING)
         ENVIRONMENT "ROS_DOMAIN_ID=41;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
       set_tests_properties(${PROJECT_NAME}_e5_process_feedback_loss PROPERTIES
         ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
+      set_tests_properties(${PROJECT_NAME}_e5_process_host_pause PROPERTIES
+        ENVIRONMENT "E5_SCENARIO=host_pause;ROS_DOMAIN_ID=43;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
     endif()
   endif()
 

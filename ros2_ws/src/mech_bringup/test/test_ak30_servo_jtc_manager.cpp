@@ -111,8 +111,19 @@ class ServoJtcManagerTest : public ::testing::Test {
   virtual hardware_interface::HardwareInfo hardware_info() { return servo_info(); }
   virtual std::vector<std::string> controller_joints() { return {"motor1_joint"}; }
   virtual void inject_feedback() { ASSERT_TRUE(serial_->inject_rx(feedback_wire())); }
-  virtual void configure_hardware_clock(Ak30ServoSystem&) {}
-  virtual void advance_hardware_clock() {}
+  void configure_hardware_clock(Ak30ServoSystem& plugin) {
+    // These functional tests run ROS callbacks on a non-RT host thread.
+    // Runtime and transport share one logical instant per read/update/write
+    // cycle; neither callback advances it. ROS/JTC and pacing retain their
+    // real clocks. Host scheduling pauses must not become hardware faults.
+    // Separate runtime/plugin tests cover the unchanged 3/6 ms deadlines.
+    plugin.set_clock_for_testing([this] {
+      return *mech::mech_control_core::MonotonicTime::from_nanoseconds(
+          hardware_now_ns_.load());
+    });
+  }
+
+  void advance_hardware_clock() { hardware_now_ns_.fetch_add(kPeriodNs); }
 
   void SetUp() override {
     serial_ = std::make_shared<FakeSerial>(65536U);
@@ -204,7 +215,23 @@ class ServoJtcManagerTest : public ::testing::Test {
   std::shared_ptr<rclcpp::Node> publisher_node_;
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr publisher_;
   std::chrono::steady_clock::time_point next_cycle_;
+  std::atomic<std::int64_t> hardware_now_ns_{1000000000};
 };
+
+TEST_F(ServoJtcManagerTest, HostPauseDoesNotReplaceLogicalHardwareTime) {
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  ASSERT_EQ(drive_switch({kController}, {}), controller_interface::return_type::OK);
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  ASSERT_TRUE(resources_->command_interface_is_available("motor1_joint/position"));
+  serial_->clear_tx();
+
+  // Exceed the configured 6 ms hard TTL in host time only. This functional
+  // fixture must still advance one 2 ms hardware cycle with fresh feedback.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ASSERT_NO_FATAL_FAILURE(cycle(1));
+  ASSERT_TRUE(resources_->command_interface_is_available("motor1_joint/position"));
+  EXPECT_EQ(serial_->take_tx().size(), 21U);
+}
 
 TEST_F(ServoJtcManagerTest, DeviceFaultCanLeaveControllerActiveWithCachedPosition) {
   ASSERT_NO_FATAL_FAILURE(cycle(2));
@@ -339,20 +366,6 @@ class ServoPairJtcMappingTest : public ServoJtcManagerTest,
  protected:
   using Action = control_msgs::action::FollowJointTrajectory;
 
-  void configure_hardware_clock(Ak30ServoSystem& plugin) override {
-    // This mapping test runs ROS callbacks synchronously on a non-RT thread.
-    // Runtime and transport copy callbacks that read this single state;
-    // neither callback advances time. Every read/update/write cycle is fixed
-    // at one logical instant while ROS/JTC and sleep keep their real clocks.
-    // This verifies routing, not a 3/6 ms scheduling guarantee or trace timing.
-    plugin.set_clock_for_testing([this] {
-      return *mech::mech_control_core::MonotonicTime::from_nanoseconds(
-          hardware_now_ns_.load());
-    });
-  }
-
-  void advance_hardware_clock() override { hardware_now_ns_.fetch_add(kPeriodNs); }
-
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(ServoJtcManagerTest::SetUp());
     // DDS entity creation/destruction is not bounded by the active 3/6 ms
@@ -474,7 +487,6 @@ class ServoPairJtcMappingTest : public ServoJtcManagerTest,
   }
 
   rclcpp_action::Client<Action>::SharedPtr action_client_;
-  std::atomic<std::int64_t> hardware_now_ns_{1000000000};
 };
 
 TEST_P(ServoPairJtcMappingTest, DistinctTargetsSurviveUpdatesReorderingAndSixteenSecondHold) {
