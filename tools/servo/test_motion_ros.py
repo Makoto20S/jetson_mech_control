@@ -272,6 +272,13 @@ class RosMotionTests(unittest.TestCase):
                 '--run-dir',str(Path(directory)/'runs'),'--disable-helper',str(helper),'--motor-id','105'],
                 stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
             os.close(slave);received=bytearray();transcript=bytearray();loaded=set()
+            def unexpected_exit():
+                details={'returncode':proc.poll(), 'terminal':transcript.decode(errors='replace')[-6000:],
+                         'gateway_errors':gateway_errors}
+                for name in ('framework.log','events.jsonl','disable.log'):
+                    files=sorted(Path(directory).glob('runs/move-*/'+name))
+                    details[name]=[p.read_text(errors='replace')[-6000:] for p in files]
+                self.fail('Operator exited during lifecycle test: '+json.dumps(details,ensure_ascii=False))
             def expect(text,timeout=15.):
                 deadline=time.monotonic()+timeout
                 while time.monotonic()<deadline:
@@ -304,9 +311,11 @@ class RosMotionTests(unittest.TestCase):
                 # There is no elapsed-enable-time shutdown in this operator.
                 hold_until=time.monotonic()+31.
                 while time.monotonic()<hold_until:
-                    self.assertIsNone(proc.poll())
+                    if proc.poll() is not None:unexpected_exit()
                     if select.select([master],[],[],.05)[0]:
-                        data=os.read(master,65536);self.assertTrue(data)
+                        try:data=os.read(master,65536)
+                        except OSError:unexpected_exit()
+                        if not data:unexpected_exit()
                         received.extend(data);transcript.extend(data)
                 self.assertFalse(any(p[7:]!=bytes(6) and int.from_bytes(p[7:11],'little')==0xf69
                                      for p in serial_packets))
