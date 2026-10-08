@@ -47,6 +47,13 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
    Inspect GTest XML `result="skipped"` as well as the colcon summary; the latter
    can report zero skips despite conditional vcan/position-only cases.
 
+   Synthetic servo JTC functional tests share a logical hardware clock that
+   advances 2 ms per read/update/write cycle. ROS trajectory/action clocks and
+   host pacing still use real time. A host pause beyond 6 ms must not become a
+   synthetic hardware fault; dedicated runtime/plugin tests independently
+   enforce the unchanged 3 ms soft and 6 ms hard deadlines in logical time.
+   These functional tests do not establish a real-time scheduling guarantee.
+
 4. Deterministic lifecycle/performance test:
 
    ```bash
