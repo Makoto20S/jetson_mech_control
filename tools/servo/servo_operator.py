@@ -32,9 +32,59 @@ def default_config(device_path):
 def finite(value):
     return isinstance(value,(float,int)) and not isinstance(value,bool) and math.isfinite(value)
 
+def configured_buses(config):
+    """Normalize old single-port and explicit multi-port declarations without I/O."""
+    if config.get('schema_version') == 1:
+        if 'buses' in config or any('logical_bus' in m for m in config.get('motors', [])):
+            raise ValueError('schema 1不能混用多总线配置')
+        buses = [dict(logical_bus=1, device_path=config.get('device_path'))]
+    elif config.get('schema_version') == 2:
+        if 'device_path' in config:
+            raise ValueError('schema 2必须仅通过buses声明设备路径')
+        buses = config.get('buses')
+        if not isinstance(buses, list) or not 1 <= len(buses) <= 2:
+            raise ValueError('必须配置一或两条总线')
+    else:
+        raise ValueError('配置版本无效')
+    ids, paths = set(), set()
+    for bus in buses:
+        ident, path = bus.get('logical_bus'), bus.get('device_path')
+        if type(ident) is not int or not 1 <= ident <= 255:
+            raise ValueError('logical_bus必须为1到255的整数')
+        if not isinstance(path, str) or not path or path.strip() != path:
+            raise ValueError('设备路径无效')
+        canonical = str(Path(path).resolve())
+        if ident in ids or canonical in paths:
+            raise ValueError('总线编号或设备路径重复')
+        ids.add(ident); paths.add(canonical)
+    if config.get('schema_version') == 2:
+        assignments = [m.get('logical_bus') for m in config.get('motors', [])]
+        if any(type(i) is not int or i not in ids for i in assignments) or set(assignments) != ids:
+            raise ValueError('每台电机必须属于已声明总线，每条总线必须有电机')
+    return buses
+
+
+def selected_buses(config, motors):
+    return [dict(bus, motors=[m for m in motors if m.get('logical_bus', 1) == bus['logical_bus']])
+            for bus in configured_buses(config)
+            if any(m.get('logical_bus', 1) == bus['logical_bus'] for m in motors)]
+
+
+def split_buses(config, port104, port105):
+    """Copy saved mappings/limits; changing topology never recalibrates motors."""
+    validate_config(config, True)
+    result = copy.deepcopy(config)
+    result.pop('device_path', None)
+    result.update(schema_version=2, buses=[dict(logical_bus=1, device_path=port105),
+                                          dict(logical_bus=2, device_path=port104)])
+    for motor in result['motors']:
+        motor['logical_bus'] = 1 if motor['id']==105 else 2
+    validate_config(result, True)
+    return result
+
+
 def validate_config(config, observe=False):
-    if config.get('schema_version')!=1 or not isinstance(config.get('device_path'),str) or not config['device_path']:
-        raise ValueError('配置格式或设备路径无效')
+    configured_buses(config)
     motors=config.get('motors',[])
     if len(motors)!=2 or {m.get('id') for m in motors}!=set(IDS): raise ValueError('必须配置104和105')
     if len({m.get('joint_name') for m in motors})!=2: raise ValueError('关节名称重复')
@@ -70,19 +120,21 @@ def generate_urdf(config, observe=False, motor_id=None):
         j=ET.SubElement(root,'joint',name=m['joint_name'],type='continuous')
         ET.SubElement(j,'parent',link='base'); ET.SubElement(j,'child',link=link)
         ET.SubElement(j,'axis',xyz='0 0 1')
-    control=ET.SubElement(root,'ros2_control',name='servo_pair',type='system')
-    hw=ET.SubElement(control,'hardware'); ET.SubElement(hw,'plugin').text='mech_bringup/Ak30ServoSystem'
-    params={'profile':'ak30_servo_extended','device_path':config['device_path'],'logical_bus':1,
-            'control_period_ns':2_000_000,'command_ttl_ns':3_000_000,
-            'command_hard_ttl_ns':6_000_000,'feedback_ttl_ns':FRESH_NS if observe else 60_000_000}
-    for k,v in params.items(): ET.SubElement(hw,'param',name=k).text=str(v)
-    for m in motors:
-        j=ET.SubElement(control,'joint',name=m['joint_name'])
-        p={k:m[k] for k in ('target_scale','target_offset','target_mapping_verified','feedback_scale','feedback_offset','feedback_mapping_verified','speed_erpm','acceleration_raw','position_max_error_rad')}
-        p.update(drive_id=m['id'],position_min_rad=-1e6 if observe else m['position_min_rad'],position_max_rad=1e6 if observe else m['position_max_rad'])
-        for k,v in p.items(): ET.SubElement(j,'param',name=k).text=str(v).lower() if isinstance(v,bool) else str(v)
-        ET.SubElement(j,'state_interface',name='position')
-        ET.SubElement(j,'command_interface',name='position'); ET.SubElement(j,'command_interface',name='command_generation')
+    for bus in selected_buses(config, motors):
+        control=ET.SubElement(root,'ros2_control',name='servo_pair' if config['schema_version']==1 else f"servo_bus_{bus['logical_bus']}",type='system')
+        hw=ET.SubElement(control,'hardware'); ET.SubElement(hw,'plugin').text='mech_bringup/Ak30ServoSystem'
+        params={'profile':'ak30_servo_extended','device_path':bus['device_path'],'logical_bus':bus['logical_bus'],
+                'control_period_ns':2_000_000,'command_ttl_ns':3_000_000,
+                'command_hard_ttl_ns':6_000_000,'feedback_ttl_ns':FRESH_NS if observe else 60_000_000}
+        if config['schema_version']==2: params['trace_name']=f"bus-{bus['logical_bus']}"
+        for k,v in params.items(): ET.SubElement(hw,'param',name=k).text=str(v)
+        for m in bus['motors']:
+            j=ET.SubElement(control,'joint',name=m['joint_name'])
+            p={k:m[k] for k in ('target_scale','target_offset','target_mapping_verified','feedback_scale','feedback_offset','feedback_mapping_verified','speed_erpm','acceleration_raw','position_max_error_rad')}
+            p.update(drive_id=m['id'],position_min_rad=-1e6 if observe else m['position_min_rad'],position_max_rad=1e6 if observe else m['position_max_rad'])
+            for k,v in p.items(): ET.SubElement(j,'param',name=k).text=str(v).lower() if isinstance(v,bool) else str(v)
+            ET.SubElement(j,'state_interface',name='position')
+            ET.SubElement(j,'command_interface',name='position'); ET.SubElement(j,'command_interface',name='command_generation')
     ET.indent(root); return ET.tostring(root,encoding='unicode')+'\n'
 
 def paired(frame, now, arrival):
@@ -282,10 +334,17 @@ def main(argv=None):
         if name=='calibrate': p.add_argument('--margin-deg',type=float,default=10)
         if name=='monitor': p.add_argument('--duration',type=float)
         if name=='generate-urdf': p.add_argument('--output',required=True); p.add_argument('--observe',action='store_true')
+    p=sub.add_parser('split-buses', help='离线复制配置为双总线；保留标定，不打开设备')
+    for option in ('config','output','port104','port105'): p.add_argument('--'+option,required=True)
     args=parser.parse_args(argv)
     try:
         config=json.loads(Path(args.config).read_text())
-        if args.command=='generate-urdf': Path(args.output).write_text(generate_urdf(config,args.observe))
+        if args.command=='split-buses':
+            result=split_buses(config,args.port104,args.port105)
+            with Path(args.output).open('x',encoding='utf-8') as stream:
+                json.dump(result,stream,ensure_ascii=False,indent=2,allow_nan=False);stream.write('\n')
+            print('双总线候选配置已生成；原配置未修改，未打开设备。')
+        elif args.command=='generate-urdf': Path(args.output).write_text(generate_urdf(config,args.observe))
         elif args.command=='check':
             validate_config(config,True)
             if config.get('calibrated'): generate_urdf(config)

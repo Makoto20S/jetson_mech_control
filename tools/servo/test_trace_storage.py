@@ -6,6 +6,7 @@ import gzip
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -171,6 +172,23 @@ class StorageTests(unittest.TestCase):
             self.assertTrue(result['snapshot_retained']); self.assertTrue(source.exists())
             self.assertEqual(json.loads((run/'capture-manifest.json').read_text())['diagnostic_status'],'incomplete')
 
+    def test_multi_bus_export_retains_all_sources_if_one_bus_is_missing(self):
+        for missing in (False, True):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);run=root/'run';run.mkdir();source=root/'snapshot';source.mkdir()
+                (source/'owner.json').write_text(json.dumps(dict(uid=1000,run=str(run.resolve()),
+                                                               trace_names=['bus-1','bus-2'])))
+                for filename,_,kind,_ in storage.snapshot_layout(['bus-1','bus-2']):
+                    if missing and filename=='serial-bus-2.snapshot':continue
+                    snapshot(source/filename,[],kind)
+                with patch.object(storage.os,'getuid',return_value=1000,create=True), \
+                        patch.object(storage.shutil,'disk_usage',return_value=type('Usage',(),{'free':2**40})()):
+                    result=storage.finalize(source,run,run,confirmed_exit=True)
+                self.assertEqual(result['snapshot_retained'],missing)
+                self.assertEqual(source.exists(),missing)
+                self.assertEqual(len(result['snapshots']),3 if missing else 4)
+                self.assertEqual(result['diagnostic_status'],'incomplete' if missing else 'complete')
+
     def test_successful_export_removes_only_verified_owned_snapshot(self):
         rows=fixtures.ChainAuditTest().fixture()
         with tempfile.TemporaryDirectory() as directory:
@@ -205,6 +223,36 @@ class StorageTests(unittest.TestCase):
             path=Path(directory)/'snapshot'; snapshot(path,rows[1:])
             path.write_bytes(path.read_bytes()[:-1])
             with self.assertRaises(ValueError):storage.snapshot_metadata(path,1)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'durable archive uses Linux directory fsync')
+    def test_raw_archive_preserves_bytes_and_capture_loss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base=Path(directory);source=base/'snapshot';source.mkdir()
+            run=base/'runs'/'run';run.mkdir(parents=True)
+            (source/'owner.json').write_text(json.dumps(dict(uid=os.getuid(),run=str(run),writer_pid=123)))
+            snapshot(source/'chain.snapshot',[],closed=0)
+            snapshot(source/'serial.snapshot',[{}],2)
+            original={p.name:p.read_bytes() for p in source.iterdir()}
+            with patch.object(storage.os,'killpg',side_effect=ProcessLookupError()):
+                with self.assertRaisesRegex(ValueError,'outside'):
+                    storage.archive_snapshot(source,run/'archive')
+                with patch.object(storage.shutil,'copyfileobj',side_effect=OSError('disk full')):
+                    with self.assertRaises(OSError):storage.archive_snapshot(source,base/'failed')
+                self.assertTrue(source.exists())
+                report=storage.archive_snapshot(source,base/'archive')
+            self.assertFalse(source.exists())
+            self.assertEqual(report['diagnostic_status'],'not_audited')
+            self.assertFalse(report['metadata']['chain.snapshot']['closed'])
+            for name,data in original.items():self.assertEqual((base/'archive'/name).read_bytes(),data)
+
+    def test_raw_archive_rejects_live_writer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base=Path(directory);source=base/'snapshot';source.mkdir()
+            (source/'owner.json').write_text(json.dumps(dict(uid=1000,run=str(base/'run'),writer_pid=123)))
+            with patch.object(storage.os,'getuid',return_value=1000,create=True), patch.object(storage.os,'killpg',create=True):
+                with self.assertRaisesRegex(ValueError,'still present'):
+                    storage.archive_snapshot(source,base/'archive')
+            self.assertFalse((base/'archive').exists())
 
 
 if __name__ == '__main__':
