@@ -1,9 +1,9 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
-> 最近收敛：2026-09-06（Foundation RC2 完成后本文件转为实施记录；当前活动阶段是 AK3.0 力控适配器，状态见[规划索引](README.md) §3）
+> 最近收敛：2026-09-06（Foundation RC2 完成后本文件转为实施记录；当前活动状态（包括已合并的双路伺服）见[规划索引](README.md) §3）
 > 当前状态：**FND-000～FND-015、RSP-001/RSP-002 与 INT-001 全部完成**——RC2 取证（Jetson ARM64 clean build/test、sanitizers、30 min 稳定性 10670 runs、首次 vcan 往返）收口于 `9317d76` 并打 tag `v0.1.0-foundation-rc2`；`main` 为六包结构（含 PR #9 合并的 `mech_protocol_cubemars`）
-> 执行方向：Foundation 已收口；后续按 §12 分工进入 AK3.0 力控适配器（第一切片已合并）与 ros2_control hardware plugin 接线
+> 文档职责：保留 Foundation 实施顺序与验收记录；AK3.0 力控/伺服及硬件接线已有后续实现，当前入口为[规划索引](README.md)，不重复执行旧阶段。
 
 ## 1. 决策结论
 
@@ -34,7 +34,7 @@
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context/ADR 检查脚本已存在 | 先完成 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
 | 目标平台 | 目标 Jetson 已于 2026-08-23 迁移为 Ubuntu 22.04.5 / JetPack 6.2 并装好 ROS 2 Humble；当前主开发工作区为 Ubuntu 22.04 x86_64 | 构建与 vcan 测试在 Ubuntu 22.04 环境执行；ARM64 结论只来自目标 Jetson |
 
-`03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件保留 Foundation 阶段的执行顺序、核心契约和 Foundation 后的分工方式。**Foundation 已于 2026-08-31 收口**，当前实施入口改为[规划索引](README.md) §3 的 AK3.0 适配器阶段。
+`03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件保留 Foundation 阶段的执行顺序、核心契约和 Foundation 后的分工方式。**Foundation 已于 2026-08-31 收口**，当前实施入口改为[规划索引](README.md) §3 的活动任务。
 
 ## 3. Foundation v0.1 的成功定义
 

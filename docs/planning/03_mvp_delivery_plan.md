@@ -1,6 +1,6 @@
 # MVP 执行、验证与项目治理计划
 
-> 2026-08-03 实施顺序更新：本文件保留完整 MVP、硬件闸门和月度验收总路线；当前无硬件 `Foundation v0.1` 的具体执行以 [07_framework_bootstrap_plan.md](07_framework_bootstrap_plan.md) 为准。实机身份和配置不阻塞 Foundation，只阻塞真实设备激活。
+> 2026-10-08 状态更新：本文件保留完整 MVP、硬件闸门和量化验收总路线；Foundation 已完成，具体实施记录见 [07_framework_bootstrap_plan.md](07_framework_bootstrap_plan.md)。当前六包实现及双路伺服状态以[规划索引](README.md)为入口；台架功能通过不代表下述完整 MVP 指标全部完成。
 >
 > 2026-08-07 FND-004 更新（2026-08-19 澄清）：当前架构规范和状态以 [ADR 索引](../adr/README.md) 为准；ADR-001/002/003/004/005/009 已 Accepted，ADR-006 在单物理通道、所选 transport backend 和实机/总线证据完成前保持 Proposed。本文件中的早期推荐不得提升 ADR 状态。
 >
@@ -25,7 +25,7 @@
 
 ## 2. 建议仓库与 ROS 包结构
 
-**已确认事实 + 有依据的推断**：私有 GitHub 单仓库 `Makoto20S/jetson_mech_control` 已建立，当前已有五个 Foundation package 骨架、manifest、CI 和 ADR；下图是目标目录包络，不表示所有目录或 vendor package 已创建。
+**已确认事实 + 有依据的推断**：私有 GitHub 单仓库 `Makoto20S/jetson_mech_control` 已建立，当前已有五个 Foundation package 加 `mech_protocol_cubemars` 协议包、manifest、CI 和 ADR；下图是目标目录包络，不表示所有目录或 vendor package 已创建。
 
 ```text
 /

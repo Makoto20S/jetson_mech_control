@@ -1,8 +1,13 @@
 # mech_protocol_cubemars
 
 AK3.0 force-control codec and device session for CubeMars AKE60-8 actuators,
-plus an offline servo wire codec and position session, per
+plus a servo wire codec and position session used by the deployed servo plugin, per
 `docs/development/ak30_force_control_adapter_design.md` and ADR-013.
+
+The protocol layer remains I/O-free. Production composition, explicit mode-15
+disable and single/dual-bus operator tools are documented in
+[servo tools](../../../tools/servo/README.md) and
+[mech_bringup](../mech_bringup/README.md).
 
 ## Scope
 
@@ -11,7 +16,7 @@ Its three sub-modes (position, velocity, torque) share that one ID and are
 distinguished by payload content, so the sub-mode is explicit configuration
 and is never inferred from received data.
 
-The servo wire codec implements only L07 §4.1.7 p34–35 mode 6: extended
+The servo position command codec implements L07 §4.1.7 p34–35 mode 6: extended
 Classic CAN ID `(6 << 8) | drive_id`, DLC 8, signed big-endian int32 raw
 device degrees ×10000, then two signed big-endian int16 fields for positive
 electrical speed ERPM /10 and positive raw acceleration /10. The manual labels
