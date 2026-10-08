@@ -54,6 +54,16 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
    enforce the unchanged 3 ms soft and 6 ms hard deadlines in logical time.
    These functional tests do not establish a real-time scheduling guarantee.
 
+   E5 force-control process tests use the same 2 ms logical hardware cadence,
+   while the controller's 100/106 ms target policy and manager update periods
+   keep real time. They retain the first transmitted frame after each trace
+   reset, checking its slew against the actual update period and CAN payload
+   quantization; a later telemetry snapshot is not the first command. An
+   additional scenario injects a 20 ms host pause and requires the functional
+   chain to remain usable, including target expiry and inactive restart checks.
+   The 4/6 ms hardware lease and feedback-loss protections remain enforced by
+   separate runtime tests; production code and parameters are unchanged.
+
 4. Deterministic lifecycle/performance test:
 
    ```bash

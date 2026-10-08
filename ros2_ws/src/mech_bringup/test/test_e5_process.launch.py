@@ -34,6 +34,10 @@ def generate_test_description():
             os.environ.get("ASAN_OPTIONS", "") +
             ":new_delete_type_mismatch=0").lstrip(":")
     robot_description = (source / "e5_process.urdf").read_text(encoding="utf-8")
+    if os.environ.get("E5_SCENARIO") == "host_pause":
+        robot_description = robot_description.replace(
+            "</hardware>",
+            '<param name="test_pause_after_first_send">true</param></hardware>')
     manager = launch_ros.actions.Node(
         package="controller_manager",
         executable="ros2_control_node",
@@ -98,6 +102,10 @@ class E5ProcessTest(unittest.TestCase):
         cls.trace_count = None
         cls.trace_id = None
         cls.trace_payload = None
+        cls.first_trace_id = None
+        cls.first_trace_payload = None
+        cls.first_command_period_ns = 0
+        cls.pause_applied = False
         cls.trace_samples = 0
         cls.trace_reset = 0
         cls.observed_at_ns = 0
@@ -117,7 +125,7 @@ class E5ProcessTest(unittest.TestCase):
 
     @classmethod
     def _trace(cls, message):
-        if len(message.data) == 15:
+        if len(message.data) == 26:
             cls.trace_count = message.data[0]
             cls.trace_id = message.data[1]
             cls.trace_payload = list(message.data[2:10])
@@ -127,6 +135,18 @@ class E5ProcessTest(unittest.TestCase):
             cls.read_cycles = message.data[12]
             cls.error_reason = message.data[13]
             cls.error_quality = message.data[14]
+            cls.first_trace_id = message.data[15]
+            cls.first_trace_payload = list(message.data[16:24])
+            cls.first_command_period_ns = message.data[24]
+            cls.pause_applied = bool(message.data[25])
+
+    def trace_diagnostics(self):
+        return (f"count={self.trace_count}, reset={self.trace_reset}, "
+                f"read_cycles={self.read_cycles}, error={self.error_reason}, "
+                f"quality={self.error_quality}, latest={self.trace_payload}, "
+                f"first={self.first_trace_payload}, "
+                f"first_period_ns={self.first_command_period_ns}, "
+                f"pause_applied={self.pause_applied}")
 
     @classmethod
     def _joint_state(cls, message):
@@ -203,9 +223,14 @@ class E5ProcessTest(unittest.TestCase):
         next_publish = time.monotonic()
         samples = 0
         while next_publish < deadline:
-            wait = next_publish - time.monotonic()
-            if wait > 0:
-                time.sleep(wait)
+            # Telemetry and joint-state callbacks outnumber the 20 Hz targets.
+            # Sleeping between publications leaves old snapshots queued, so
+            # an immediate assertion can see count=0 long after transmission.
+            while True:
+                wait = next_publish - time.monotonic()
+                if wait <= 0:
+                    break
+                rclpy.spin_once(self.node, timeout_sec=min(wait, 0.02))
             self.publish(value)
             samples += 1
             next_publish += 0.05
@@ -250,13 +275,27 @@ class E5ProcessTest(unittest.TestCase):
         rclpy.spin_once(self.node, timeout_sec=0.02)
         self.assertEqual(self.trace_count, 0)
 
-        self.publish(0.5)
+        # Observe after several control cycles on purpose: the first frame
+        # must remain available even when asynchronous telemetry skips it.
+        self.assertGreaterEqual(self.publish_at_20_hz(0.5, 0.12), 3)
         self.assertTrue(self.spin_until(lambda: (self.trace_count or 0) > 0, 2.0))
-        self.assertEqual(self.trace_id, 0x0868)
-        commanded = self.decoded_canonical_position(self.trace_payload)
+        self.assertEqual(self.first_trace_id, 0x0868)
+        commanded = self.decoded_canonical_position(self.first_trace_payload)
         self.assertGreater(commanded, seed)
         self.assertLess(commanded, 0.5)
-        self.assertLess(commanded - seed, 0.05)
+        self.assertGreater(self.first_command_period_ns, 0)
+        # Check the configured 2 rad/s limit against the period actually used
+        # by the controller, with one wire quantization unit of tolerance.
+        # The process test does not promise a host scheduling bound.
+        max_step = 2.0 * self.first_command_period_ns / 1e9
+        self.assertLessEqual(commanded - seed, max_step + 25.12 / 65535.0,
+                             self.trace_diagnostics())
+        if os.environ.get("E5_SCENARIO") == "host_pause":
+            self.assertTrue(self.spin_until(lambda: self.pause_applied, 2.0),
+                            self.trace_diagnostics())
+        else:
+            self.assertFalse(self.pause_applied, self.trace_diagnostics())
+        self.assertEqual(self.error_reason, 0, self.trace_diagnostics())
         # Sustain the slowest production cadence across several complete target
         # lifetimes. Same-value messages are refreshes and must keep both the
         # controller and the independent 4/6 ms hardware lease alive.
@@ -264,7 +303,7 @@ class E5ProcessTest(unittest.TestCase):
         self.assertGreaterEqual(self.publish_at_20_hz(0.5, 0.25), 5)
         self.assertTrue(self.spin_until(
             lambda: self.trace_count > before_sustained, 1.0))
-        self.assertEqual(self.error_reason, 0)
+        self.assertEqual(self.error_reason, 0, self.trace_diagnostics())
         self.assertEqual(self.state(), "active")
 
         self.deactivate()
@@ -296,7 +335,8 @@ class E5ProcessTest(unittest.TestCase):
         self.assertTrue(self.spin_until(
             lambda: self.publisher.get_subscription_count() > 0, 2.0))
         self.assertGreaterEqual(self.publish_at_20_hz(0.25, 0.30), 6)
-        self.assertGreater(self.trace_count or 0, 0)
+        self.assertTrue(self.spin_until(lambda: (self.trace_count or 0) > 0, 1.0),
+                        self.trace_diagnostics())
         self.assertEqual(self.error_reason, 0)
         self.assertEqual(self.state(), "active")
         self.set_feedback(False)
