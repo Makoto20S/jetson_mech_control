@@ -380,10 +380,10 @@ class RosMotionTests(unittest.TestCase):
                 artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
                 if artifact:
                     destination=Path(artifact)/('single-lifecycle-'+uuid.uuid4().hex[:8])
+                    (Path(directory)/'terminal.txt').write_bytes(transcript)
+                    (Path(directory)/'loaded-libraries.json').write_text(json.dumps(sorted(loaded),indent=2))
+                    (Path(directory)/'gateway-tx.json').write_text(json.dumps([dict(monotonic_s=t,hex=p.hex()) for t,p in zip(packet_times,serial_packets)],indent=2))
                     retain(directory,destination)
-                    (destination/'terminal.txt').write_bytes(transcript)
-                    (destination/'loaded-libraries.json').write_text(json.dumps(sorted(loaded),indent=2))
-                    (destination/'gateway-tx.json').write_text(json.dumps([dict(monotonic_s=t,hex=p.hex()) for t,p in zip(packet_times,serial_packets)],indent=2))
 
     def test_single_105_real_framework_pty_lifecycle_and_chain(self):
         self.single_105_workflow()

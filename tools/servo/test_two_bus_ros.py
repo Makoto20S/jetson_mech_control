@@ -93,9 +93,9 @@ class TwoBusRosTests(unittest.TestCase):
         artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
         if artifact:
             destination=Path(artifact)/(self._testMethodName+'-'+uuid.uuid4().hex[:8])
-            retain(self.root,destination)
-            (destination/'gateways.json').write_text(json.dumps([
+            (self.root/'gateways.json').write_text(json.dumps([
                 dict(drive=g.drive,commands=g.commands,tx=g.tx,errors=g.errors) for g in self.gateways]))
+            retain(self.root,destination)
         self.temp.cleanup()
         self.assertFalse([e for g in self.gateways for e in g.errors])
 
