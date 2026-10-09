@@ -8,6 +8,7 @@ import sys
 import time
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import Vector3Stamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -24,6 +25,8 @@ class CtrBoardMonitor(Node):
         self.status = [0, 0, 0, 0]
         self.timestamp_ms = 0
         self.sample_count = 0
+        self.safety = "waiting_for_data"
+        self.packet_age_ms = "-"
         self.started_at = time.monotonic()
 
         self.create_subscription(
@@ -43,6 +46,12 @@ class CtrBoardMonitor(Node):
             "/fsr/left/total",
             self._set_left_total,
             qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            DiagnosticArray,
+            "/ctrboard/diagnostics",
+            self._set_diagnostics,
+            10,
         )
         self.create_subscription(
             UInt32,
@@ -82,6 +91,17 @@ class CtrBoardMonitor(Node):
         self.timestamp_ms = message.data
         self.sample_count += 1
 
+    def _set_diagnostics(self, message: DiagnosticArray) -> None:
+        status = next(
+            (item for item in message.status if item.name == "ctrboard_sensor_safety"),
+            None,
+        )
+        if status is None:
+            return
+        values = {item.key: item.value for item in status.values}
+        self.safety = values.get("state", status.message)
+        self.packet_age_ms = values.get("packet_age_ms", "-")
+
     @staticmethod
     def _angles(values: list[float]) -> str:
         if not all(math.isfinite(value) for value in values):
@@ -96,7 +116,8 @@ class CtrBoardMonitor(Node):
             f"IMU1 {self._angles(self.imu1)} | "
             f"IMU2 {self._angles(self.imu2)} | "
             f"FSR L={self.left_total:6d} R={self.right_total:6d} | "
-            f"status={self.status} | {rate:5.1f} Hz"
+            f"status={self.status} | SAFE={self.safety} "
+            f"age={self.packet_age_ms}ms | {rate:5.1f} Hz"
         )
         sys.stdout.write(f"\r\033[2K{line}")
         sys.stdout.flush()

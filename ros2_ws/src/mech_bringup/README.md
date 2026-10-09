@@ -29,6 +29,29 @@ all three deployment xacro examples load it.
   unknown keys, non-numeric values, and over-budget TTLs reject configure.
   `sub_mode` is an explicit parameter (`position`|`velocity`|`torque`,
   default `position`); the URDF's command interface must match it.
+- **`Ak30ServoSystem`** — the position-only servo plugin
+  (`mech_bringup/Ak30ServoSystem`). A single serial port and
+  `UsbCdcTransport` feed one `Ak30ServoRuntime`, which uses the existing
+  `BusRuntime` and one `Ak30ServoPositionSession` per joint. The exported
+  state is position alone; each joint declares position and
+  `command_generation` commands. A standard position controller may claim
+  position alone, while a controller that also claims generation gets the
+  stronger refresh rule. No velocity or effort state is inferred from raw
+  eRPM or Iq.
+- **`Ak30ServoRuntimeParams`** — strict, I/O-free parsing for that servo
+  plugin. Hardware parameters must include `profile=ak30_servo_extended`,
+  `device_path`, `logical_bus`, `control_period_ns`,
+  `command_ttl_ns`, `command_hard_ttl_ns`, and `feedback_ttl_ns`.
+  Optional `trace_name` (1–32 lowercase letters, digits or hyphens) partitions
+  bounded snapshot filenames when multiple servo components share one manager.
+  All other unknown parameters remain rejected. The operator admits the total
+  memory budget before starting any component and divides it across the buses.
+  Each joint must explicitly supply `drive_id`, separate verified
+  `target_scale`/`target_offset` and `feedback_scale`/`feedback_offset`,
+  `speed_erpm`, `acceleration_raw`, and
+  `position_min_rad`/`position_max_rad`/`position_max_error_rad`.
+  Unknown or missing keys, duplicate IDs, unsafe time budgets, or invalid
+  interface declarations reject initialization before a serial port is made.
 - **`FoundationHarness`** — the Foundation-era simulation harness
   (CompositeSystem + TargetLimiter through exported interfaces).
 - **Device probes** (`ak30_torque_probe`, `ak30_position_probe`) — the
@@ -42,6 +65,45 @@ all three deployment xacro examples load it.
   one per force-control sub-mode. The position-controller spawner ships
   commented out: uncommenting it arms position commands, which stay
   gated by ADR-006 and per-test owner authorization.
+
+## Servo position composition
+
+`Ak30ServoSystem::on_init` validates the complete declaration, constructs
+one stable serial/CDC chain, and installs the runtime into `CompositeSystem`
+without opening a port. Configure validates only. Activation lets the
+runtime's `BusRuntime` acquire the shared physical-bus registry entry and
+open the port, then sends the gateway's existing 0x12 pass-through init once
+for that activation before any read/write cycle. A second plugin using the
+same physical path cannot open it while the first owns it. Deactivation,
+error, cleanup, and active destruction stop the runtime, revoke pending host
+commands, and close the port. Reactivation needs new feedback and a new
+claim; it sends the gateway init again. The init count is separate from
+motor-frame transmit statistics.
+
+Both production plugins construct `PosixCdcSerialPort`. Its open path takes
+a nonblocking advisory lock on the opened device inode before terminal
+configuration or flush. This excludes another repository process using the
+same serial implementation, including one naming the port through a symlink;
+close or destruction releases the lock. It does not prevent unrelated tools
+that ignore advisory locks from opening the device.
+
+During active cycles, `CompositeSystem` owns exported state, claims and
+generation checks; `Ak30ServoRuntime` drives the shared bus and existing
+servo sessions. All configured feedback routes must be fresh before any motor
+target can be sent. Invalid or stale sampled feedback faults the group and
+cancels pending host submissions. Releasing one claim cancels only that
+joint's pending target. Stopping submissions does not establish that either
+physical motor has stopped; the plugin sends no automatic disable, zero,
+hold or keepalive frame. The offline fixtures use synthetic mappings solely
+to verify this composition. They are not calibrated deployment parameters.
+
+Command TTLs require `0 < soft < hard`, with hard bounded by three control
+periods and 6 ms. An unsent target fails at soft expiry. A target actually
+accepted by the transport stops refreshing at soft expiry and remains in the
+host Holding stage until its original hard deadline. Expiry is checked even
+when the receive budget is exhausted and before a fresh write can replace an
+old target. Claim release clears that member's watchdog history. None of
+these host states proves that the device's internal trajectory has stopped.
 
 ## Position deployment envelope (ADR-019)
 

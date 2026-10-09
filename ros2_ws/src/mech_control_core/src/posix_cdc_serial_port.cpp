@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -15,6 +16,10 @@ namespace {
 bool configure_raw_nonblocking(int fd) noexcept {
   termios attrs{};
   if (tcgetattr(fd, &attrs) != 0) {
+    return false;
+  }
+  if (cfsetispeed(&attrs, B4000000) != 0 ||
+      cfsetospeed(&attrs, B4000000) != 0) {
     return false;
   }
   attrs.c_cflag &= ~(CSIZE | PARENB);
@@ -40,8 +45,16 @@ bool PosixCdcSerialPort::open() noexcept {
   if (fd_ >= 0) {
     return true;
   }
-  const int fd = ::open(device_path_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+  const int fd = ::open(device_path_.c_str(),
+                        O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) {
+    return false;
+  }
+  // Lock the opened inode before changing termios or flushing buffers. This
+  // also rejects a second process that reaches the same device through a
+  // symlink alias.
+  if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
+    ::close(fd);
     return false;
   }
   if (!configure_raw_nonblocking(fd)) {
@@ -87,7 +100,16 @@ TransportResult PosixCdcSerialPort::write_all(
   }
   std::size_t written = 0U;
   while (written < size) {
+    const std::int64_t begin =
+        trace_sink_ != nullptr ? trace_sink_->begin_write() : 0;
     const ssize_t sent = ::write(fd_, data + written, size - written);
+    const int saved_errno = sent < 0 ? errno : 0;
+    if (trace_sink_ != nullptr) {
+      trace_sink_->record_write(
+          data + written, sent > 0 ? static_cast<std::size_t>(sent) : 0U,
+          sent, size - written, saved_errno, begin);
+    }
+    if (sent < 0) errno = saved_errno;
     if (sent > 0) {
       written += static_cast<std::size_t>(sent);
       continue;
@@ -96,7 +118,11 @@ TransportResult PosixCdcSerialPort::write_all(
       continue;
     }
     if ((sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) || sent == 0) {
-      return TransportResult::WouldBlock;
+      // Retrying is safe only when no byte from this packet entered the
+      // stream. A partial prefix followed by backpressure must fault the bus
+      // epoch, otherwise replaying the packet corrupts vendor framing.
+      return written == 0U ? TransportResult::WouldBlock
+                           : TransportResult::Fault;
     }
     return TransportResult::Fault;
   }

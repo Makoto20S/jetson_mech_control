@@ -9,6 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
 find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(mech_control_core REQUIRED)
 find_package(mech_protocol_ctrboard REQUIRED)
@@ -17,10 +19,21 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
+add_library(${PROJECT_NAME}_imu_safety STATIC src/imu_safety.cpp)
+target_include_directories(${PROJECT_NAME}_imu_safety
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+ament_target_dependencies(${PROJECT_NAME}_imu_safety
+  builtin_interfaces
+  geometry_msgs
+  mech_protocol_ctrboard
+  sensor_msgs)
+
 add_executable(ctrboard_bridge_node src/bridge_node.cpp)
 target_include_directories(ctrboard_bridge_node
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(ctrboard_bridge_node ${PROJECT_NAME}_imu_safety)
 ament_target_dependencies(ctrboard_bridge_node
+  diagnostic_msgs
   geometry_msgs
   mech_control_core
   mech_protocol_ctrboard
@@ -42,6 +55,9 @@ if(BUILD_TESTING)
   target_include_directories(${PROJECT_NAME}_marker_test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   ament_target_dependencies(${PROJECT_NAME}_marker_test rcl)
+  ament_add_gtest(${PROJECT_NAME}_imu_safety_test test/test_imu_safety.cpp)
+  target_link_libraries(${PROJECT_NAME}_imu_safety_test
+    ${PROJECT_NAME}_imu_safety)
   ament_lint_cmake()
   ament_xmllint()
 endif()

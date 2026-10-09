@@ -1,9 +1,9 @@
 # Foundation v0.1 控制框架搭建计划
 
 > 制定日期：2026-08-03
-> 最近收敛：2026-09-06（Foundation RC2 完成后本文件转为实施记录；当前活动阶段是 AK3.0 力控适配器，状态见[规划索引](README.md) §3）
+> 最近收敛：2026-09-06（Foundation RC2 完成后本文件转为实施记录；当前活动状态（包括已合并的双路伺服）见[规划索引](README.md) §3）
 > 当前状态：**FND-000～FND-015、RSP-001/RSP-002 与 INT-001 全部完成**——RC2 取证（Jetson ARM64 clean build/test、sanitizers、30 min 稳定性 10670 runs、首次 vcan 往返）收口于 `9317d76` 并打 tag `v0.1.0-foundation-rc2`；`main` 为六包结构（含 PR #9 合并的 `mech_protocol_cubemars`）
-> 执行方向：Foundation 已收口；后续按 §12 分工进入 AK3.0 力控适配器（第一切片已合并）与 ros2_control hardware plugin 接线
+> 文档职责：保留 Foundation 实施顺序与验收记录；AK3.0 力控/伺服及硬件接线已有后续实现，当前入口为[规划索引](README.md)，不重复执行旧阶段。
 
 ## 1. 决策结论
 
@@ -34,7 +34,7 @@
 | 实现代码 | 五个 Foundation package 骨架、manifest、Docker/CI 与 build/context/ADR 检查脚本已存在 | 先完成 FND-004A，再从 FND-005 写核心类型；不提前写厂商 adapter |
 | 目标平台 | 目标 Jetson 已于 2026-08-23 迁移为 Ubuntu 22.04.5 / JetPack 6.2 并装好 ROS 2 Humble；当前主开发工作区为 Ubuntu 22.04 x86_64 | 构建与 vcan 测试在 Ubuntu 22.04 环境执行；ARM64 结论只来自目标 Jetson |
 
-`03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件保留 Foundation 阶段的执行顺序、核心契约和 Foundation 后的分工方式。**Foundation 已于 2026-08-31 收口**，当前实施入口改为[规划索引](README.md) §3 的 AK3.0 适配器阶段。
+`03_mvp_delivery_plan.md` 仍是包含真实硬件和完整 MVP 的总路线；本文件保留 Foundation 阶段的执行顺序、核心契约和 Foundation 后的分工方式。**Foundation 已于 2026-08-31 收口**，当前实施入口改为[规划索引](README.md) §3 的活动任务。
 
 ## 3. Foundation v0.1 的成功定义
 
@@ -261,6 +261,7 @@ FND-004 已完成架构决策固化；该任务没有写运行时代码，也没
 | [ADR-017](../adr/ADR-017-command-freshness-generation-interface.md) | Accepted | 命令新鲜度两档代号接口：硬件层无法观测「是否有人写过」裸 `double*`，改由每关节一个始终导出、可选 claim 的 `command_generation` 接口承载。claim 了的走强档（代号不变即不发送），没 claim 的走弱档并把缺口登记为已接受风险——强制版本已被否决，因为它会让第三方控制器无法驱动本硬件 |
 | [ADR-018](../adr/ADR-018-upstream-target-lifetime.md) | Accepted | `PositionCommandController` 上游目标暂定 100/106 ms，支持 20–50 Hz policy producer；硬件命令租约保持 4/6 ms，标准控制器弱档兼容性不变；Jetson 无设备测量不得表述为硬实时上界 |
 | [ADR-019](../adr/ADR-019-hardware-position-envelope.md) | Proposed | Position 子模式的硬件位置包络：绝对区间（含端点）与相对最新可用反馈的 `position_max_error_rad`，越界不裁剪、不发送、锁存并由生命周期清除；闸门在共享硬件层，第三方控制器同样受约束，`position_max_error_rad × Kp` 构成命令力矩上限。实机证据尚缺，台架通过后才转 Accepted |
+| [ADR-020](../adr/ADR-020-declared-state-interfaces.md) | Proposed | 通用状态按配置声明子集；新伺服只导出位置，保留原始诊断；现有力控三状态和控制器 claim 契约不变。集成与实机验证分别取证 |
 
 十五份 ADR 均包含状态、日期/owner role、上下文、决策、替代、正负后果、可执行验证、重审触发和来源。ADR-006 的 Proposed 状态是有意的失败关闭边界，不是 FND-004 遗漏；它必须等 G0/G1 和负载/仲裁/错误证据后才能转为 Accepted。后续 FND-005～009 直接引用这些接口边界。
 

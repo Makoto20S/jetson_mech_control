@@ -15,29 +15,212 @@ concurrency:
 jobs:
   context:
     name: Portable context checks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Validate repository context
         run: python3 tools/ci/context_check.py
-      - name: Bench operator script syntax
-        # The behavioral suite uses typed ROS services and is registered with
-        # mech_bringup's tests inside the pinned Humble build environment.
-        run: bash -n tools/bench/activate_position_controller.sh tools/bench/test_activate_position_controller.sh
+      - name: Markdown local links and anchors
+        run: python3 tools/ci/check_docs.py
+      - name: Repository Python and Bash syntax
+        # Parsing only: no imports, launches, serial ports or motor commands.
+        run: python3 tools/ci/check_script_syntax.py
+      - name: Portable CI checker regression tests
+        run: python3 -m unittest discover -s tools/ci -p 'test_*.py' -v
 
   build:
-    name: Ubuntu 22.04 / ROS 2 Humble build and unit tests
-    runs-on: ubuntu-22.04
+    name: ${{ matrix.check_name }}
+    runs-on: ${{ matrix.runner }}
     needs: context
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      # Preserve the other architecture's results when one platform fails.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            # Preserve the existing check name used by branch protection.
+            check_name: Ubuntu 22.04 / ROS 2 Humble build and unit tests
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            check_name: Ubuntu 22.04 / ROS 2 Humble ARM64 build and unit tests
+    env:
+      CI_ARCH: ${{ matrix.arch }}
+      CI_PLATFORM: linux/${{ matrix.arch }}
+      CI_CONTAINER: mech-ci-tests
     steps:
+      - name: Prepare evidence and cache paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mech-ci-evidence"
+          echo "CI initialized for $CI_ARCH" > "$RUNNER_TEMP/mech-ci-evidence/initialization.log"
+          {
+            echo "CI_EVIDENCE=$RUNNER_TEMP/mech-ci-evidence"
+            echo "CI_CACHE=$RUNNER_TEMP/mech-build-cache"
+            echo "CI_CACHE_NEXT=$RUNNER_TEMP/mech-build-cache-next"
+          } >> "$GITHUB_ENV"
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify native runner platform
+        run: python3 tools/ci/check_ci_platform.py --expected "$CI_ARCH" --output "$CI_EVIDENCE/runner-platform.json"
+      - name: Set up Docker builder
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Restore build cache
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/mech-build-cache
+          key: mech-build-linux-${{ matrix.arch }}-v1-${{ hashFiles('docker/ros_humble_jammy/Dockerfile', 'manifests/dependencies.json', 'ros2_ws/src/**/package.xml') }}-${{ github.sha }}
+          restore-keys: |
+            mech-build-linux-${{ matrix.arch }}-v1-${{ hashFiles('docker/ros_humble_jammy/Dockerfile', 'manifests/dependencies.json', 'ros2_ws/src/**/package.xml') }}-
       - name: Build pinned Humble image
-        run: >-
-          docker build
-          --file docker/ros_humble_jammy/Dockerfile
-          --tag jetson-mech-control-foundation:${{ github.sha }}
-          .
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CI_EVIDENCE"
+          cache_args=()
+          if [[ -f "$CI_CACHE/index.json" ]]; then
+            cache_args+=(--cache-from "type=local,src=$CI_CACHE")
+          fi
+          docker buildx build --load --progress=plain --shm-size=2g --platform "$CI_PLATFORM" \
+            "${cache_args[@]}" \
+            --cache-to "type=local,dest=$CI_CACHE_NEXT,mode=max" \
+            --build-arg MECH_BUILD_ONLY=1 \
+            --file docker/ros_humble_jammy/Dockerfile \
+            --tag jetson-mech-control-foundation:${{ github.sha }} \
+            . 2>&1 | tee "$CI_EVIDENCE/image-build.log"
+      - name: Verify native image platform
+        run: python3 tools/ci/check_ci_platform.py --expected "$CI_ARCH" --image "jetson-mech-control-foundation:${{ github.sha }}" --output "$CI_EVIDENCE/runner-platform.json"
+      - name: Rotate build cache
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Export to a fresh directory so unused blobs do not accumulate.
+          # Keep the saved/restored path identical for actions/cache.
+          if [[ -d "$CI_CACHE" ]]; then
+            mv "$CI_CACHE" "$CI_CACHE-previous"
+          fi
+          mv "$CI_CACHE_NEXT" "$CI_CACHE"
+      - name: Save fresh build cache
+        continue-on-error: true
+        if: ${{ success() }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/mech-build-cache
+          key: mech-build-linux-${{ matrix.arch }}-v1-${{ hashFiles('docker/ros_humble_jammy/Dockerfile', 'manifests/dependencies.json', 'ros2_ws/src/**/package.xml') }}-${{ github.sha }}
+      - name: Run tests with controller scheduling permissions
+        # Keep production 6 ms hard deadlines. No device or host mounts.
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --name "$CI_CONTAINER" --platform "$CI_PLATFORM" --shm-size=2g \
+            --cap-add=SYS_NICE --ulimit rtprio=99 --ulimit memlock=-1 \
+            -e MECH_TEST_ONLY=1 -e ROS_LOG_DIR=/workspace/ci-ros-logs \
+            jetson-mech-control-foundation:${{ github.sha }} \
+            bash /workspace/tools/ci/build_workspace.sh \
+            2>&1 | tee "$CI_EVIDENCE/test-console.log"
+      - name: Collect container evidence
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: python3 tools/ci/collect_ci_evidence.py --container "$CI_CONTAINER" --output "$CI_EVIDENCE"
+      - name: Upload CI evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mech-ci-evidence-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mech-ci-evidence/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Remove test container after collection
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if docker container inspect "$CI_CONTAINER" >/dev/null 2>&1; then
+            docker rm -f "$CI_CONTAINER"
+          fi
+
+  sanitizers:
+    name: ASan / UBSan build and tests
+    runs-on: ubuntu-24.04
+    needs: context
+    timeout-minutes: 40
+    env:
+      CI_ARCH: amd64
+      CI_CONTAINER: mech-ci-sanitizers
+    steps:
+      - name: Prepare evidence and cache paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mech-sanitizer-evidence"
+          echo "CI initialized for $CI_ARCH sanitizers" > "$RUNNER_TEMP/mech-sanitizer-evidence/initialization.log"
+          {
+            echo "CI_EVIDENCE=$RUNNER_TEMP/mech-sanitizer-evidence"
+            echo "CI_CACHE=$RUNNER_TEMP/mech-build-cache"
+          } >> "$GITHUB_ENV"
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify native runner platform
+        run: python3 tools/ci/check_ci_platform.py --expected "$CI_ARCH" --output "$CI_EVIDENCE/runner-platform.json"
+      - name: Set up Docker builder
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Restore dependency layers from build cache
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/mech-build-cache
+          key: mech-build-linux-amd64-v1-${{ hashFiles('docker/ros_humble_jammy/Dockerfile', 'manifests/dependencies.json', 'ros2_ws/src/**/package.xml') }}-${{ github.sha }}
+          restore-keys: |
+            mech-build-linux-amd64-v1-${{ hashFiles('docker/ros_humble_jammy/Dockerfile', 'manifests/dependencies.json', 'ros2_ws/src/**/package.xml') }}-
+      - name: Build pinned sanitizer source image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CI_EVIDENCE"
+          cache_args=()
+          if [[ -f "$CI_CACHE/index.json" ]]; then
+            cache_args+=(--cache-from "type=local,src=$CI_CACHE")
+          fi
+          docker buildx build --load --progress=plain --target test-source --platform linux/amd64 \
+            "${cache_args[@]}" \
+            --file docker/ros_humble_jammy/Dockerfile \
+            --tag jetson-mech-control-sanitizers:${{ github.sha }} \
+            . 2>&1 | tee "$CI_EVIDENCE/image-build.log"
+      - name: Verify native image platform
+        run: python3 tools/ci/check_ci_platform.py --expected "$CI_ARCH" --image "jetson-mech-control-sanitizers:${{ github.sha }}" --output "$CI_EVIDENCE/runner-platform.json"
+      - name: Build and test with ASan and UBSan
+        # Source-only image; no release build reuse, device or host mounts.
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --name "$CI_CONTAINER" --platform linux/amd64 --shm-size=2g \
+            --cap-add=SYS_NICE --ulimit rtprio=99 --ulimit memlock=-1 \
+            -e MECH_ASAN_DETECT_LEAKS=0 -e ROS_LOG_DIR=/workspace/ci-ros-logs \
+            jetson-mech-control-sanitizers:${{ github.sha }} \
+            bash /workspace/tools/ci/run_sanitizers.sh /workspace \
+            2>&1 | tee "$CI_EVIDENCE/test-console.log"
+      - name: Collect sanitizer evidence
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: python3 tools/ci/collect_ci_evidence.py --container "$CI_CONTAINER" --output "$CI_EVIDENCE" --sanitizers
+      - name: Upload sanitizer evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mech-sanitizer-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mech-sanitizer-evidence/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Remove sanitizer container after collection
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if docker container inspect "$CI_CONTAINER" >/dev/null 2>&1; then
+            docker rm -f "$CI_CONTAINER"
+          fi

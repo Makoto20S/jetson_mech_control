@@ -20,6 +20,12 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
    MECH_OUTPUT_ROOT=/tmp/mech-foundation-rc tools/ci/build_workspace.sh
    ```
 
+   CI executes this build/test path on both native x86_64 and ARM64 hosted
+   runners, with the pinned Jammy/Humble Docker image. Runner/image architecture
+   guards must pass, caches/artifacts are separated by architecture, and both
+   platform results are retained even if one fails. This ARM64 runner is not
+   the physical Jetson and supplies no device or real-time acceptance evidence.
+
 3. Address/undefined behavior sanitizers:
 
    ```bash
@@ -29,6 +35,34 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
    LeakSanitizer is optional because it cannot run under ptrace-managed
    executors. Enable it on a standalone runner with
    `MECH_ASAN_DETECT_LEAKS=1`; ASan and UBSan remain mandatory in all cases.
+
+   The CI sanitizer job is independent of the normal build/test job and uses
+   the same pinned Humble dependencies. Before tests, the script verifies all
+   package CMake/compilation flags and writes `sanitizer-build.json`. CI retains
+   this proof and failure logs in its separate sanitizer artifact. The existing
+   upstream Humble allocator mismatch exception is scoped to manager integration
+   processes; other ASan checks and UBSan remain enabled. See the
+   [workspace instructions](../../ros2_ws/README.md#address-and-undefined-behavior-sanitizers).
+
+   Inspect GTest XML `result="skipped"` as well as the colcon summary; the latter
+   can report zero skips despite conditional vcan/position-only cases.
+
+   Synthetic servo JTC functional tests share a logical hardware clock that
+   advances 2 ms per read/update/write cycle. ROS trajectory/action clocks and
+   host pacing still use real time. A host pause beyond 6 ms must not become a
+   synthetic hardware fault; dedicated runtime/plugin tests independently
+   enforce the unchanged 3 ms soft and 6 ms hard deadlines in logical time.
+   These functional tests do not establish a real-time scheduling guarantee.
+
+   E5 force-control process tests use the same 2 ms logical hardware cadence,
+   while the controller's 100/106 ms target policy and manager update periods
+   keep real time. They retain the first transmitted frame after each trace
+   reset, checking its slew against the actual update period and CAN payload
+   quantization; a later telemetry snapshot is not the first command. An
+   additional scenario injects a 20 ms host pause and requires the functional
+   chain to remain usable, including target expiry and inactive restart checks.
+   The 4/6 ms hardware lease and feedback-loss protections remain enforced by
+   separate runtime tests; production code and parameters are unchanged.
 
 4. Deterministic lifecycle/performance test:
 

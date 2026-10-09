@@ -13,6 +13,19 @@ fresh feedback or physical rest.
 Cleanup/configure is the recovery path. Deactivation revokes pending commands
 immediately and does not synthesize a zero or a braking command.
 
+## State declarations
+
+Each joint declares a nonempty subset of the standard `position`, `velocity`,
+and `effort` state interfaces. Unknown or repeated names are rejected. A joint
+with a position command must declare position state so a weak controller claim
+can seed its hold from accepted feedback. State interfaces are exported in
+position, velocity, effort order for the fields declared by that joint.
+
+A runtime may keep unsupported canonical fields unavailable (NaN). Only
+declared fields are published and checked for finite values on each active
+read. A nonfinite declared value latches the existing hardware fault. Existing
+three-state declarations retain the same behavior.
+
 ## Position command bundles
 
 A joint may declare one of `position`, `velocity`, `effort`, `position+velocity`,
@@ -29,3 +42,14 @@ position from accepted feedback; strong claims wait for a changed generation.
 Revocation cancels the pending tuple and clears auxiliary values. Position-only
 controllers still use a position-only declaration; they must not partially claim
 a larger bundle. See [design](../../../docs/development/position_feedforward_design.md).
+## Multiple hardware components in one manager
+
+Humble passes the full interface switch to every hardware component
+([SystemInterface contract](https://control.ros.org/humble/doc/api/classhardware__interface_1_1SystemInterface.html)).
+`CompositeSystem` filters switches by its declared joint names before validating
+or changing local claims. Requests concerning only another component are no-ops,
+including when this component is inactive. Unknown interfaces on a local joint,
+malformed names, duplicate local claims and conflicting local start/stop requests
+remain errors; global interface existence is checked by the resource manager.
+Filtering is shared by all derived hardware plugins, without vendor-specific
+branches or changes to the runtime command contract.

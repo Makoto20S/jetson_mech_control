@@ -14,6 +14,8 @@ find_package(mech_control_core REQUIRED)
 add_library(${PROJECT_NAME}
   src/package_marker.cpp
   src/ak30_force_wire.cpp
+  src/ak30_servo_wire.cpp
+  src/ak30_servo_position_session.cpp
   src/ak30_mapping.cpp
   src/ak30_force_codec.cpp
   src/ak30_force_session.cpp
@@ -45,6 +47,8 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_package_marker.cpp
     test/test_ak30_force_wire.cpp
+    test/test_ak30_servo_wire.cpp
+    test/test_ak30_servo_position_session.cpp
     test/test_ak30_feedback_decode.cpp
     test/test_ak30_mapping.cpp
     test/test_ak30_force_codec.cpp
