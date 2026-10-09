@@ -81,9 +81,11 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
      --output-on-failure
    ```
 
-   `RunsFiveHundredHertzAndExpiresCommandToNeutral` executes 1000 virtual
-   2 ms cycles, checks command TTL returns to neutral, records cycle latency,
-   and fails if a host cycle exceeds 2 ms. This is a host benchmark, not a
+   `RunsFiveHundredHertzWhileTargetKeepsBeingRefreshed` executes 1000 virtual
+   2 ms cycles and records host cycle latency without a scheduling threshold.
+   Separate expiry tests check hold followed by fault, never movement to zero.
+   The opt-in `mech_bringup_performance_test` enforces the 2 ms host bound with
+   `-DMECH_ENABLE_HOST_PERFORMANCE_TESTS=ON`. This is a host benchmark, not a
    real-time or device-performance claim.
 
 5. Linux vcan round-trip (software-only, requires network administration):
@@ -126,3 +128,75 @@ interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
   firmware matrix, and reusable-source licensing remain unresolved.
 - No CubeMars or HI12 device adapter is part of Foundation RC.
 - Real CAN and device activation remain gated by G0-G3 and ADR-006.
+
+## CI clock and acceptance contract
+
+The current six-package CI separates functional correctness, deadline semantics
+and host performance. A green hosted run supplies no real-time guarantee.
+
+| Test family | Hardware time | Host time and acceptance |
+|---|---|---|
+| Force/servo runtime and plugin unit tests | Explicit injected timestamps | Exact soft/hard expiry, missing feedback and no post-expiry transmission remain mandatory |
+| Force/servo JTC and E5 integration | 2 ms logical hardware cycles | Bounded ROS discovery/action waits; injected pauses must not replace hardware time |
+| Single/two-bus PTY operator workflows | Test-only composition of the production servo plugin, 2 ms per read | Real manager/JTC, PTY codecs, lifecycle, operator timers and 31-second hold; 20/50/100 ms pauses with a pending command |
+| Foundation functional endurance | 1000 logical 2 ms cycles | Position, refresh, lifecycle and protection assertions; host maximum recorded in XML |
+| Foundation host performance | Logical harness stimulus, actual elapsed cycle measurements | Explicit opt-in, unsanitized qualified host; maximum must remain below 2 ms |
+
+`ServoPtyTestSystem` exists only under `BUILD_TESTING`, in a separate plugin
+manifest. It composes the unchanged final `Ak30ServoSystem`, forwards its
+lifecycle and interfaces, and accepts only `/dev/pts/<number>`. Production
+operator launch/configuration never selects it. The helper
+`tools/servo/pty_clock_fixture.py` selects it only for synthetic process tests.
+The production servo 3/6 ms and force 4/6 ms deadlines remain unchanged.
+Before each logical read, a bounded Unix-socket handshake asks the gateway
+thread to queue a feedback frame. During intentional feedback loss it acknowledges
+the cycle without sending a frame; the runtime still reaches expiry. This keeps
+manager catch-up after a host pause from outrunning the synthetic peer. Within
+one cycle, clock reads advance by 1 ns so multiple queued feedback arrivals
+retain the strict ordering required by the production session.
+
+PTY raw command/serial traces retain host time; runtime deadlines use the test
+hardware clock. A separate per-process CSV records the mapping and injected
+pauses. The test auditor converts a copy to hardware time for deadline checks,
+then restores host claim timestamps for operator/service correlation. It requires
+the mapping and pause evidence, preserves the raw files, and rejects expired
+logical commands. These synthetic captures must be audited with that helper,
+not presented as production host timing evidence. Missing feedback still advances
+toward logical expiry and the two-bus loss test must stop and disable both buses.
+
+ROS discovery, process readiness and trajectory completion use bounded host
+waits. Do not replace them with arbitrary sleeps, weaken production leases,
+remove lifecycle assertions, disable sanitizer checks or retry failures to green.
+
+### Stability validation and evidence
+
+For CI timing changes, validate the final source with 20 independent rounds of
+the single/two-bus PTY, servo/force JTC and E5 host-pause suites. The three PTY
+pause durations must be observed. Run the full portable/native x86/native ARM64/
+ASan matrix three times, including one without restored build layers. Preserve
+every attempt and failure; these are empirical acceptance criteria, not a proof
+that future runs cannot fail.
+
+The Foundation workflow has manual inputs `cold_cache` and
+`stability_repetitions` (0 or 20). The normal PR/main path runs the full suite
+once; manual stability runs add repetitions after it. Both paths use the same
+test targets and still require all ordinary tests. From a built Linux workspace:
+
+```bash
+MECH_OUTPUT_ROOT=/tmp/mech-foundation-rc MECH_STABILITY_REPETITIONS=20 \
+  bash tools/ci/run_stability.sh
+```
+
+Each round has a console log, XML copy and exit code under `ci-stability`.
+Any failed round fails the command even if later rounds pass. CI retains these
+alongside colcon/ROS logs, sanitizer instrumentation evidence and
+`SERVO_TEST_ARTIFACT_DIR=/workspace/ci-test-artifacts`. PTY diagnostics include
+terminal output, gateway TX, command/serial captures, config, first-fault logs
+and clock mappings. The test copier allows only diagnostic extensions, does not
+follow symlinks, compresses unsealed snapshots, and limits payload to 256 MiB per
+test capture. `artifact-manifest.json` explicitly reports partial retention;
+partial/missing evidence must never be described as complete.
+
+Branch protection is a separate repository setting: verify that all four matrix
+checks are required before relying on protection as the merge gate. A successful
+PR run does not replace checking the post-merge main run.

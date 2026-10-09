@@ -44,7 +44,9 @@ def collect(container, output, run=docker, sanitizers=False):
                 raise RuntimeError("could not stop test container: " + result.stderr.strip())
             report["stopped_for_collection"] = True
         sources = [("/workspace/log", "colcon-log", True),
-                   ("/workspace/ci-ros-logs", "ros-log", False)]
+                   ("/workspace/ci-ros-logs", "ros-log", False),
+                   ("/workspace/ci-test-artifacts", "pty-tests", False),
+                   ("/workspace/ci-stability", "stability", False)]
         if sanitizers:
             sources.append(("/workspace/sanitizer-build.json", "sanitizer-build.json", False))
         for package in PACKAGES:

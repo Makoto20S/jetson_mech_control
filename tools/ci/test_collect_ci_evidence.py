@@ -44,6 +44,8 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(report["container_state"]["ExitCode"], 1)
         self.assertTrue(report["container_state"]["OOMKilled"])
         self.assertIn("colcon-log/evidence.txt", files)
+        self.assertIn("pty-tests/evidence.txt", files)
+        self.assertIn("stability/evidence.txt", files)
         self.assertIn("reports/mech_bringup/test_results/evidence.txt", files)
         self.assertFalse(any(c[0] in ("rm", "exec") for c in calls))
 

@@ -14,6 +14,9 @@ import time
 import tty
 import unittest
 import xml.etree.ElementTree as ET
+import uuid
+from pty_clock_fixture import audit_trace, ClockPeer
+from test_artifacts import retain
 from ament_index_python.packages import get_package_prefix
 from test_two_bus_config import ROOT, config_for, op, load
 
@@ -28,8 +31,10 @@ class Gateway:
         self.path = os.ttyname(self.slave)
         self.drive, self.angle = drive, angle
         self.commands, self.errors = [], []
+        self.tx = []
         self.receive = True
         self.ack = True
+        self.clock_peer = None
         self.done = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -49,6 +54,8 @@ class Gateway:
                     size = int.from_bytes(pending[2:4],'little')+7
                     if len(pending)<size: break
                     packet, pending = pending[:size], pending[size:]
+                    if len(self.tx) >= 100000: raise AssertionError('gateway trace capacity exceeded')
+                    self.tx.append(dict(monotonic_s=time.monotonic(),hex=packet.hex()))
                     body = packet[7:]
                     if body==bytes(6): continue
                     if packet[4]!=audit.crc(packet[1:4],255,0x8c) or int.from_bytes(packet[5:7],'little')!=audit.crc(body,65535,0x8408):
@@ -62,10 +69,13 @@ class Gateway:
                 now = time.monotonic()
                 if self.receive and now>=next_feedback:
                     os.write(self.master,self.feedback()); next_feedback=now+.005
+                if self.clock_peer is not None:
+                    self.clock_peer.exchange(lambda: os.write(self.master,self.feedback()) if self.receive else None)
         except Exception as exc: self.errors.append(str(exc))
 
     def close(self):
         self.done.set(); self.thread.join(2)
+        if self.clock_peer is not None: self.clock_peer.close()
         os.close(self.master); os.close(self.slave)
 
 
@@ -80,6 +90,12 @@ class TwoBusRosTests(unittest.TestCase):
 
     def tearDown(self):
         for gateway in self.gateways: gateway.close()
+        artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
+        if artifact:
+            destination=Path(artifact)/(self._testMethodName+'-'+uuid.uuid4().hex[:8])
+            retain(self.root,destination)
+            (destination/'gateways.json').write_text(json.dumps([
+                dict(drive=g.drive,commands=g.commands,tx=g.tx,errors=g.errors) for g in self.gateways]))
         self.temp.cleanup()
         self.assertFalse([e for g in self.gateways for e in g.errors])
 
@@ -133,12 +149,14 @@ class TwoBusRosTests(unittest.TestCase):
 
     def test_real_framework_routing_restart_disable_and_separate_traces(self, fault=False):
         config_path=self.root/'config.json'; config_path.write_text(json.dumps(self.config))
+        for bus, gateway in enumerate(self.gateways, 1):
+            gateway.clock_peer=ClockPeer(self.root/f'runs/clocks/bus-{bus}.sock')
         before=config_path.read_bytes()
         master,slave=pty.openpty()
-        proc=subprocess.Popen(['/usr/bin/python3',str(ROOT/'motion.py'),'--config',str(config_path),
+        proc=subprocess.Popen(['/usr/bin/python3',str(ROOT/'pty_clock_fixture.py'),'--config',str(config_path),
                                '--run-dir',str(self.root/'runs'),'--disable-helper',str(BIN/'servo_disable')],
                               stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
-        os.close(slave); pending=bytearray()
+        os.close(slave); pending=bytearray(); transcript=bytearray()
         def expect(text,timeout=25.):
             end=time.monotonic()+timeout
             while time.monotonic()<end:
@@ -146,7 +164,8 @@ class TwoBusRosTests(unittest.TestCase):
                 if index>=0:
                     del pending[:index+len(text.encode())];return
                 if select.select([master],[],[],.05)[0]:
-                    try: pending.extend(os.read(master,65536))
+                    try:
+                        data=os.read(master,65536); pending.extend(data); transcript.extend(data)
                     except OSError: break
             logs={p.name:p.read_text(errors='replace')[-6000:]
                   for p in self.root.glob('runs/move-*/framework.log')}
@@ -179,8 +198,8 @@ class TwoBusRosTests(unittest.TestCase):
                 self.assertEqual(len(manifest['snapshots']),4)
                 events=[json.loads(row) for row in (directory/'events.jsonl').read_text().splitlines()]
                 for bus,drive in ((1,105),(2,104)):
-                    with gzip.open(directory/f'command-chain-bus-{bus}.jsonl.gz','rt') as stream:
-                        report=audit.audit_records(json.loads(row) for row in stream)
+                    report=audit_trace(directory/f'command-chain-bus-{bus}.jsonl.gz',
+                                       self.root/'runs/clocks',require_pauses=directory==run)
                     self.assertTrue(report['complete'],report)
                     self.assertEqual(set(report['drives']),{drive})
                     self.assertEqual(audit.audit_operator(events,report['acquisitions']),[])
@@ -190,6 +209,7 @@ class TwoBusRosTests(unittest.TestCase):
         finally:
             if proc.poll() is None:
                 proc.terminate(); proc.wait(timeout=25)
+            (self.root/'terminal.txt').write_bytes(transcript)
             os.close(master)
 
 
