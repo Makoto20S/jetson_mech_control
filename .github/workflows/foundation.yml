@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: foundation-${{ github.workflow }}-${{ github.ref }}
+  group: foundation-${{ github.workflow }}-${{ github.ref }}-${{ inputs.cold_cache }}-${{ inputs.stability_repetitions }}
   cancel-in-progress: true
 
 jobs:
