@@ -25,6 +25,7 @@
 - 从 handoff 恢复时，必须先用 `write-codex-handoff` 的 `RESUME` 流程验证结构和时效，再与当前 Git、文件和测试核对。
 - 创建 handoff 后必须验证；已宣布为最终交接的文件不可继续改写，后续变化创建新的 successor handoff。
 - 两个 skill 的唯一批准来源、已核验提交和用途记录在 `manifests/ai_skills.yaml`。项目负责人已授权在缺失时从其中列出的仓库安装；不得静默替换为 fork 或其他同名来源。
+- 新增或扩展 CAN 电机适配时，使用仓库维护的 `skills/mech-can-motor-adapter/SKILL.md`；它整理扩展层选择、协议证据与验证流程，不授予额外实机操作权限。其源文件随本仓库 PR 评审，不替代以上两个上下文 skill。
 - 若当前 AI 环境缺少 skill，先读取 manifest，并在当前环境权限允许时安装对应仓库。优先使用已核验提交；若只能安装移动中的 `main`，必须核对实际 HEAD 并报告与 manifest 的差异，不得静默更新基线。
 - 若网络、权限或 AI 产品不支持安装，必须明确报告缺失，随后按统一流程手工执行等价步骤；不得声称已运行不存在的 skill 或 validator，也不得另建第四种项目记忆格式。
 
