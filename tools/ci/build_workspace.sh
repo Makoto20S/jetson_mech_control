@@ -87,3 +87,7 @@ env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" test \
 env PATH="${SYSTEM_PATH}" colcon test-result \
   --test-result-base "${OUTPUT_ROOT}/build" \
   --verbose
+
+if [[ "${MECH_STABILITY_REPETITIONS:-0}" != "0" ]]; then
+  MECH_OUTPUT_ROOT="$OUTPUT_ROOT" bash "$SCRIPT_DIR/run_stability.sh"
+fi

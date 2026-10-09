@@ -135,6 +135,13 @@ if(BUILD_TESTING)
     hardware_interface test/e5_test_plugins.xml)
   install(TARGETS ${PROJECT_NAME}_e5_test_system
     LIBRARY DESTINATION lib)
+  add_library(${PROJECT_NAME}_servo_pty_test_system SHARED
+    test/servo_pty_test_system.cpp)
+  target_link_libraries(${PROJECT_NAME}_servo_pty_test_system ${PROJECT_NAME})
+  pluginlib_export_plugin_description_file(
+    hardware_interface test/servo_pty_test_plugins.xml)
+  install(TARGETS ${PROJECT_NAME}_servo_pty_test_system
+    LIBRARY DESTINATION lib)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
@@ -154,6 +161,15 @@ if(BUILD_TESTING)
   target_compile_definitions(${PROJECT_NAME}_test PRIVATE
     MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+  option(MECH_ENABLE_HOST_PERFORMANCE_TESTS
+    "Enable host timing acceptance on a qualified, unsanitized Linux host" OFF)
+  if(MECH_ENABLE_HOST_PERFORMANCE_TESTS)
+    ament_add_gtest(${PROJECT_NAME}_performance_test
+      test/test_foundation_performance.cpp)
+    target_link_libraries(${PROJECT_NAME}_performance_test ${PROJECT_NAME})
+    set_tests_properties(${PROJECT_NAME}_performance_test PROPERTIES
+      LABELS "host_performance" RUN_SERIAL TRUE)
+  endif()
 
   # ADR-015 E1's last layer: the authorization boundary driven by a real
   # controller_manager. Kept in its own target because it needs an rclcpp

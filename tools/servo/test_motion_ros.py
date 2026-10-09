@@ -5,7 +5,6 @@ import math
 import os
 import pty
 import select
-import shutil
 import struct
 import json
 from pathlib import Path
@@ -16,6 +15,8 @@ import threading
 import tty
 import unittest
 import uuid
+from pty_clock_fixture import audit_trace, ClockPeer
+from test_artifacts import retain
 
 ROOT=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('servo_motion',ROOT/'motion.py')
@@ -214,7 +215,7 @@ class RosMotionTests(unittest.TestCase):
                 artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
                 if artifact:
                     destination=Path(artifact)/('loopback-lifecycle-'+uuid.uuid4().hex[:8])
-                    shutil.copytree(directory,destination)
+                    retain(directory,destination)
 
     def single_105_workflow(self):
         """Production Ak30ServoSystem and helper share a synthetic USB gateway."""
@@ -227,6 +228,7 @@ class RosMotionTests(unittest.TestCase):
         tty.setraw(serial_slave)
         serial_packets=[];packet_times=[];gateway_errors=[]
         serial_done=threading.Event()
+        clock_peer=None
         def feedback(angle,status=0):
             body=struct.pack('<IBB',0x2969,4,8)+struct.pack('>hhhBB',round(angle*10),0,0,40,status)
             head=b'\x12'+struct.pack('<H',len(body))
@@ -260,15 +262,18 @@ class RosMotionTests(unittest.TestCase):
                         # Never synthesize 104 feedback: the production graph must
                         # become ready and move with the selected 105 alone.
                         os.write(serial_master,feedback(angle));next_feedback=now+.005
+                    if clock_peer is not None:
+                        clock_peer.exchange(lambda: os.write(serial_master,feedback(angle)))
             except Exception as exc:gateway_errors.append(str(exc))
         gateway=threading.Thread(target=serial_gateway,daemon=True);gateway.start()
         config=motion.load_config(ROOT/'config.example.json',require_calibrated=False)
         config['calibrated']=True;config['device_path']=os.ttyname(serial_slave)
         for motor in config['motors']:motor.update(position_min_rad=-2.,position_max_rad=2.)
         with tempfile.TemporaryDirectory() as directory:
+            clock_peer=ClockPeer(Path(directory)/'runs/clocks/single.sock')
             path=Path(directory)/'config.json';path.write_text(json.dumps(config));before=path.read_bytes()
             master,slave=pty.openpty()
-            proc=subprocess.Popen(['/usr/bin/python3',str(ROOT/'motion.py'),'--config',str(path),
+            proc=subprocess.Popen(['/usr/bin/python3',str(ROOT/'pty_clock_fixture.py'),'--config',str(path),
                 '--run-dir',str(Path(directory)/'runs'),'--disable-helper',str(helper),'--motor-id','105'],
                 stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
             os.close(slave);received=bytearray();transcript=bytearray();loaded=set()
@@ -352,8 +357,7 @@ class RosMotionTests(unittest.TestCase):
                         opener=gzip.open if trace_path.suffix == '.gz' else open
                         with opener(trace_path,'rt') as stream:metadata=json.loads(next(stream))
                         self.assertEqual(metadata[loss_key],0,metadata)
-                    with gzip.open(trace,'rt') as stream:
-                        report=audit.audit_records(json.loads(line) for line in stream)
+                    report=audit_trace(trace,Path(directory)/'runs/clocks')
                     events=[json.loads(line) for line in trace.with_name('events.jsonl').read_text().splitlines()]
                     report['issues']+=audit.audit_operator(events,report['acquisitions'])
                     if not report['complete'] or report['issues']:
@@ -371,14 +375,15 @@ class RosMotionTests(unittest.TestCase):
             finally:
                 if proc.poll() is None:proc.terminate();proc.wait(timeout=15.)
                 os.close(master);serial_done.set();gateway.join(timeout=1.)
+                clock_peer.close()
                 os.close(serial_master);os.close(serial_slave)
                 artifact=os.environ.get('SERVO_TEST_ARTIFACT_DIR')
                 if artifact:
                     destination=Path(artifact)/('single-lifecycle-'+uuid.uuid4().hex[:8])
-                    shutil.copytree(directory,destination)
-                    (destination/'terminal.txt').write_bytes(transcript)
-                    (destination/'loaded-libraries.json').write_text(json.dumps(sorted(loaded),indent=2))
-                    (destination/'gateway-tx.json').write_text(json.dumps([dict(monotonic_s=t,hex=p.hex()) for t,p in zip(packet_times,serial_packets)],indent=2))
+                    (Path(directory)/'terminal.txt').write_bytes(transcript)
+                    (Path(directory)/'loaded-libraries.json').write_text(json.dumps(sorted(loaded),indent=2))
+                    (Path(directory)/'gateway-tx.json').write_text(json.dumps([dict(monotonic_s=t,hex=p.hex()) for t,p in zip(packet_times,serial_packets)],indent=2))
+                    retain(directory,destination)
 
     def test_single_105_real_framework_pty_lifecycle_and_chain(self):
         self.single_105_workflow()
