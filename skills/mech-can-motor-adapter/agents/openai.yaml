@@ -1,0 +1,4 @@
+interface:
+  display_name: "新 CAN 电机适配"
+  short_description: "在机电控制框架中适配新 CAN 电机，复用核心并完成分层验证"
+  default_prompt: "使用 $mech-can-motor-adapter，根据当前仓库、目标电机协议和已有证据，完成新 CAN 电机的分层适配与离线验收，并列出实机验证所需条件。"
