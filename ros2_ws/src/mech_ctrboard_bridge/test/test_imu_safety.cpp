@@ -20,7 +20,8 @@ ImuSampleWire valid_stationary_sample() {
 }
 
 TEST(ImuSafety, MarksAnAllZeroPlaceholderUnavailable) {
-  const auto prepared = prepare_imu_messages(ImuSampleWire{}, "imu", {});
+  const auto prepared = prepare_imu_messages(
+      ImuSampleWire{}, "imu", builtin_interfaces::msg::Time());
   EXPECT_FALSE(prepared.validity.sample_present);
   EXPECT_FALSE(prepared.euler.has_value());
   EXPECT_EQ(prepared.imu.orientation_covariance[0], -1.0);
@@ -33,7 +34,8 @@ TEST(ImuSafety, KeepsIndependentMeasurementsWhenOrientationIsInvalid) {
   sample.acceleration_g[2] = 1.0F;
   sample.angular_velocity_dps[1] = 12.0F;
   sample.euler_deg[1] = 23.0F;
-  const auto prepared = prepare_imu_messages(sample, "imu", {});
+  const auto prepared = prepare_imu_messages(
+      sample, "imu", builtin_interfaces::msg::Time());
   EXPECT_TRUE(prepared.validity.sample_present);
   EXPECT_FALSE(prepared.validity.orientation_valid);
   EXPECT_TRUE(prepared.validity.angular_velocity_valid);
@@ -46,7 +48,8 @@ TEST(ImuSafety, KeepsIndependentMeasurementsWhenOrientationIsInvalid) {
 
 TEST(ImuSafety, AcceptsZeroAngularVelocityFromAStationaryImu) {
   const auto prepared =
-      prepare_imu_messages(valid_stationary_sample(), "imu", {});
+      prepare_imu_messages(valid_stationary_sample(), "imu",
+                           builtin_interfaces::msg::Time());
   EXPECT_TRUE(prepared.validity.fully_valid());
   EXPECT_EQ(prepared.imu.angular_velocity.x, 0.0);
   EXPECT_EQ(prepared.imu.angular_velocity.y, 0.0);
@@ -56,9 +59,11 @@ TEST(ImuSafety, AcceptsZeroAngularVelocityFromAStationaryImu) {
 }
 
 TEST(ImuSafety, HandlesOneMissingAndOneValidImuIndependently) {
-  const auto missing = prepare_imu_messages(ImuSampleWire{}, "imu_1", {});
+  const auto missing = prepare_imu_messages(
+      ImuSampleWire{}, "imu_1", builtin_interfaces::msg::Time());
   const auto valid =
-      prepare_imu_messages(valid_stationary_sample(), "imu_2", {});
+      prepare_imu_messages(valid_stationary_sample(), "imu_2",
+                           builtin_interfaces::msg::Time());
   EXPECT_FALSE(missing.validity.sample_present);
   EXPECT_FALSE(missing.euler.has_value());
   EXPECT_TRUE(valid.validity.fully_valid());
@@ -68,7 +73,8 @@ TEST(ImuSafety, HandlesOneMissingAndOneValidImuIndependently) {
 TEST(ImuSafety, DoesNotPublishNonFiniteAngularVelocity) {
   auto sample = valid_stationary_sample();
   sample.angular_velocity_dps[0] = std::numeric_limits<float>::quiet_NaN();
-  const auto prepared = prepare_imu_messages(sample, "imu", {});
+  const auto prepared = prepare_imu_messages(
+      sample, "imu", builtin_interfaces::msg::Time());
   EXPECT_FALSE(prepared.validity.angular_velocity_valid);
   EXPECT_EQ(prepared.imu.angular_velocity_covariance[0], -1.0);
   EXPECT_TRUE(std::isfinite(prepared.imu.angular_velocity.x));
