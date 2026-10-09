@@ -66,4 +66,9 @@ env PATH="${SYSTEM_PATH}" colcon test-result \
 
 # Keep both diagnostics and the original failure when colcon test itself fails.
 if [[ "$test_exit" != 0 ]]; then exit "$test_exit"; fi
+if [[ "$result_exit" == 0 && "${MECH_STABILITY_REPETITIONS:-0}" != "0" ]]; then
+  ASAN_OPTIONS="detect_leaks=${DETECT_LEAKS}:halt_on_error=1" \
+  UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  MECH_OUTPUT_ROOT="$OUTPUT_ROOT" bash "$REPO_ROOT/tools/ci/run_stability.sh"
+fi
 exit "$result_exit"
