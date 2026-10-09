@@ -23,7 +23,6 @@ find_package(realtime_tools REQUIRED)
 add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
-  src/posix_cdc_serial_port.cpp
   src/command_trace.cpp
   src/trace_snapshot.cpp
   src/ak30_force_runtime.cpp
@@ -189,7 +188,7 @@ if(BUILD_TESTING)
   # seam can force short writes without wrapping writes in production DSOs.
   ament_add_gtest(${PROJECT_NAME}_usb_cdc_pty_isolation_test
     test/test_usb_cdc_pty_isolation.cpp
-    src/posix_cdc_serial_port.cpp
+    ../mech_control_core/src/posix_cdc_serial_port.cpp
     src/command_trace.cpp
     src/trace_snapshot.cpp
     src/pass_through_init.cpp)

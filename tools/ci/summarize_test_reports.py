@@ -11,7 +11,8 @@ from xml.etree import ElementTree
 
 PACKAGES = (
     'mech_control_core', 'mech_simulation', 'mech_hardware_ros2_control',
-    'mech_controllers', 'mech_protocol_cubemars', 'mech_bringup',
+    'mech_controllers', 'mech_protocol_cubemars', 'mech_protocol_ctrboard',
+    'mech_ctrboard_bridge', 'mech_bringup',
 )
 
 

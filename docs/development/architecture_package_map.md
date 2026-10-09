@@ -21,7 +21,7 @@
 
 配套约束（同文件）：配置期固定 `ProtocolProfile`、无运行期自动探测（清单第 3 条）；canonical 语义只在物理映射有证据时导出（ADR-009）；命令接口形状是 canonical 契约（ADR-014，变更需先出 ADR）。
 
-## 2. 实际包结构 ↔ 各层职责 / The six packages
+## 2. 实际包结构 ↔ 各层职责 / The eight packages
 
 | 包 | 职责 | 品牌相关？ | 换新品牌电机时要动吗 |
 |---|---|---|---|
@@ -29,10 +29,12 @@
 | `mech_simulation` | FakeTransport/FakeSerial 等离线测试替身 | 否 | **不动** |
 | `mech_hardware_ros2_control` | `CompositeSystem`（SystemInterface）：生命周期/claim/switch/看门狗浮出/接口导出。接口形状是**通用** position/velocity/effort（ADR-014） | 否 | **不动** |
 | `mech_controllers` | 通用控制器（PositionCommandController 等） | 否 | **不动** |
-| `mech_protocol_cubemars` | **唯一的品牌包**：AK3.0 力控+伺服 wire 编解码、证据门映射（`mapping_is_sufficient`）、`DeviceCodec`/`DeviceSession`（分级看门狗、故障锁存） | 是（CubeMars AK3.0） | **新增平行的** `mech_protocol_<新品牌>` 包；本包不动 |
+| `mech_protocol_cubemars` | **电机品牌包**：AK3.0 力控+伺服 wire 编解码、证据门映射（`mapping_is_sufficient`）、`DeviceCodec`/`DeviceSession`（分级看门狗、故障锁存） | 是（CubeMars AK3.0） | **新增平行的** `mech_protocol_<新品牌>` 包；本包不动 |
+| `mech_protocol_ctrboard` | STM32 传感器 wire 协议：分片重组、CRC 和遥测载荷解码，不做设备 I/O | 是（CtrBoard 遥测格式） | 新传感器协议新增平行协议包；本包不动 |
+| `mech_ctrboard_bridge` | 只接收的 ROS 2 组合点：打开 SocketCAN/USB-CDC，发布 IMU、足底压力和安全诊断 | 部署层（传感器组合） | 电机适配不动；传感器部署在这里组合 |
 | `mech_bringup` | 部署组合层：探针（bench 验证用）、`Ak30RuntimeParams`（fail-closed URDF 参数解析）、`Ak30ForceControlRuntime`（RuntimePort 接线）、deployment 示例（URDF/controllers/launch） | 部署层（组合点按 profile 分） | 加新品牌的组合点/参数解析；既有内容不动 |
 
-依赖方向（`context_check.py` 逐包钉死）：`bringup → {core, simulation, hardware, controllers, cubemars}`；`hardware → core`；`cubemars → core, simulation`；**没有任何包反向依赖 bringup，core/controllers/hardware 不知道任何品牌。**
+依赖方向（`context_check.py` 逐包钉死）：`bringup → {core, simulation, hardware, controllers, cubemars}`；`ctrboard_bridge → {core, ctrboard}`；`hardware → core`；两个协议包只依赖通用层；**没有任何包反向依赖 bringup 或 bridge，core/controllers/hardware 不知道任何品牌。**
 
 ## 3. 三个 PR 各改了哪层 / Where each slice actually landed
 

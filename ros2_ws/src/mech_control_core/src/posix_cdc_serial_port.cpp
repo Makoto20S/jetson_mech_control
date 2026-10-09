@@ -1,21 +1,18 @@
-#include "mech_bringup/posix_cdc_serial_port.hpp"
+#include "mech_control_core/posix_cdc_serial_port.hpp"
 
 #include <cerrno>
-#include "mech_bringup/command_trace.hpp"
-#include <cstring>
+#include <cstddef>
+#include <cstdint>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <termios.h>
 #include <unistd.h>
 
-#include "mech_bringup/pass_through_init.hpp"
+#include <utility>
 
-namespace mech::mech_bringup {
+namespace mech::mech_control_core {
 namespace {
 
-// The board enumerates as CDC-ACM and speaks its own framing on top; the
-// vendor stack and bench receiver set the host line coding to 4,000,000 baud
-// with raw, non-blocking I/O. This is independent of the CAN bus bitrates.
 bool configure_raw_nonblocking(int fd) noexcept {
   termios attrs{};
   if (tcgetattr(fd, &attrs) != 0) {
@@ -53,9 +50,9 @@ bool PosixCdcSerialPort::open() noexcept {
   if (fd < 0) {
     return false;
   }
-  // Lock the opened inode before termios/flush touches it. Both production
-  // plugins use this port, so a symlink alias or separate process must not
-  // configure the same cooperative CDC channel concurrently.
+  // Lock the opened inode before changing termios or flushing buffers. This
+  // also rejects a second process that reaches the same device through a
+  // symlink alias.
   if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
     ::close(fd);
     return false;
@@ -76,39 +73,42 @@ void PosixCdcSerialPort::close() noexcept {
   }
 }
 
-mech_control_core::TransportResult PosixCdcSerialPort::read_some(
+TransportResult PosixCdcSerialPort::read_some(
     std::uint8_t* data, std::size_t capacity, std::size_t& size) noexcept {
   size = 0U;
   if (fd_ < 0) {
-    return mech_control_core::TransportResult::Disconnected;
+    return TransportResult::Disconnected;
   }
   const ssize_t received = ::read(fd_, data, capacity);
   if (received > 0) {
     size = static_cast<std::size_t>(received);
-    return mech_control_core::TransportResult::Ok;
+    return TransportResult::Ok;
   }
   if (received == 0) {
-    return mech_control_core::TransportResult::WouldBlock;
+    return TransportResult::WouldBlock;
   }
   if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-    return mech_control_core::TransportResult::WouldBlock;
+    return TransportResult::WouldBlock;
   }
-  return mech_control_core::TransportResult::Fault;
+  return TransportResult::Fault;
 }
 
-mech_control_core::TransportResult PosixCdcSerialPort::write_all(
+TransportResult PosixCdcSerialPort::write_all(
     const std::uint8_t* data, std::size_t size) noexcept {
   if (fd_ < 0) {
-    return mech_control_core::TransportResult::Disconnected;
+    return TransportResult::Disconnected;
   }
   std::size_t written = 0U;
   while (written < size) {
-    const auto begin = trace_ ? CommandTrace::now() : 0;
+    const std::int64_t begin =
+        trace_sink_ != nullptr ? trace_sink_->begin_write() : 0;
     const ssize_t sent = ::write(fd_, data + written, size - written);
     const int saved_errno = sent < 0 ? errno : 0;
-    if (trace_) trace_->bytes("syscall_write", data + written,
-        sent > 0 ? static_cast<std::size_t>(sent) : 0U, sent, size - written,
-        saved_errno, begin);
+    if (trace_sink_ != nullptr) {
+      trace_sink_->record_write(
+          data + written, sent > 0 ? static_cast<std::size_t>(sent) : 0U,
+          sent, size - written, saved_errno, begin);
+    }
     if (sent < 0) errno = saved_errno;
     if (sent > 0) {
       written += static_cast<std::size_t>(sent);
@@ -118,23 +118,19 @@ mech_control_core::TransportResult PosixCdcSerialPort::write_all(
       continue;
     }
     if ((sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) || sent == 0) {
-      // Retry is safe only when no byte of this packet entered the stream.
-      // After a partial write, callers cannot resume from our local offset;
-      // retrying the whole packet or sending another route would corrupt the
-      // framing. Fault the bus epoch instead of blocking or replaying it.
-      return written == 0U ? mech_control_core::TransportResult::WouldBlock
-                           : mech_control_core::TransportResult::Fault;
+      // Retrying is safe only when no byte from this packet entered the
+      // stream. A partial prefix followed by backpressure must fault the bus
+      // epoch, otherwise replaying the packet corrupts vendor framing.
+      return written == 0U ? TransportResult::WouldBlock
+                           : TransportResult::Fault;
     }
-    return mech_control_core::TransportResult::Fault;
+    return TransportResult::Fault;
   }
-  return mech_control_core::TransportResult::Ok;
+  return TransportResult::Ok;
 }
 
 bool PosixCdcSerialPort::send_pass_through_init() noexcept {
-  if (fd_ < 0) {
-    return false;
-  }
-  return mech::mech_bringup::send_pass_through_init(*this);
+  return initialize_usb_cdc_pass_through(*this);
 }
 
-}  // namespace mech::mech_bringup
+}  // namespace mech::mech_control_core

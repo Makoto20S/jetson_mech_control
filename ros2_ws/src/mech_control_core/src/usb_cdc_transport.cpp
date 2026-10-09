@@ -77,6 +77,20 @@ MonotonicTime current_time() noexcept {
 
 }  // namespace
 
+bool initialize_usb_cdc_pass_through(CdcSerialPort& serial) noexcept {
+  if (!serial.is_open()) {
+    return false;
+  }
+  TransportResult result = TransportResult::WouldBlock;
+  std::size_t attempts = 0U;
+  do {
+    result = serial.write_all(kUsbCdcPassThroughInitFrame.data(),
+                              kUsbCdcPassThroughInitFrame.size());
+    ++attempts;
+  } while (result == TransportResult::WouldBlock && attempts < 100U);
+  return result == TransportResult::Ok;
+}
+
 bool UsbCdcCodec::encode(const RawCanFrame& frame,
                          std::array<std::uint8_t, 528U>& output,
                          std::size_t& size) noexcept {

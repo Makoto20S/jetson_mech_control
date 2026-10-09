@@ -193,7 +193,7 @@ hardware_interface::CallbackReturn Ak30ServoSystem::on_init(
   if (!port) return hardware_interface::CallbackReturn::ERROR;
   if (command_trace_) {
     if (auto posix = std::dynamic_pointer_cast<PosixCdcSerialPort>(port))
-      posix->set_command_trace(command_trace_.get());
+      posix->set_write_trace_sink(command_trace_.get());
     for (std::size_t i = 0; i < parsed->config.joints.size(); ++i) {
       const auto& j = parsed->config.joints[i];
       command_trace_->record("config_target", i, 0, j.target_rad_to_deg.scale,

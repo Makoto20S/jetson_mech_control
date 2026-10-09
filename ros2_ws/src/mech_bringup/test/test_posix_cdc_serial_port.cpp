@@ -135,7 +135,7 @@ TEST_F(PosixCdcPortLockTest, TerminalConfigurationFailureReleasesFileLock) {
 TEST_F(PosixCdcPortLockTest, RecordsActualKernelWriteAndUnchangedPeerBytes) {
   auto trace = std::make_shared<mech::mech_bringup::CommandTrace>(16);
   auto port = std::make_shared<PosixCdcSerialPort>(path_);
-  port->set_command_trace(trace.get());
+  port->set_write_trace_sink(trace.get());
   mech::mech_bringup::SerialTrace serial(port, 16, trace.get());
   ASSERT_TRUE(serial.open());
   const std::uint8_t packet[]{0xf7, 0x12, 0x00, 0xff, 0x0a, 0x0d};
@@ -153,7 +153,7 @@ TEST_F(PosixCdcPortLockTest, RecordsActualKernelWriteAndUnchangedPeerBytes) {
 TEST_F(PosixCdcPortLockTest, BackpressureDoesNotClaimUnacceptedBytesWereWritten) {
   auto trace = std::make_shared<mech::mech_bringup::CommandTrace>(16);
   PosixCdcSerialPort port(path_);
-  port.set_command_trace(trace.get());
+  port.set_write_trace_sink(trace.get());
   ASSERT_TRUE(port.open());
   // Fill a real nonblocking PTY without draining the peer. This forces a
   // partial prefix and EAGAIN, unlike FakeSerial's all-or-nothing interface.

@@ -1,7 +1,8 @@
 # ROS 2 workspace
 
 The workspace contains the five Foundation v0.1 packages planned in
-`docs/planning/07_framework_bootstrap_plan.md`, plus one protocol adapter:
+`docs/planning/07_framework_bootstrap_plan.md`, two protocol adapters, and one
+receive-only sensor bridge:
 
 - `mech_control_core`
 - `mech_simulation`
@@ -11,6 +12,10 @@ The workspace contains the five Foundation v0.1 packages planned in
 - `mech_protocol_cubemars` — CubeMars AK3.0 force-control and servo-position codecs/sessions.
   The protocol package performs no device I/O; real device composition lives
   in `mech_bringup`. See [servo tools](../tools/servo/README.md).
+- `mech_protocol_ctrboard` — STM32 telemetry reassembly, CRC validation, and
+  sensor payload decoding without device I/O.
+- `mech_ctrboard_bridge` — SocketCAN/USB-CDC ROS 2 publication for CtrBoard IMU
+  and plantar-pressure data, including timeout and per-field validity diagnostics.
 
 From Ubuntu 22.04 with ROS 2 Humble installed, run from the repository root:
 
@@ -56,7 +61,7 @@ lists the ARM64 labels; 22.04 host labels are being retired according to the
 [official announcement](https://github.com/actions/runner-images/issues/14254).
 This host update does not migrate the project to ROS Jazzy or change Jetson.
 
-Both architectures build all six packages and execute the software test suite.
+Both architectures build all eight packages and execute the software test suite.
 Host and image architecture guards reject mismatches; no QEMU emulation or
 Jetson/self-hosted runner is configured. Each architecture has a separate cache
 key and evidence artifact. A failure on one platform does not cancel the other
@@ -105,7 +110,7 @@ allow the controller to request FIFO scheduling while keeping the production
 6 ms hard deadline; shared-runner success is not a real-time guarantee.
 The 2 GiB shared-memory allocation covers the production bounded trace budget.
 
-The Docker dependency stage copies all six package manifests and resolves rosdep
+The Docker dependency stage copies all eight package manifests and resolves rosdep
 before copying source. Documentation/source edits therefore reuse dependency
 layers. CI imports a BuildKit cache via a SHA-pinned builder and cache actions;
 cache keys include the Dockerfile, dependency manifest, package manifests and
@@ -137,7 +142,7 @@ artifact retention is best effort in those cases, not a complete evidence guaran
 
 ### Address and undefined-behavior sanitizers
 
-The independent `ASan / UBSan build and tests` job builds all six packages in
+The independent `ASan / UBSan build and tests` job builds all eight packages in
 Debug mode and runs the same software test suite with AddressSanitizer and
 UndefinedBehaviorSanitizer. It uses the pinned `test-source` Docker target and
 its dependency layers, then compiles inside a separate container. It does not

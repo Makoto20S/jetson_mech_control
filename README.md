@@ -19,6 +19,7 @@
 | 位置＋速度／前馈力矩 | 硬件接口支持 Position 模式的整组目标，具有独立辅助目标限幅 | 接口及离线集成已实现；完整阻抗控制器、自动重力补偿尚未实现 |
 | 诊断与证据 | 保存配置、目标、反馈、框架日志、有界命令链与原始串口记录；独立审计和离线归档 | 可定位主机链路和观察端差异；串口写入成功不能证明 CAN 送达或电机执行 |
 | 传输与扩展 | Fake、SocketCAN/vcan、USB-CDC 后端；Classic CAN / CAN FD 帧模型 | 已有后端能力不等于所有通信板均通过验收；HI12、统一安装初始化与完整 MVP 仍待推进 |
+| STM32 传感器节点 | 通过 SocketCAN 或 USB-CDC 接收两路 IMU、左右足底 20 点压力和设备时间戳 | 保持只接收，不接管电机；检测链路超时、CRC 和字段有效性，旧 196 字节协议无法证明单路 IMU 后续是否冻结 |
 
 **当前可直接使用的已迁移部署是双路伺服。** 旧力控位置、速度和轨迹工具仍保留在 Jetson 上，但使用各自的旧发布版和配置，不自动读取双路伺服配置。软件具备力控能力，不表示旧工具已迁移到现在的接线和零点，具体区别见下文。
 
@@ -238,7 +239,7 @@ MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build \
   bash tools/ci/build_workspace.sh
 ```
 
-脚本解析依赖、构建六个包并运行测试，测试使用模拟设备和虚拟串口。依赖解析可能安装系统软件包；已配好依赖时可设置 `MECH_SKIP_ROSDEP=1`。普通 clone 不包含现场部署入口、标定或实验记录。持久部署使用 symlink-install 时，源码、build 和 install 必须一起保留，不能仅搬动 install。
+脚本解析依赖、构建八个包并运行测试，测试使用模拟设备和虚拟串口。依赖解析可能安装系统软件包；已配好依赖时可设置 `MECH_SKIP_ROSDEP=1`。普通 clone 不包含现场部署入口、标定或实验记录。持久部署使用 symlink-install 时，源码、build 和 install 必须一起保留，不能仅搬动 install。
 
 文档与仓库检查可单独运行：
 
@@ -248,7 +249,7 @@ python3 tools/ci/check_adrs.py
 git diff --check
 ```
 
-CI 先检查文档链接、Python/Bash 语法和仓库约束，再在原生 x86_64、ARM64 上分别构建六个包并测试；独立 ASan/UBSan 任务检查内存和未定义行为。宿主使用 Ubuntu 24.04，构建环境仍是固定的 Ubuntu 22.04／ROS 2 Humble 容器。依赖缓存按架构分开，测试复用已构建产物，源码变化时拒绝直接复用旧构建。
+CI 先检查文档链接、Python/Bash 语法和仓库约束，再在原生 x86_64、ARM64 上分别构建八个包并测试；独立 ASan/UBSan 任务检查内存和未定义行为。宿主使用 Ubuntu 24.04，构建环境仍是固定的 Ubuntu 22.04／ROS 2 Humble 容器。依赖缓存按架构分开，测试复用已构建产物，源码变化时拒绝直接复用旧构建。
 
 构建失败或测试失败都会尝试保存日志、XML 和状态报告，诊断产物保留 14 天，并列出实际跳过项。测试容器提供相应调度权限和共享内存；不会放宽生产保护时限来让测试通过。CI 使用模拟设备与虚拟串口，独立于现场 Jetson 的运行状态。复现步骤见 [ROS workspace](ros2_ws/README.md)，实际云端运行结果见 [GitHub Actions](https://github.com/Makoto20S/jetson_mech_control/actions/workflows/foundation.yml)。构建和自动化测试不能替代现场验收。
 
@@ -273,9 +274,11 @@ flowchart TD
 | [`mech_hardware_ros2_control`](ros2_ws/src/mech_hardware_ros2_control) | 通用复合硬件插件及接口映射 |
 | [`mech_controllers`](ros2_ws/src/mech_controllers) | 有界位置、速度、力矩控制器与目标有效期 |
 | [`mech_protocol_cubemars`](ros2_ws/src/mech_protocol_cubemars) | AK3.0 力控/伺服编解码、映射、session、看门狗 |
+| [`mech_protocol_ctrboard`](ros2_ws/src/mech_protocol_ctrboard) | STM32 遥测分片重组、CRC 校验和 196 字节传感器协议解码 |
+| [`mech_ctrboard_bridge`](ros2_ws/src/mech_ctrboard_bridge) | 将 STM32 作为只接收传感器设备接入 ROS 2，并发布 IMU/足底压力与安全诊断 |
 | [`mech_bringup`](ros2_ws/src/mech_bringup) | 真实设备组合、硬件插件、URDF、launch 与集成测试 |
 
-协议包本身不做设备 I/O，实际组合在 `mech_bringup`。双路伺服由一个 manager/JTC 驱动两个 `Ak30ServoSystem`，每个实例有独立串口和总线运行时，反馈聚合、失能逐路尝试。
+协议包本身不做设备 I/O。电机实际组合在 `mech_bringup`；STM32 由独立的 `mech_ctrboard_bridge` 节点只读接入，不改变电机总线所有权。双路伺服由一个 manager/JTC 驱动两个 `Ak30ServoSystem`，每个实例有独立串口和总线运行时，反馈聚合、失能逐路尝试。
 
 ## 实验记录与验证边界
 
@@ -293,6 +296,7 @@ flowchart TD
 | 力控运行时、标准 JTC、模式反馈及台架证据 | [mech_bringup](ros2_ws/src/mech_bringup/README.md) |
 | 控制器目标、限幅、超时和停止语义 | [mech_controllers](ros2_ws/src/mech_controllers/README.md) |
 | 协议编码和设备会话 | [CubeMars 协议包](ros2_ws/src/mech_protocol_cubemars/README.md) |
+| STM32 IMU/足底压力接入与安全状态 | [CtrBoard ROS 2 桥](ros2_ws/src/mech_ctrboard_bridge/README.md) · [实机验证记录](docs/development/ctrboard_hardware_validation.md) |
 | 位置伺服 profile 与验收要求 | [伺服设计](docs/development/ak30_servo_position_design.md) |
 | 期望速度与前馈力矩接口 | [Position 扩展设计](docs/development/position_feedforward_design.md) |
 | 构建、测试和 CI 复现 | [ROS workspace](ros2_ws/README.md) |

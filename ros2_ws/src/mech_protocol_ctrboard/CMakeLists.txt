@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mech_control_core LANGUAGES CXX)
+project(mech_protocol_ctrboard LANGUAGES CXX)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -9,40 +9,32 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
 find_package(ament_cmake REQUIRED)
+find_package(mech_control_core REQUIRED)
 
-add_library(${PROJECT_NAME}
-  src/package_marker.cpp
-  src/posix_cdc_serial_port.cpp
-  src/socketcan_transport.cpp
-  src/usb_cdc_transport.cpp
-)
+add_library(${PROJECT_NAME} src/protocol.cpp)
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
+    $<INSTALL_INTERFACE:include>)
+ament_target_dependencies(${PROJECT_NAME} mech_control_core)
 
 install(TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
+  RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(mech_control_core)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
-  ament_add_gtest(${PROJECT_NAME}_test
-    test/test_frame_time_status.cpp
-    test/test_config_router.cpp
-    test/test_adapter_contract.cpp
-    test/test_transport_backends.cpp
-    test/test_package_marker.cpp
-  )
+  ament_add_gtest(${PROJECT_NAME}_test test/test_protocol.cpp)
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+  ament_add_gtest(${PROJECT_NAME}_marker_test test/test_package_marker.cpp)
+  target_link_libraries(${PROJECT_NAME}_marker_test ${PROJECT_NAME})
   ament_lint_cmake()
   ament_xmllint()
 endif()

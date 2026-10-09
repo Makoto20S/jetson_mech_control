@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
       for (const auto& joint : parsed->config.joints) bus_missing.insert(joint.drive_id);
       try {
         PosixCdcSerialPort serial(parsed->device_path);
-        serial.set_command_trace(&trace);
+        serial.set_write_trace_sink(&trace);
         UsbCdcOptions options;
         options.logical_bus = parsed->config.logical_bus;
         options.verified_board_version = {4,8,8};

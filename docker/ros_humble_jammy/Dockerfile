@@ -26,6 +26,8 @@ COPY ros2_ws/src/mech_simulation/package.xml /opt/mech-dependencies/mech_simulat
 COPY ros2_ws/src/mech_hardware_ros2_control/package.xml /opt/mech-dependencies/mech_hardware_ros2_control/package.xml
 COPY ros2_ws/src/mech_controllers/package.xml /opt/mech-dependencies/mech_controllers/package.xml
 COPY ros2_ws/src/mech_protocol_cubemars/package.xml /opt/mech-dependencies/mech_protocol_cubemars/package.xml
+COPY ros2_ws/src/mech_protocol_ctrboard/package.xml /opt/mech-dependencies/mech_protocol_ctrboard/package.xml
+COPY ros2_ws/src/mech_ctrboard_bridge/package.xml /opt/mech-dependencies/mech_ctrboard_bridge/package.xml
 COPY ros2_ws/src/mech_bringup/package.xml /opt/mech-dependencies/mech_bringup/package.xml
 RUN apt-get update \
     && rosdep update --rosdistro "${ROS_DISTRO}" \

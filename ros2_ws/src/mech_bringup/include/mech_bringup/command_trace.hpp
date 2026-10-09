@@ -10,13 +10,14 @@
 #include <string>
 #include <vector>
 #include "mech_bringup/trace_snapshot.hpp"
+#include "mech_control_core/posix_cdc_serial_port.hpp"
 #include "mech_control_core/transport.hpp"
 
 namespace mech::mech_bringup {
 // Optional, single control-thread recorder. Allocate/touch before activation;
 // no formatting, allocation or file I/O during capture. Dump after shutdown.
 // Exhaustion preserves the beginning and reports every omitted record.
-class CommandTrace final {
+class CommandTrace final : public mech_control_core::CdcWriteTraceSink {
  public:
   explicit CommandTrace(std::size_t capacity = 524288U,
                         const std::string& snapshot_path = {})
@@ -28,6 +29,12 @@ class CommandTrace final {
   static std::int64_t now() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+  [[nodiscard]] std::int64_t begin_write() noexcept override { return now(); }
+  void record_write(const std::uint8_t* data, std::size_t length,
+                    std::int64_t result, std::size_t requested, int error,
+                    std::int64_t begin) noexcept override {
+    bytes("syscall_write", data, length, result, requested, error, begin);
   }
   void record(const char* stage, std::size_t index = 0, std::uint64_t gen = 0,
               double position = 0, double feedback = 0, int flags = 0,

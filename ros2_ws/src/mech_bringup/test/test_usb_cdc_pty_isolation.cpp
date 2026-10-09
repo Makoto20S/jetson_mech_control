@@ -54,7 +54,7 @@ class UsbCdcPtyIsolation : public ::testing::Test {
     ASSERT_GE(master,0); ASSERT_EQ(::grantpt(master),0); ASSERT_EQ(::unlockpt(master),0);
     std::array<char,256> path{}; ASSERT_EQ(::ptsname_r(master,path.data(),path.size()),0);
     port=std::make_shared<PosixCdcSerialPort>(path.data());
-    trace=std::make_shared<CommandTrace>(256); port->set_command_trace(trace.get());
+    trace=std::make_shared<CommandTrace>(256); port->set_write_trace_sink(trace.get());
     serial=std::make_unique<SerialTrace>(port,256,trace.get());
     transport=std::make_unique<UsbCdcTransport>(*serial,UsbCdcOptions{1,1000000,64,1024,CdcProtocolVersion{4,8,8}});
     ASSERT_TRUE(transport->open());

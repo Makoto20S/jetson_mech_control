@@ -1,55 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-
-#include "mech_control_core/usb_cdc_transport.hpp"
+#include "mech_control_core/posix_cdc_serial_port.hpp"
 
 namespace mech::mech_bringup {
-class CommandTrace;
 
-// CdcSerialPort over a real Linux terminal device (/dev/ttyACM*). This is the
-// one piece the Foundation deliberately left as an injected interface: the
-// production ros2_control slice will own its construction policy. The probe
-// keeps it deliberately small and single-threaded, matching the transport's
-// single-driver-thread contract. open() takes a nonblocking advisory lock on
-// the opened device inode before changing terminal settings; close() and
-// destruction release it with the file descriptor.
-class PosixCdcSerialPort final : public mech_control_core::CdcSerialPort {
- public:
-  explicit PosixCdcSerialPort(std::string device_path) noexcept;
-
-  ~PosixCdcSerialPort() override;
-
-  PosixCdcSerialPort(const PosixCdcSerialPort&) = delete;
-  PosixCdcSerialPort& operator=(const PosixCdcSerialPort&) = delete;
-
-  [[nodiscard]] bool is_open() const noexcept override;
-  bool open() noexcept override;
-  void close() noexcept override;
-  [[nodiscard]] mech_control_core::TransportResult read_some(
-      std::uint8_t* data, std::size_t capacity,
-      std::size_t& size) noexcept override;
-  [[nodiscard]] mech_control_core::TransportResult write_all(
-      const std::uint8_t* data, std::size_t size) noexcept override;
-
-  // The vendor pass-through init frame: MODE_FDCAN_PASS (0x12) with a
-  // six-byte zero payload, i.e. send_flag=0. The vendor's own fdcan_init()
-  // sends exactly these bytes (its config member is never copied into the
-  // payload, so cfg=0x00 is what actually ships, and 0x00 vs 0x07 measured
-  // identical on the bench). Must be called after open() and before the first
-  // try_send/try_receive; the transport itself does not send it. The bytes
-  // are the shared bench-verified literal (pass_through_init.hpp) - the CRCs
-  // are never recomputed.
-  [[nodiscard]] bool send_pass_through_init() noexcept;
-
-  // Set only before opening; recorder must outlive this port.
-  void set_command_trace(CommandTrace* trace) noexcept { if (fd_ < 0) trace_ = trace; }
-
- private:
-  CommandTrace* trace_{nullptr};
-  std::string device_path_;
-  int fd_{-1};
-};
+using PosixCdcSerialPort = mech_control_core::PosixCdcSerialPort;
 
 }  // namespace mech::mech_bringup

@@ -10,6 +10,17 @@ values are rejected by the factory functions. Source timestamps retain their
 raw device/transport ticks; only host arrival time participates in freshness
 until a clock mapping is proven.
 
+`PosixCdcSerialPort` is the shared Linux CDC-ACM implementation used by sensor
+and motor compositions. It opens the terminal non-blocking at 4,000,000 baud,
+takes an advisory inode lock before termios or buffer changes, and reports a
+partial packet write followed by backpressure as a transport fault. An optional
+`CdcWriteTraceSink` observes actual kernel write attempts without coupling core
+to a deployment trace class. The former
+`mech_bringup/posix_cdc_serial_port.hpp` remains as a type alias, so existing
+bringup includes and `PosixCdcSerialPort` call sites remain source-compatible;
+the trace setter is intentionally renamed to the generic
+`set_write_trace_sink()` interface.
+
 FND-006 adds typed schema/configuration and transport capabilities with
 deterministic rejection of missing fields, duplicate routes, unknown profiles,
 and incompatible frame/capability combinations. FND-008 and FND-009 provide
