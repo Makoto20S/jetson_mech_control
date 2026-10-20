@@ -85,6 +85,16 @@ MECH_SKIP_ROSDEP=1 MECH_OUTPUT_ROOT=/tmp/mech-validation \
 全量 build/test 包含 Python 包测试，硬件探针默认不构建。
 带真实 ROS 图的合成检查另在加载当前构建后运行，具体结果见 PR。
 
+合成图验证可统一执行：
+
+```bash
+bash tools/validation/run_sensor_ros_checks.sh /tmp/mech-validation/install/setup.bash
+```
+
+该入口自动启动合成输入需要的膝角节点，顺序检查四张 ROS 图并清理进程；
+不启动传感器串口桥或电机硬件。直接执行 `check_knee_ros_graph.py` 则要求
+调用方预先启动同参数的膝角节点。
+
 - [当前规划](../planning/README.md)：共享阶段与未决项。
 - [架构决定](../adr/README.md)：规范边界；ADR-021 保持 Proposed。
 - [10 月 16 日历史验证](../validation/2026-10-16-exoskeleton-architecture.md)：双 IMU/影子图、历史联合构建与电机试验。

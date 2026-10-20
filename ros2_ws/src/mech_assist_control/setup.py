@@ -10,10 +10,11 @@ setup(
         ('share/mech_assist_control', ['package.xml']),
     ],
     install_requires=['setuptools'],
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Project Owners',
     maintainer_email='project-owners@example.invalid',
-    description='Selectable ROS knee velocity-follow and resistance-preview modes.',
+    description='Selectable ROS knee velocity-follow and bounded resistance strategies.',
     license='Internal Research Use - All Rights Reserved',
     entry_points={'console_scripts': [
         'knee_motor_follow_node = mech_assist_control.node:main',

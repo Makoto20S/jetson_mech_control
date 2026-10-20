@@ -73,7 +73,10 @@ def main():
     except (OSError, ValueError, KeyError, ElementTree.ParseError) as error:
         print(f'ERROR: {error}')
         return 2
-    print(f'ASan/UBSan instrumentation verified for {len(report["packages"])} packages')
+    compiled = sum(package['compilations'] > 0 for package in report['packages'].values())
+    python = len(report['packages']) - compiled
+    print(f'ASan/UBSan instrumentation verified for {compiled} C++ packages; '
+          f'{python} Python packages recorded as not applicable')
     return 0
 
 

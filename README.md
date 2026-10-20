@@ -239,7 +239,7 @@ MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build \
   bash tools/ci/build_workspace.sh
 ```
 
-脚本解析依赖、构建八个包并运行测试，测试使用模拟设备和虚拟串口。依赖解析可能安装系统软件包；已配好依赖时可设置 `MECH_SKIP_ROSDEP=1`。普通 clone 不包含现场部署入口、标定或实验记录。持久部署使用 symlink-install 时，源码、build 和 install 必须一起保留，不能仅搬动 install。
+脚本解析依赖、构建十一个包并运行测试，测试使用模拟设备和虚拟串口。依赖解析可能安装系统软件包；已配好依赖时可设置 `MECH_SKIP_ROSDEP=1`。普通 clone 不包含现场部署入口、标定或实验记录。持久部署使用 symlink-install 时，源码、build 和 install 必须一起保留，不能仅搬动 install。
 
 文档与仓库检查可单独运行：
 
@@ -249,7 +249,7 @@ python3 tools/ci/check_adrs.py
 git diff --check
 ```
 
-CI 先检查文档链接、Python/Bash 语法和仓库约束，再在原生 x86_64、ARM64 上分别构建八个包并测试；独立 ASan/UBSan 任务检查内存和未定义行为。宿主使用 Ubuntu 24.04，构建环境仍是固定的 Ubuntu 22.04／ROS 2 Humble 容器。依赖缓存按架构分开，测试复用已构建产物，源码变化时拒绝直接复用旧构建。
+CI 先检查文档链接、Python/Bash 语法和仓库约束，再在原生 x86_64、ARM64 上分别构建十一个包并测试；独立 ASan/UBSan 任务检查内存和未定义行为。宿主使用 Ubuntu 24.04，构建环境仍是固定的 Ubuntu 22.04／ROS 2 Humble 容器。依赖缓存按架构分开，测试复用已构建产物，源码变化时拒绝直接复用旧构建。
 
 构建失败或测试失败都会尝试保存日志、XML 和状态报告，诊断产物保留 14 天，并列出实际跳过项。测试容器提供相应调度权限和共享内存；不会放宽生产保护时限来让测试通过。CI 使用模拟设备与虚拟串口，独立于现场 Jetson 的运行状态。复现步骤见 [ROS workspace](ros2_ws/README.md)，实际云端运行结果见 [GitHub Actions](https://github.com/Makoto20S/jetson_mech_control/actions/workflows/foundation.yml)。构建和自动化测试不能替代现场验收。
 
