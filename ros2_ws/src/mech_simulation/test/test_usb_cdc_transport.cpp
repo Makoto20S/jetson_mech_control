@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <optional>
 #include <vector>
 
@@ -62,6 +63,78 @@ TEST(UsbCdcTransport, InjectedSerialRoundTripHasNoDeviceDependency) {
   EXPECT_EQ(received.id.value, 0x1ABCDEU);
   EXPECT_EQ(received.direction, mech_control_core::FrameDirection::Rx);
   EXPECT_EQ(received.payload[0], 0xA5U);
+}
+
+TEST(UsbCdcTransport, DefaultArrivalStampUsesHostSteadyClock) {
+  using namespace mech_control_core;
+  FakeSerial serial;
+  UsbCdcTransport transport(serial, UsbCdcOptions{
+      1U, 1000000U, 4U, 1024U, CdcProtocolVersion{4U, 8U, 8U}});
+  ASSERT_TRUE(transport.open());
+  ASSERT_EQ(transport.try_send(make_frame(FrameDirection::Tx)), TransportResult::Ok);
+  ASSERT_TRUE(serial.inject_rx(serial.take_tx()));
+  const auto steady_ns = [] {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  };
+  const auto before = steady_ns();
+  RawCanFrame received{};
+  ASSERT_EQ(transport.try_receive(received), TransportResult::Ok);
+  const auto after = steady_ns();
+  EXPECT_GE(received.host_arrival.nanoseconds(), before);
+  EXPECT_LE(received.host_arrival.nanoseconds(), after);
+  EXPECT_FALSE(received.source_timestamp);
+}
+
+TEST(UsbCdcTransport, InjectedClockStampsCompletePacketsAndQueuedFramesKeepTheirStamp) {
+  using namespace mech_control_core;
+  std::int64_t now_ns = 1000000000;
+  FakeSerial serial;
+  UsbCdcTransport transport(serial, UsbCdcOptions{
+      1U, 1000000U, 4U, 1024U, CdcProtocolVersion{4U, 8U, 8U}},
+      [&now_ns] { return *MonotonicTime::from_nanoseconds(now_ns); });
+  ASSERT_TRUE(transport.open());
+  ASSERT_EQ(transport.try_send(make_frame(FrameDirection::Tx)), TransportResult::Ok);
+  const auto packet = serial.take_tx();
+  auto two_packets = packet;
+  two_packets.insert(two_packets.end(), packet.begin(), packet.end());
+  ASSERT_TRUE(serial.inject_rx(two_packets));
+  RawCanFrame first{}, queued{};
+  ASSERT_EQ(transport.try_receive(first), TransportResult::Ok);
+  EXPECT_EQ(first.host_arrival.nanoseconds(), 1000000000);
+  now_ns = 2000000000;
+  ASSERT_EQ(transport.try_receive(queued), TransportResult::Ok);
+  EXPECT_EQ(queued.host_arrival.nanoseconds(), 1000000000);
+  EXPECT_FALSE(first.source_timestamp);
+  EXPECT_FALSE(queued.source_timestamp);
+  ASSERT_TRUE(serial.inject_rx(packet));
+  RawCanFrame later{};
+  ASSERT_EQ(transport.try_receive(later), TransportResult::Ok);
+  EXPECT_EQ(later.host_arrival.nanoseconds(), 2000000000);
+  EXPECT_EQ(transport.try_receive(later), TransportResult::WouldBlock);
+}
+
+TEST(UsbCdcTransport, FragmentedPacketUsesClockWhenPacketBecomesComplete) {
+  using namespace mech_control_core;
+  std::int64_t now_ns = 1000000000;
+  FakeSerial serial;
+  UsbCdcTransport transport(serial, UsbCdcOptions{
+      1U, 1000000U, 4U, 1024U, CdcProtocolVersion{4U, 8U, 8U}},
+      [&now_ns] { return *MonotonicTime::from_nanoseconds(now_ns); });
+  ASSERT_TRUE(transport.open());
+  ASSERT_EQ(transport.try_send(make_frame(FrameDirection::Tx)), TransportResult::Ok);
+  const auto packet = serial.take_tx();
+  ASSERT_GT(packet.size(), 9U);
+  ASSERT_TRUE(serial.inject_rx({packet.begin(), packet.begin() + 9U}));
+  RawCanFrame received{};
+  EXPECT_EQ(transport.try_receive(received), TransportResult::WouldBlock);
+  now_ns = 2000000000;
+  ASSERT_TRUE(serial.inject_rx({packet.begin() + 9U, packet.end()}));
+  ASSERT_EQ(transport.try_receive(received), TransportResult::Ok);
+  EXPECT_EQ(received.host_arrival.nanoseconds(), 2000000000);
+  EXPECT_EQ(received.payload[0], 0xA5U);
+  EXPECT_EQ(received.payload[1], 0x5AU);
+  EXPECT_FALSE(received.source_timestamp);
 }
 
 TEST(UsbCdcTransport, BatchesFdAndRejectsMalformedCrc) {

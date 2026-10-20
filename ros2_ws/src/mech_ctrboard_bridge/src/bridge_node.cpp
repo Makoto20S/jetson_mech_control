@@ -1,18 +1,20 @@
-#include <algorithm>
-#include <array>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
+#include "diagnostic_msgs/msg/diagnostic_status.hpp"
+#include "diagnostic_msgs/msg/key_value.hpp"
 #include "geometry_msgs/msg/vector3_stamped.hpp"
 #include "mech_control_core/posix_cdc_serial_port.hpp"
 #include "mech_control_core/socketcan_transport.hpp"
 #include "mech_control_core/transport.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
+#include "mech_ctrboard_bridge/imu_safety.hpp"
 #include "mech_ctrboard_bridge/topic_names.hpp"
 #include "mech_protocol_ctrboard/protocol.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -36,13 +38,11 @@ using mech_control_core::Transport;
 using mech_control_core::TransportResult;
 using mech_control_core::UsbCdcOptions;
 using mech_control_core::UsbCdcTransport;
-using mech_protocol_ctrboard::ImuSampleWire;
 using mech_protocol_ctrboard::Packet;
 using mech_protocol_ctrboard::SensorTelemetryWire;
 
 constexpr std::size_t kMaximumReceiveFramesPerPoll = 64U;
-constexpr double kGravityMetersPerSecondSquared = 9.80665;
-constexpr double kDegreesToRadians = 0.017453292519943295;
+constexpr auto kDiagnosticPeriod = std::chrono::milliseconds(200);
 
 std::uint16_t checked_logical_bus(int value) {
   if (value < 0 || value > 65535) {
@@ -76,6 +76,13 @@ std::uint8_t checked_version_component(int value, const char* parameter) {
   return static_cast<std::uint8_t>(value);
 }
 
+std::chrono::milliseconds checked_sensor_timeout(int value) {
+  if (value < 20 || value > 10000) {
+    throw std::invalid_argument("sensor_timeout_ms must be in [20, 10000]");
+  }
+  return std::chrono::milliseconds(value);
+}
+
 UsbCdcOptions make_usb_cdc_options(std::uint16_t logical_bus,
                                    CdcProtocolVersion board_version) {
   UsbCdcOptions options;
@@ -87,15 +94,8 @@ UsbCdcOptions make_usb_cdc_options(std::uint16_t logical_bus,
   return options;
 }
 
-bool imu_is_finite(const ImuSampleWire& imu) {
-  const auto array_is_finite = [](const auto& values) {
-    return std::all_of(std::begin(values), std::end(values),
-                       [](float value) { return std::isfinite(value); });
-  };
-  return array_is_finite(imu.acceleration_g) &&
-         array_is_finite(imu.angular_velocity_dps) &&
-         array_is_finite(imu.euler_deg) &&
-         array_is_finite(imu.quaternion_wxyz);
+const char* bool_text(bool value) noexcept {
+  return value ? "true" : "false";
 }
 
 }  // namespace
@@ -124,7 +124,10 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
         imu_1_frame_id_(
             declare_parameter<std::string>("imu_1_frame_id", "imu_1_link")),
         imu_2_frame_id_(
-            declare_parameter<std::string>("imu_2_frame_id", "imu_2_link")) {
+            declare_parameter<std::string>("imu_2_frame_id", "imu_2_link")),
+        sensor_timeout_(checked_sensor_timeout(
+            declare_parameter<int>("sensor_timeout_ms", 500))),
+        safety_monitor_(sensor_timeout_) {
     if (poll_period_ms_ < 1 || poll_period_ms_ > 1000) {
       throw std::invalid_argument("poll_period_ms must be in [1, 1000]");
     }
@@ -183,17 +186,26 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
             "ctrboard/sensor_status", rclcpp::SensorDataQoS());
     device_timestamp_publisher_ = create_publisher<std_msgs::msg::UInt32>(
         "ctrboard/timestamp_ms", rclcpp::SensorDataQoS());
+    diagnostic_publisher_ =
+        create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+            kDiagnosticTopic, rclcpp::SystemDefaultsQoS());
 
     timer_ = create_wall_timer(std::chrono::milliseconds(poll_period_ms_),
                                [this]() { poll_transport(); });
-    const std::string endpoint = transport_backend_ == "socketcan"
-                                     ? interface_name_
-                                     : device_path_;
+    diagnostic_timer_ = create_wall_timer(
+        kDiagnosticPeriod, [this]() { publish_diagnostics(); });
+    endpoint_ = transport_backend_ == "socketcan" ? interface_name_
+                                                   : device_path_;
     RCLCPP_INFO(get_logger(),
                 "CtrBoard receive-only bridge opened %s via %s: RX 0x%03X, "
                 "Classic CAN",
-                endpoint.c_str(), transport_backend_.c_str(),
+                endpoint_.c_str(), transport_backend_.c_str(),
                 mech_protocol_ctrboard::kMcuToHostCanId);
+    RCLCPP_WARN(
+        get_logger(),
+        "The legacy 196-byte telemetry payload has no per-IMU freshness "
+        "field; startup absence and packet timeout are monitored, but a "
+        "single IMU freezing after its first sample cannot be proven");
   }
 
   ~CtrBoardBridgeNode() override {
@@ -212,6 +224,7 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
         break;
       }
       if (result != TransportResult::Ok) {
+        safety_monitor_.note_transport_fault();
         RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000,
                               "CtrBoard transport receive error: %u",
                               static_cast<unsigned int>(result));
@@ -221,6 +234,9 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
         handle_packet(packet);
       }
     }
+
+    safety_monitor_.set_decoder_counters(decoder_.crc_errors(),
+                                         decoder_.discarded_bytes());
 
     if (decoder_.crc_errors() != reported_crc_errors_) {
       reported_crc_errors_ = decoder_.crc_errors();
@@ -234,18 +250,22 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
     if (!mech_protocol_ctrboard::decode_sensor_state(packet, telemetry)) {
       return;
     }
-    if (!imu_is_finite(telemetry.imu_1) ||
-        !imu_is_finite(telemetry.imu_2)) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                           "Dropped CtrBoard sample containing NaN or Inf");
-      return;
-    }
-
     const auto stamp = now();
-    publish_imu(telemetry.imu_1, imu_1_frame_id_, stamp, imu_1_publisher_,
-                imu_1_euler_publisher_);
-    publish_imu(telemetry.imu_2, imu_2_frame_id_, stamp, imu_2_publisher_,
-                imu_2_euler_publisher_);
+    const auto message_stamp =
+        static_cast<builtin_interfaces::msg::Time>(stamp);
+    const auto imu_1 = prepare_imu_messages(
+        telemetry.imu_1, imu_1_frame_id_, message_stamp);
+    const auto imu_2 = prepare_imu_messages(
+        telemetry.imu_2, imu_2_frame_id_, message_stamp);
+    imu_1_publisher_->publish(imu_1.imu);
+    imu_2_publisher_->publish(imu_2.imu);
+    if (imu_1.euler.has_value()) {
+      imu_1_euler_publisher_->publish(*imu_1.euler);
+    }
+    if (imu_2.euler.has_value()) {
+      imu_2_euler_publisher_->publish(*imu_2.euler);
+    }
+    safety_monitor_.note_packet(imu_1.validity, imu_2.validity);
 
     std_msgs::msg::UInt16MultiArray fsr_left;
     fsr_left.data.assign(std::begin(telemetry.fsr_left_raw),
@@ -273,55 +293,67 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
     device_timestamp_publisher_->publish(device_timestamp);
   }
 
-  static void publish_imu(
-      const ImuSampleWire& sample, const std::string& frame_id,
-      const rclcpp::Time& stamp,
-      const rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr& publisher,
-      const rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr&
-          euler_publisher) {
-    sensor_msgs::msg::Imu message;
-    message.header.stamp = stamp;
-    message.header.frame_id = frame_id;
-
-    const double norm = std::sqrt(
-        static_cast<double>(sample.quaternion_wxyz[0]) *
-            sample.quaternion_wxyz[0] +
-        static_cast<double>(sample.quaternion_wxyz[1]) *
-            sample.quaternion_wxyz[1] +
-        static_cast<double>(sample.quaternion_wxyz[2]) *
-            sample.quaternion_wxyz[2] +
-        static_cast<double>(sample.quaternion_wxyz[3]) *
-            sample.quaternion_wxyz[3]);
-    if (norm > 1.0e-6) {
-      message.orientation.w = sample.quaternion_wxyz[0] / norm;
-      message.orientation.x = sample.quaternion_wxyz[1] / norm;
-      message.orientation.y = sample.quaternion_wxyz[2] / norm;
-      message.orientation.z = sample.quaternion_wxyz[3] / norm;
-    } else {
-      message.orientation.w = 1.0;
-      message.orientation_covariance[0] = -1.0;
+  void publish_diagnostics() {
+    const auto snapshot = safety_monitor_.snapshot();
+    diagnostic_msgs::msg::DiagnosticArray array;
+    array.header.stamp = now();
+    diagnostic_msgs::msg::DiagnosticStatus status;
+    status.name = "ctrboard_sensor_safety";
+    status.hardware_id = endpoint_;
+    switch (snapshot.state) {
+      case SensorSafetyState::Healthy:
+        status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
+        status.message = "sensor packet and both IMUs are valid";
+        break;
+      case SensorSafetyState::WaitingForData:
+        status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+        status.message = "waiting for first sensor packet";
+        break;
+      case SensorSafetyState::Degraded:
+        status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+        status.message = "one or more IMU fields are unavailable";
+        break;
+      case SensorSafetyState::TransportFault:
+        status.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+        status.message = "transport receive fault";
+        break;
+      case SensorSafetyState::TimedOut:
+        status.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+        status.message = "sensor packet timeout";
+        break;
     }
-
-    message.angular_velocity.x =
-        sample.angular_velocity_dps[0] * kDegreesToRadians;
-    message.angular_velocity.y =
-        sample.angular_velocity_dps[1] * kDegreesToRadians;
-    message.angular_velocity.z =
-        sample.angular_velocity_dps[2] * kDegreesToRadians;
-    message.linear_acceleration.x =
-        sample.acceleration_g[0] * kGravityMetersPerSecondSquared;
-    message.linear_acceleration.y =
-        sample.acceleration_g[1] * kGravityMetersPerSecondSquared;
-    message.linear_acceleration.z =
-        sample.acceleration_g[2] * kGravityMetersPerSecondSquared;
-    publisher->publish(message);
-
-    geometry_msgs::msg::Vector3Stamped euler;
-    euler.header = message.header;
-    euler.vector.x = sample.euler_deg[0];
-    euler.vector.y = sample.euler_deg[1];
-    euler.vector.z = sample.euler_deg[2];
-    euler_publisher->publish(euler);
+    const auto add = [&status](const std::string& key,
+                               const std::string& value) {
+      diagnostic_msgs::msg::KeyValue item;
+      item.key = key;
+      item.value = value;
+      status.values.push_back(std::move(item));
+    };
+    add("state", to_string(snapshot.state));
+    add("transport", transport_backend_);
+    add("endpoint", endpoint_);
+    add("packet_age_ms", std::to_string(snapshot.packet_age_ms));
+    add("timeout_ms", std::to_string(sensor_timeout_.count()));
+    add("crc_errors", std::to_string(snapshot.crc_errors));
+    add("discarded_bytes", std::to_string(snapshot.discarded_bytes));
+    add("imu_1_sample_present", bool_text(snapshot.imu_1.sample_present));
+    add("imu_1_orientation_valid",
+        bool_text(snapshot.imu_1.orientation_valid));
+    add("imu_1_angular_velocity_valid",
+        bool_text(snapshot.imu_1.angular_velocity_valid));
+    add("imu_1_linear_acceleration_valid",
+        bool_text(snapshot.imu_1.linear_acceleration_valid));
+    add("imu_2_sample_present", bool_text(snapshot.imu_2.sample_present));
+    add("imu_2_orientation_valid",
+        bool_text(snapshot.imu_2.orientation_valid));
+    add("imu_2_angular_velocity_valid",
+        bool_text(snapshot.imu_2.angular_velocity_valid));
+    add("imu_2_linear_acceleration_valid",
+        bool_text(snapshot.imu_2.linear_acceleration_valid));
+    add("per_imu_freshness",
+        "unavailable in legacy 196-byte telemetry payload");
+    array.status.push_back(std::move(status));
+    diagnostic_publisher_->publish(array);
   }
 
   std::string transport_backend_;
@@ -332,6 +364,9 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
   int poll_period_ms_;
   std::string imu_1_frame_id_;
   std::string imu_2_frame_id_;
+  std::chrono::milliseconds sensor_timeout_;
+  SensorSafetyMonitor safety_monitor_;
+  std::string endpoint_;
   std::unique_ptr<PosixCdcSerialPort> cdc_serial_;
   std::unique_ptr<Transport> transport_;
   mech_protocol_ctrboard::StreamDecoder decoder_;
@@ -355,7 +390,10 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
       sensor_status_publisher_;
   rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr
       device_timestamp_publisher_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr
+      diagnostic_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr diagnostic_timer_;
 };
 
 }  // namespace mech::mech_ctrboard_bridge

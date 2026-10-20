@@ -20,6 +20,14 @@ TEST(ProductionPluginLoading, HardwareThenControllerHaveIndependentFactories) {
             nullptr);
 }
 
+TEST(ProductionPluginLoading, ServoSystemLoadsByPublicNameWithoutDeviceIo) {
+  pluginlib::ClassLoader<hardware_interface::SystemInterface> hardware_loader(
+      "hardware_interface", "hardware_interface::SystemInterface");
+  auto servo =
+      hardware_loader.createSharedInstance("mech_bringup/Ak30ServoSystem");
+  ASSERT_NE(servo, nullptr);
+}
+
 TEST(ProductionPluginLoading, DamiaoSystemLoadsByPublicNameWithoutDeviceIo) {
   pluginlib::ClassLoader<hardware_interface::SystemInterface> hardware_loader(
       "hardware_interface", "hardware_interface::SystemInterface");

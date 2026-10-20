@@ -3,11 +3,13 @@
 // CompositeSystem through the ADR-017 weak tier.
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -135,9 +137,24 @@ class RecordingTelemetry final : public FeedbackTelemetryCapture {
  public:
   bool try_push(const FeedbackTelemetryEvent& event) noexcept override {
     events.push_back(event);
+    if (event.kind == FeedbackTelemetryKind::RuntimeError && !reported_error_) {
+      reported_error_ = true;
+      std::cerr << "First force JTC runtime error: reason="
+                << static_cast<unsigned>(event.reason)
+                << " cycle=" << cycle_index
+                << " observed_ns=" << event.observed_at_nanoseconds
+                << " since_write_ns="
+                << event.observed_at_nanoseconds - last_write_ns
+                << " feedback_age_ns=" << event.age_nanoseconds << '\n';
+    }
     return true;
   }
   std::vector<FeedbackTelemetryEvent> events;
+  std::uint64_t cycle_index{0U};
+  std::int64_t last_write_ns{0};
+
+ private:
+  bool reported_error_{false};
 };
 
 class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
@@ -176,7 +193,7 @@ class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
     auto system =
         std::make_unique<mech::mech_hardware_ros2_control::CompositeSystem>();
     ASSERT_TRUE(system->set_runtime(std::make_unique<Ak30ForceControlRuntime>(
-        *transport_, []() { return steady_now(); },
+        *transport_, [this]() { return hardware_now(); },
         runtime_config(position_velocity_),
         &telemetry_)));
     auto resources = std::make_unique<hardware_interface::ResourceManager>();
@@ -203,7 +220,7 @@ class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
         std::string("/") + controller_name_ + "/joint_trajectory", 1);
     executor_->add_node(publisher_node_);
     next_cycle_ = std::chrono::steady_clock::now();
-    last_feedback_ = next_cycle_ - std::chrono::nanoseconds(kFeedbackPeriodNs);
+    trajectory_time_ = controller_->get_node()->get_clock()->now();
   }
 
   void TearDown() override {
@@ -219,19 +236,17 @@ class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
     transport_.reset();
   }
 
-  [[nodiscard]] static MonotonicTime steady_now() {
+  [[nodiscard]] MonotonicTime hardware_now() const {
     return MonotonicTime::from_nanoseconds(
-               std::chrono::duration_cast<std::chrono::nanoseconds>(
-                   std::chrono::steady_clock::now().time_since_epoch())
-                   .count())
+               hardware_now_ns_.load(std::memory_order_relaxed))
         .value();
   }
 
   void establish_feedback() {
-    ASSERT_EQ(transport_->inject_receive(feedback_frame(steady_now(), feedback_position_decidegrees_)),
+    ASSERT_EQ(transport_->inject_receive(feedback_frame(hardware_now(), feedback_position_decidegrees_)),
               TransportResult::Ok);
-    last_feedback_ = std::chrono::steady_clock::now();
-    cycle(1);
+    last_feedback_ns_ = hardware_now().nanoseconds();
+    ASSERT_NO_FATAL_FAILURE(cycle(1));
   }
 
   controller_interface::return_type drive_switch(
@@ -256,25 +271,34 @@ class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
 
   void cycle(int count) {
     for (int index = 0; index < count; ++index) {
+      ++telemetry_.cycle_index;
       const auto current = std::chrono::steady_clock::now();
       if (next_cycle_ < current) {
         next_cycle_ = current;
       }
       next_cycle_ += std::chrono::nanoseconds(kPeriodNanoseconds);
       std::this_thread::sleep_until(next_cycle_);
-      const auto steady = std::chrono::steady_clock::now();
-      if (steady - last_feedback_ >=
-          std::chrono::nanoseconds(kFeedbackPeriodNs)) {
-        last_feedback_ = steady;
-        EXPECT_EQ(transport_->inject_receive(feedback_frame(steady_now(), feedback_position_decidegrees_)),
+      // This is a functional FakeTransport fixture, not a host scheduling
+      // benchmark. Keep arrival stamps and the runtime in one clock domain,
+      // advancing exactly one declared control period despite host pauses.
+      hardware_now_ns_.fetch_add(kPeriodNanoseconds, std::memory_order_relaxed);
+      const auto now = hardware_now();
+      if (now.nanoseconds() - last_feedback_ns_ >= kFeedbackPeriodNs) {
+        last_feedback_ns_ = now.nanoseconds();
+        ASSERT_EQ(transport_->inject_receive(feedback_frame(now, feedback_position_decidegrees_)),
                   TransportResult::Ok);
       }
-      const auto clock = controller_->get_node()->get_clock();
-      const rclcpp::Time time = clock->now();
       const rclcpp::Duration period(0, kPeriodNanoseconds);
+      // JTC samples the update timestamp. Its trajectory time must advance
+      // with the period too, or wall-clock pauses create larger target steps
+      // while the test still asserts a 2 ms step bound. ROS callbacks and
+      // discovery keep using the real node clock; use_sim_time is not enabled.
+      trajectory_time_ = trajectory_time_ + period;
+      const auto time = trajectory_time_;
       manager_->read(time, period);
       manager_->update(time, period);
       manager_->write(time, period);
+      telemetry_.last_write_ns = hardware_now().nanoseconds();
       executor_->spin_some();
       drain_transmit();
     }
@@ -345,6 +369,13 @@ class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
                        });
   }
 
+  [[nodiscard]] bool saw_runtime_error() const {
+    return std::any_of(telemetry_.events.begin(), telemetry_.events.end(),
+                       [](const FeedbackTelemetryEvent& event) {
+                         return event.kind == FeedbackTelemetryKind::RuntimeError;
+                       });
+  }
+
   std::uint16_t feedback_position_decidegrees_{900U};
   bool position_velocity_{false};
   std::string controller_name_;
@@ -359,8 +390,53 @@ class JtcIntegrationTest : public ::testing::TestWithParam<bool> {
   std::vector<double> velocities_;
   std::vector<double> efforts_;
   std::chrono::steady_clock::time_point next_cycle_;
-  std::chrono::steady_clock::time_point last_feedback_;
+  std::atomic<std::int64_t> hardware_now_ns_{1000000000};
+  std::int64_t last_feedback_ns_{0};
+  rclcpp::Time trajectory_time_{0, 0, RCL_ROS_TIME};
 };
+
+TEST_P(JtcIntegrationTest, HostPauseDoesNotReplaceLogicalHardwareTime) {
+  ASSERT_NO_FATAL_FAILURE(establish_feedback());
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
+            controller_interface::return_type::OK);
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  (void)take_positions();
+
+  const auto before = hardware_now().nanoseconds();
+  const auto trajectory_before = trajectory_time_.nanoseconds();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ASSERT_NO_FATAL_FAILURE(cycle(1));
+  EXPECT_EQ(hardware_now().nanoseconds() - before, kPeriodNanoseconds);
+  EXPECT_EQ(trajectory_time_.nanoseconds() - trajectory_before, kPeriodNanoseconds);
+  EXPECT_EQ(take_positions().size(), 1U);
+  EXPECT_FALSE(saw_runtime_error());
+}
+
+TEST_P(JtcIntegrationTest, LogicalHardwareDeadlineStillExpires) {
+  ASSERT_NO_FATAL_FAILURE(establish_feedback());
+  ASSERT_EQ(drive_switch({controller_name_}, {}),
+            controller_interface::return_type::OK);
+  ASSERT_NO_FATAL_FAILURE(cycle(2));
+  ASSERT_FALSE(take_positions().empty());
+  ASSERT_FALSE(saw_runtime_error());
+
+  // A gap in hardware time remains a real watchdog violation. Give the
+  // runtime fresh feedback so the command deadline is the failing gate.
+  hardware_now_ns_.fetch_add(4 * kPeriodNanoseconds, std::memory_order_relaxed);
+  ASSERT_NO_FATAL_FAILURE(establish_feedback());
+  EXPECT_TRUE(take_positions().empty());
+  const auto first_error = std::find_if(
+      telemetry_.events.begin(), telemetry_.events.end(),
+      [](const FeedbackTelemetryEvent& event) {
+        return event.kind == FeedbackTelemetryKind::RuntimeError;
+      });
+  ASSERT_NE(first_error, telemetry_.events.end());
+  EXPECT_EQ(first_error->reason, FeedbackTelemetryReason::CommandSubmission);
+  EXPECT_TRUE(first_error->age_available);
+  EXPECT_LE(first_error->age_nanoseconds, kPeriodNanoseconds);
+  EXPECT_NE(drive_switch({}, {controller_name_}),
+            controller_interface::return_type::OK);
+}
 
 TEST_P(JtcIntegrationTest, ActivationAndReactivationHoldMeasuredPosition) {
   establish_feedback();
@@ -408,7 +484,12 @@ TEST_P(JtcIntegrationTest, TrajectoryProducesBoundedMonotoneLegs) {
   ASSERT_NO_FATAL_FAILURE(wait_for_trajectory_subscription());
   (void)take_positions();
   publisher_->publish(message);
-  cycle(4500);
+  ASSERT_NO_FATAL_FAILURE(cycle(1000));
+  // Pause during interpolation as well as during the hold regression above.
+  // Frame count, monotonic legs and the original step bound must all survive.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ASSERT_NO_FATAL_FAILURE(cycle(3500));
+  EXPECT_FALSE(saw_runtime_error());
   const auto positions = take_positions();
   ASSERT_EQ(positions.size(), 4500U);
   const auto peak = std::max_element(positions.begin(), positions.end());

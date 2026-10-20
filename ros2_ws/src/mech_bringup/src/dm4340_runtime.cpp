@@ -1,4 +1,4 @@
-#include "mech_bringup/dm4340_velocity_runtime.hpp"
+#include "mech_bringup/dm4340_runtime.hpp"
 
 #include <array>
 #include <cmath>
@@ -43,19 +43,19 @@ const char* dm4340_fault_name(Dm4340FaultReason reason) noexcept {
   return "unknown";
 }
 
-Dm4340VelocityRuntime::Dm4340VelocityRuntime(
-    Transport& transport, Clock clock, Dm4340VelocityConfig config,
+Dm4340Runtime::Dm4340Runtime(
+    Transport& transport, Clock clock, Dm4340RuntimeConfig config,
     BusOwnershipRegistry& ownership)
     : transport_(transport), clock_(std::move(clock)), config_(std::move(config)),
       router_(kMaxJoints),
       bus_(config_.logical_bus, config_.physical_bus, transport_, router_,
            ownership, kMaxJoints, kMaxJoints) {}
 
-std::uint16_t Dm4340VelocityRuntime::route(std::size_t index) const noexcept {
+std::uint16_t Dm4340Runtime::route(std::size_t index) const noexcept {
   return static_cast<std::uint16_t>(index + 1U);
 }
 
-bool Dm4340VelocityRuntime::configure(std::size_t count) noexcept {
+bool Dm4340Runtime::configure(std::size_t count) noexcept {
   if (running_ || !clock_ || count == 0U || count > kMaxJoints ||
       count != config_.joints.size() || config_.logical_bus == 0U ||
       config_.physical_bus.empty() ||
@@ -111,7 +111,7 @@ bool Dm4340VelocityRuntime::configure(std::size_t count) noexcept {
   return true;
 }
 
-bool Dm4340VelocityRuntime::start() noexcept {
+bool Dm4340Runtime::start() noexcept {
   if (!configured_ || running_ || bus_.start() != RuntimeResult::Ok) return false;
   const auto now = clock_();
   for (auto& device : devices_) {
@@ -140,7 +140,7 @@ bool Dm4340VelocityRuntime::start() noexcept {
   return true;
 }
 
-void Dm4340VelocityRuntime::stop() noexcept {
+void Dm4340Runtime::stop() noexcept {
   if (!running_) return;
   (void)halt_all(false);
   for (auto& device : devices_) device.session.deactivate();
@@ -148,7 +148,7 @@ void Dm4340VelocityRuntime::stop() noexcept {
   running_ = false;
 }
 
-bool Dm4340VelocityRuntime::send_special(
+bool Dm4340Runtime::send_special(
     std::uint32_t id, const std::array<std::uint8_t, 8>& bytes) noexcept {
   std::array<std::uint8_t, kMaxCanPayloadBytes> payload{};
   for (std::size_t i = 0; i < bytes.size(); ++i) payload[i] = bytes[i];
@@ -160,7 +160,7 @@ bool Dm4340VelocityRuntime::send_special(
   return frame && transport_.try_send(*frame) == TransportResult::Ok;
 }
 
-bool Dm4340VelocityRuntime::halt_device(std::size_t index) noexcept {
+bool Dm4340Runtime::halt_device(std::size_t index) noexcept {
   auto& device = devices_[index];
   device.pending.reset();
   device.lease.reset();
@@ -192,7 +192,7 @@ bool Dm4340VelocityRuntime::halt_device(std::size_t index) noexcept {
   return stopped;
 }
 
-bool Dm4340VelocityRuntime::halt_all(bool fault) noexcept {
+bool Dm4340Runtime::halt_all(bool fault) noexcept {
   bool stopped = true;
   for (std::size_t index = 0; index < devices_.size(); ++index)
     stopped = halt_device(index) && stopped;
@@ -202,14 +202,14 @@ bool Dm4340VelocityRuntime::halt_all(bool fault) noexcept {
   return stopped && !fault;
 }
 
-bool Dm4340VelocityRuntime::fail(Dm4340FaultReason reason) noexcept {
+bool Dm4340Runtime::fail(Dm4340FaultReason reason) noexcept {
   if (fault_reason_ == Dm4340FaultReason::None) fault_reason_ = reason;
   return halt_all(true);
 }
 
-bool Dm4340VelocityRuntime::observe(void* context, std::uint16_t selected,
+bool Dm4340Runtime::observe(void* context, std::uint16_t selected,
                                     const RawCanFrame& frame) noexcept {
-  auto& self = *static_cast<Dm4340VelocityRuntime*>(context);
+  auto& self = *static_cast<Dm4340Runtime*>(context);
   if (selected == 0U || selected > self.devices_.size()) {
     self.fault_reason_ = Dm4340FaultReason::FeedbackRejected;
     self.faulted_ = true;
@@ -231,9 +231,9 @@ bool Dm4340VelocityRuntime::observe(void* context, std::uint16_t selected,
   return true;
 }
 
-bool Dm4340VelocityRuntime::authorize_send(
+bool Dm4340Runtime::authorize_send(
     void* context, const CommandLease& selected, MonotonicTime& now) noexcept {
-  auto& self = *static_cast<Dm4340VelocityRuntime*>(context);
+  auto& self = *static_cast<Dm4340Runtime*>(context);
   now = self.clock_();
   if (selected.route_id == 0U || selected.route_id > self.devices_.size())
     return false;
@@ -246,7 +246,7 @@ bool Dm4340VelocityRuntime::authorize_send(
              selected.frame, selected.generation, selected.deadline, now);
 }
 
-bool Dm4340VelocityRuntime::prepare_and_transmit(MonotonicTime now) noexcept {
+bool Dm4340Runtime::prepare_and_transmit(MonotonicTime now) noexcept {
   if (!bus_.last_receive_drained()) return true;
   bool any_pending = false;
   for (std::size_t index = 0; index < devices_.size(); ++index) {
@@ -282,7 +282,7 @@ bool Dm4340VelocityRuntime::prepare_and_transmit(MonotonicTime now) noexcept {
   return true;
 }
 
-bool Dm4340VelocityRuntime::read(
+bool Dm4340Runtime::read(
     mech_hardware_ros2_control::CanonicalState* states,
     std::size_t count) noexcept {
   if (!running_ || faulted_ || !states || count != devices_.size()) return false;
@@ -326,7 +326,7 @@ bool Dm4340VelocityRuntime::read(
   return prepare_and_transmit(now);
 }
 
-bool Dm4340VelocityRuntime::write(
+bool Dm4340Runtime::write(
     const mech_hardware_ros2_control::CommandDispatch* commands,
     std::size_t count) noexcept {
   if (!running_ || faulted_ || !commands || count != devices_.size())
@@ -380,7 +380,7 @@ bool Dm4340VelocityRuntime::write(
   return true;
 }
 
-void Dm4340VelocityRuntime::cancel_pending(std::size_t index) noexcept {
+void Dm4340Runtime::cancel_pending(std::size_t index) noexcept {
   if (!running_ || index >= devices_.size()) return;
   auto& device = devices_[index];
   if (!device.claimed && !device.pending && !device.command_sent &&
@@ -388,7 +388,7 @@ void Dm4340VelocityRuntime::cancel_pending(std::size_t index) noexcept {
   if (!halt_device(index)) (void)fail(Dm4340FaultReason::StopFailed);
 }
 
-bool Dm4340VelocityRuntime::valid_sample(std::size_t index) const noexcept {
+bool Dm4340Runtime::valid_sample(std::size_t index) const noexcept {
   const auto& device = devices_[index];
   if (!running_ || faulted_ || device.disarmed) return false;
   const auto sample = device.session.snapshot(clock_());
@@ -396,14 +396,14 @@ bool Dm4340VelocityRuntime::valid_sample(std::size_t index) const noexcept {
          mech_protocol_damiao::feedback_motor_enabled(sample.raw_fault);
 }
 
-bool Dm4340VelocityRuntime::has_valid_sample() const noexcept {
+bool Dm4340Runtime::has_valid_sample() const noexcept {
   if (!running_ || faulted_) return false;
   for (std::size_t index = 0; index < devices_.size(); ++index)
     if (!valid_sample(index)) return false;
   return true;
 }
 
-bool Dm4340VelocityRuntime::has_fresh_ready_feedback() const noexcept {
+bool Dm4340Runtime::has_fresh_ready_feedback() const noexcept {
   if (!running_ || faulted_ || devices_.empty()) return false;
   for (const auto& device : devices_) {
     const auto sample = device.session.snapshot(clock_());
@@ -415,7 +415,7 @@ bool Dm4340VelocityRuntime::has_fresh_ready_feedback() const noexcept {
   return true;
 }
 
-bool Dm4340VelocityRuntime::adopt_or_enable_from_feedback() noexcept {
+bool Dm4340Runtime::adopt_or_enable_from_feedback() noexcept {
   if (!has_fresh_ready_feedback()) return false;
   for (std::size_t index = 0; index < devices_.size(); ++index) {
     auto& device = devices_[index];

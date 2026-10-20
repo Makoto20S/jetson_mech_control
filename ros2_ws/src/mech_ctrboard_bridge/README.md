@@ -17,6 +17,7 @@ subscriptions and never writes an application CAN frame.
 | `board_version_minor` | `8` | Verified USB communication-board firmware minor version |
 | `board_version_patch` | `8` | Verified USB communication-board firmware patch version |
 | `poll_period_ms` | `1` | Non-blocking receive polling period |
+| `sensor_timeout_ms` | `500` | Packet age that changes diagnostics to `ERROR` |
 | `imu_1_frame_id` | `imu_1_link` | Frame ID for the first IMU |
 | `imu_2_frame_id` | `imu_2_link` | Frame ID for the second IMU |
 
@@ -46,11 +47,24 @@ rejected by the transport.
 | `fsr/right/total` | `std_msgs/UInt32` | Right-insole raw pressure sum |
 | `ctrboard/sensor_status` | `std_msgs/UInt8MultiArray` | Left/right gait phase then left/right active point count |
 | `ctrboard/timestamp_ms` | `std_msgs/UInt32` | STM32 millisecond timestamp |
+| `ctrboard/diagnostics` | `diagnostic_msgs/DiagnosticArray` | Transport timeout, decoder counters, and independent IMU field validity |
 
-An all-zero quaternion marks a missing or not-yet-initialized IMU. The bridge
-publishes an identity quaternion with `orientation_covariance[0] = -1` in that
-case. Message headers use ROS receive time; the raw device timestamp is
-published separately because no host/device clock synchronization is defined.
+The current STM32 firmware zero-initializes each complete IMU sample. An
+all-zero 13-float sample therefore means missing or not yet initialized; a zero
+angular velocity by itself remains valid stationary data. Invalid orientation,
+angular velocity, or acceleration is marked independently with the matching
+ROS covariance first element set to `-1`. Euler output is suppressed when it
+cannot be validated, while the other IMU continues publishing normally.
+Message headers use ROS receive time; the raw device timestamp is published
+separately because no host/device clock synchronization is defined.
+
+Safety monitoring starts with the node. It reports `WARN` while waiting for the
+first packet or when either IMU is degraded, and `ERROR` on a receive fault or
+packet timeout. The legacy 196-byte payload contains no per-IMU timestamp or
+valid bit. Consequently the bridge can detect startup absence and whole-packet
+loss, but cannot prove that one IMU stopped refreshing after previously sending
+a valid sample. Adding per-IMU counters or timestamps requires a wire-protocol
+revision.
 
 ## Safety and ownership
 
@@ -81,6 +95,27 @@ This launch entry represents the attached STM32 as the ROS 2 node
 `/stm32_ctrboard`. The STM32 firmware remains a CAN device and does not run ROS
 itself; the bridge owns transport decoding and publishes its sensor interface.
 
+With the bridge running, display both IMU Euler angles, both FSR totals, sensor
+status, device time, and the measured update rate in a second terminal:
+
+```bash
+python3 tools/bench/watch_ctrboard_sensors.py
+```
+
+The monitor refreshes one terminal line at 10 Hz and stops cleanly with
+`Ctrl+C`. It does not open the transport or publish commands.
+
+From Windows PowerShell, the repository launcher performs the SSH connection,
+sources the target ROS environment, starts the bridge, and runs the monitor:
+
+```powershell
+.\tools\bench\run_ctrboard_live_monitor.ps1
+```
+
+The launcher defaults to `nvidia@192.168.55.1`, automatically uses the current
+bench SSH key when present, and accepts parameters for a different host, key,
+remote repository, install overlay, device, or bounded duration.
+
 To preserve and validate an experiment without putting large captures in Git,
 source the workspace overlay and run the repository's bounded recording tool:
 
@@ -90,6 +125,6 @@ bash tools/bench/record_ctrboard_sensors.sh \
 ```
 
 The tool starts this package's launch file, requires a live timestamp sample,
-records all ten public topics for the requested duration, writes `ros2 bag
+records all eleven public topics for the requested duration, writes `ros2 bag
 info` output, and generates SHA-256 checksums for the bag database. The output
 directory must not already exist.

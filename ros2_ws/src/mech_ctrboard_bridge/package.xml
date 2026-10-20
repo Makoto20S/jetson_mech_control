@@ -6,6 +6,8 @@
   <maintainer email="project-owners@example.invalid">Project Owners</maintainer>
   <license>Internal Research Use - All Rights Reserved</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>builtin_interfaces</depend>
+  <depend>diagnostic_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>mech_control_core</depend>
   <depend>mech_protocol_ctrboard</depend>

@@ -132,3 +132,10 @@ AK3.0 力控（L07 §4.2）的三个子模式共用控制模式 ID `8` 与同一
 - [AdapterContract v1](../development/adapter_contract_v1.md) 第 7 条与接口语义条款。
 - [AK3.0 力控适配器设计](../development/ak30_force_control_adapter_design.md)、[2026-09-07 Torque/Velocity 切片计划](../development/plans/2026-09-07-ak30-torque-velocity-slice.md)。
 - 台架证据（2026-09-03/04/05 渐进验证路线）：`docs/planning/06_cubemars_material_review.md` §6、`docs/planning/05_decisions_and_open_questions.md` §7/§8。
+
+
+## 2026-09-29 后续提案
+
+[ADR-020](ADR-020-declared-state-interfaces.md) 提议通用层按能力声明导出状态子集，
+使新伺服组合仅导出有明确映射的位置。该提案保持 Proposed；本文件关于原力控
+三状态形状的历史批准范围不变，现有力控配置和行为不受扩展影响。

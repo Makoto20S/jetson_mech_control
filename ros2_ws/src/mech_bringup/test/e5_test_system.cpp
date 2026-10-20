@@ -88,8 +88,18 @@ class E5TestSystem final
 
   hardware_interface::CallbackReturn on_init(
       const hardware_interface::HardwareInfo& info) override {
+    const auto pause = info.hardware_parameters.find("test_pause_after_first_send");
+    pause_after_first_send_ = pause != info.hardware_parameters.end() &&
+                             pause->second == "true";
+    // Functional process tests have no real-time scheduling guarantee. One
+    // logical hardware instant covers each read/update/write cycle, including
+    // simulated feedback arrival. Controller target TTL and manager periods
+    // retain real time; dedicated runtime tests enforce the 4/6 ms lease.
     runtime_ = std::make_unique<Ak30ForceControlRuntime>(
-        transport_, []() { return steady_now(); }, runtime_config(), this);
+        transport_, [clock = hardware_clock_]() {
+          return mech_control_core::MonotonicTime::from_nanoseconds(
+              clock->load()).value();
+        }, runtime_config(), this);
     if (!set_runtime(std::move(runtime_))) {
       return hardware_interface::CallbackReturn::ERROR;
     }
@@ -132,14 +142,24 @@ class E5TestSystem final
   hardware_interface::return_type read(const rclcpp::Time& time,
                                         const rclcpp::Duration& period) override {
     trace_version_.fetch_add(1U);
+    hardware_clock_->fetch_add(2000000);
     const auto requested = reset_requested_.load(std::memory_order_acquire);
     if (reset_applied_.load(std::memory_order_relaxed) != requested) {
       trace_count_.store(0U);
       trace_id_.store(0U);
       for (auto& byte : trace_payload_) byte.store(0U);
+      first_trace_id_.store(0U);
+      for (auto& byte : first_trace_payload_) byte.store(0U);
+      first_command_period_ns_.store(0U);
       reset_applied_.store(requested);
     }
-    const auto now = steady_now();
+    if (pause_after_first_send_ && !pause_applied_.load() &&
+        trace_count_.load() > 0U) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      pause_applied_.store(true);
+    }
+    const auto now = mech_control_core::MonotonicTime::from_nanoseconds(
+        hardware_clock_->load()).value();
     if (feedback_enabled_.load(std::memory_order_acquire) &&
         now.nanoseconds() - last_feedback_ns_ >= 20000000) {
       (void)transport_.inject_receive(feedback_frame(now));
@@ -149,6 +169,16 @@ class E5TestSystem final
     const auto result = CompositeSystem::read(time, period);
     mech_control_core::RawCanFrame frame;
     while (transport_.take_transmit(frame)) {
+      // The 10 ms telemetry timer can skip many 2 ms control cycles. Preserve
+      // the actual first transmitted frame after reset, rather than calling
+      // the latest sampled frame the first command.
+      if (trace_count_.load() == 0U) {
+        first_trace_id_.store(frame.id.value);
+        for (std::size_t index = 0; index < 8U; ++index) {
+          first_trace_payload_[index].store(frame.payload[index]);
+        }
+        first_command_period_ns_.store(last_write_period_ns_);
+      }
       trace_id_.store(frame.id.value);
       for (std::size_t index = 0; index < 8U; ++index) {
         trace_payload_[index].store(frame.payload[index]);
@@ -161,13 +191,21 @@ class E5TestSystem final
     return result;
   }
 
+  hardware_interface::return_type write(const rclcpp::Time& time,
+                                         const rclcpp::Duration& period) override {
+    // Runtime read transmits the target staged by the previous write; retain
+    // that controller update's period for the first frame's slew assertion.
+    last_write_period_ns_ = static_cast<std::uint64_t>(period.nanoseconds());
+    return CompositeSystem::write(time, period);
+  }
+
  private:
   void publish_trace() {
     if (!trace_publisher_) return;
     const auto version = trace_version_.load();
     if ((version & 1U) != 0U) return;
     std_msgs::msg::UInt64MultiArray message;
-    message.data.reserve(15U);
+    message.data.reserve(26U);
     message.data.push_back(trace_count_.load());
     message.data.push_back(trace_id_.load());
     for (std::size_t index = 0; index < 8U; ++index) {
@@ -178,11 +216,19 @@ class E5TestSystem final
     message.data.push_back(read_cycles_.load());
     message.data.push_back(error_reason_.load());
     message.data.push_back(error_quality_.load());
+    message.data.push_back(first_trace_id_.load());
+    for (const auto& byte : first_trace_payload_) {
+      message.data.push_back(byte.load());
+    }
+    message.data.push_back(first_command_period_ns_.load());
+    message.data.push_back(pause_applied_.load() ? 1U : 0U);
     if (trace_version_.load() != version) return;
     trace_publisher_->publish(message);
   }
 
   mech_simulation::FakeTransport transport_{64U};
+  std::shared_ptr<std::atomic<std::int64_t>> hardware_clock_{
+      std::make_shared<std::atomic<std::int64_t>>(1000000000)};
   std::unique_ptr<Ak30ForceControlRuntime> runtime_;
   std::atomic<bool> feedback_enabled_{false};
   std::atomic<std::uint64_t> reset_requested_{0U};
@@ -191,6 +237,12 @@ class E5TestSystem final
   std::atomic<std::uint64_t> trace_count_{0U};
   std::atomic<std::uint64_t> trace_id_{0U};
   std::array<std::atomic<std::uint64_t>, 8U> trace_payload_{};
+  std::atomic<std::uint64_t> first_trace_id_{0U};
+  std::array<std::atomic<std::uint64_t>, 8U> first_trace_payload_{};
+  std::atomic<std::uint64_t> first_command_period_ns_{0U};
+  std::uint64_t last_write_period_ns_{0U};
+  bool pause_after_first_send_{false};
+  std::atomic<bool> pause_applied_{false};
   // Atomic fields plus an odd/even version prevent torn frame observations.
   // The consumer skips a busy observation; the control loop never waits.
   std::atomic<std::uint64_t> trace_version_{0U};

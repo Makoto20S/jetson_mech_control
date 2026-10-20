@@ -24,11 +24,17 @@ find_package(realtime_tools REQUIRED)
 add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
+  src/command_trace.cpp
+  src/trace_snapshot.cpp
   src/ak30_force_runtime.cpp
+  src/ak30_servo_runtime.cpp
+  src/ak30_servo_runtime_params.cpp
+  src/ak30_servo_system.cpp
+  src/servo_feedback_reader.cpp
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
-  src/dm4340_velocity_runtime.cpp
+  src/dm4340_runtime.cpp
   src/dm4340_system.cpp
 )
 target_include_directories(${PROJECT_NAME}
@@ -50,6 +56,17 @@ ament_target_dependencies(
 
 pluginlib_export_plugin_description_file(
   hardware_interface mech_bringup_plugins.xml)
+
+add_executable(servo_feedback_reader src/servo_feedback_reader_main.cpp)
+target_link_libraries(servo_feedback_reader ${PROJECT_NAME})
+ament_target_dependencies(servo_feedback_reader hardware_interface)
+install(TARGETS servo_feedback_reader RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+add_executable(servo_disable src/servo_disable_main.cpp)
+target_link_libraries(servo_disable ${PROJECT_NAME})
+ament_target_dependencies(servo_disable hardware_interface)
+install(TARGETS servo_disable RUNTIME DESTINATION lib/${PROJECT_NAME})
+
 
 # First real-device entry point: drives a motor through the repository's own
 # UsbCdcTransport and Ak30ForceControlSession. Guarded behind an explicit
@@ -121,13 +138,27 @@ if(BUILD_TESTING)
     hardware_interface test/e5_test_plugins.xml)
   install(TARGETS ${PROJECT_NAME}_e5_test_system
     LIBRARY DESTINATION lib)
+  add_library(${PROJECT_NAME}_servo_pty_test_system SHARED
+    test/servo_pty_test_system.cpp)
+  target_link_libraries(${PROJECT_NAME}_servo_pty_test_system ${PROJECT_NAME})
+  pluginlib_export_plugin_description_file(
+    hardware_interface test/servo_pty_test_plugins.xml)
+  install(TARGETS ${PROJECT_NAME}_servo_pty_test_system
+    LIBRARY DESTINATION lib)
   ament_add_gtest(${PROJECT_NAME}_test
     test/test_foundation_integration.cpp
     test/test_ak30_runtime.cpp
+    test/test_servo_feedback_reader.cpp
+    test/test_serial_trace.cpp
+    test/test_command_trace.cpp
+    test/test_trace_snapshot.cpp
+    test/test_ak30_servo_runtime.cpp
+    test/test_ak30_servo_runtime_params.cpp
+    test/test_ak30_servo_system_plugin.cpp
     test/test_ak30_runtime_params.cpp
     test/test_ak30_system_integration.cpp
     test/test_ak30_system_plugin.cpp
-    test/test_dm4340_velocity_runtime.cpp
+    test/test_dm4340_runtime.cpp
     test/test_dm4340_system_plugin.cpp
     test/test_deployment_files.cpp
     test/test_package_marker.cpp
@@ -135,6 +166,15 @@ if(BUILD_TESTING)
   target_compile_definitions(${PROJECT_NAME}_test PRIVATE
     MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+  option(MECH_ENABLE_HOST_PERFORMANCE_TESTS
+    "Enable host timing acceptance on a qualified, unsanitized Linux host" OFF)
+  if(MECH_ENABLE_HOST_PERFORMANCE_TESTS)
+    ament_add_gtest(${PROJECT_NAME}_performance_test
+      test/test_foundation_performance.cpp)
+    target_link_libraries(${PROJECT_NAME}_performance_test ${PROJECT_NAME})
+    set_tests_properties(${PROJECT_NAME}_performance_test PROPERTIES
+      LABELS "host_performance" RUN_SERIAL TRUE)
+  endif()
 
   # ADR-015 E1's last layer: the authorization boundary driven by a real
   # controller_manager. Kept in its own target because it needs an rclcpp
@@ -147,6 +187,20 @@ if(BUILD_TESTING)
     test/test_plugin_loading.cpp)
   ament_target_dependencies(${PROJECT_NAME}_plugin_loading_test
     hardware_interface controller_interface pluginlib)
+  ament_add_gtest(${PROJECT_NAME}_posix_port_lock_test
+    test/test_posix_cdc_serial_port.cpp)
+  target_link_libraries(${PROJECT_NAME}_posix_port_lock_test ${PROJECT_NAME})
+  # Compile the actual port into this test executable so GNU ld's syscall
+  # seam can force short writes without wrapping writes in production DSOs.
+  ament_add_gtest(${PROJECT_NAME}_usb_cdc_pty_isolation_test
+    test/test_usb_cdc_pty_isolation.cpp
+    ../mech_control_core/src/posix_cdc_serial_port.cpp
+    src/command_trace.cpp
+    src/trace_snapshot.cpp
+    src/pass_through_init.cpp)
+  target_include_directories(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE include)
+  ament_target_dependencies(${PROJECT_NAME}_usb_cdc_pty_isolation_test mech_control_core)
+  target_link_options(${PROJECT_NAME}_usb_cdc_pty_isolation_test PRIVATE "-Wl,--wrap=write")
   ament_add_gtest(${PROJECT_NAME}_controller_manager_test
     test/test_controller_manager_integration.cpp
     test/test_velocity_controller_manager.cpp
@@ -188,6 +242,17 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION
       "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
 
+  ament_add_gtest(${PROJECT_NAME}_servo_jtc_manager_test
+    test/test_ak30_servo_jtc_manager.cpp)
+  target_compile_definitions(${PROJECT_NAME}_servo_jtc_manager_test PRIVATE
+    MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(${PROJECT_NAME}_servo_jtc_manager_test ${PROJECT_NAME})
+  ament_target_dependencies(${PROJECT_NAME}_servo_jtc_manager_test
+    controller_manager controller_interface rclcpp_action trajectory_msgs)
+  set_tests_properties(${PROJECT_NAME}_servo_jtc_manager_test PROPERTIES
+    ENVIRONMENT_MODIFICATION
+      "ASAN_OPTIONS=string_append::new_delete_type_mismatch=0")
+
   ament_add_test(${PROJECT_NAME}_activate_position_controller
     COMMAND bash
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/bench/test_activate_position_controller.sh
@@ -224,11 +289,17 @@ if(BUILD_TESTING)
   add_launch_test(test/test_e5_process.launch.py
     TARGET ${PROJECT_NAME}_e5_process_feedback_loss
     TIMEOUT 35)
+  add_launch_test(test/test_e5_process.launch.py
+    TARGET ${PROJECT_NAME}_e5_process_host_pause
+    TIMEOUT 45)
   set_tests_properties(${PROJECT_NAME}_e5_process_lifetime PROPERTIES
     ENVIRONMENT "ROS_DOMAIN_ID=41"
     RUN_SERIAL TRUE)
   set_tests_properties(${PROJECT_NAME}_e5_process_feedback_loss PROPERTIES
     ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42"
+    RUN_SERIAL TRUE)
+  set_tests_properties(${PROJECT_NAME}_e5_process_host_pause PROPERTIES
+    ENVIRONMENT "E5_SCENARIO=host_pause;ROS_DOMAIN_ID=43"
     RUN_SERIAL TRUE)
   if(CMAKE_CXX_FLAGS MATCHES "fsanitize=address")
     execute_process(
@@ -240,8 +311,38 @@ if(BUILD_TESTING)
         ENVIRONMENT "ROS_DOMAIN_ID=41;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
       set_tests_properties(${PROJECT_NAME}_e5_process_feedback_loss PROPERTIES
         ENVIRONMENT "E5_SCENARIO=feedback_loss;ROS_DOMAIN_ID=42;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
+      set_tests_properties(${PROJECT_NAME}_e5_process_host_pause PROPERTIES
+        ENVIRONMENT "E5_SCENARIO=host_pause;ROS_DOMAIN_ID=43;MECH_ASAN_RUNTIME=${MECH_ASAN_RUNTIME}")
     endif()
   endif()
+
+  ament_add_test(${PROJECT_NAME}_servo_reader_check
+    COMMAND /usr/bin/python3
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/servo_operator.py check
+      --reader $<TARGET_FILE:servo_feedback_reader>
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/config.example.json
+    TIMEOUT 35
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_servo_disable
+    COMMAND /usr/bin/python3
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_disable.py
+      $<TARGET_FILE:servo_disable>
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  foreach(servo_tool_test operator entrypoint control_launch motion motion_ros chain_audit trace_storage two_bus_config two_bus_ros)
+    set(servo_tool_timeout 35)
+    if(servo_tool_test STREQUAL "motion_ros" OR servo_tool_test STREQUAL "two_bus_ros")
+      # Includes the real 31-second single-motor manual-lifetime acceptance.
+      set(servo_tool_timeout 120)
+    endif()
+    ament_add_test(${PROJECT_NAME}_servo_${servo_tool_test}
+      COMMAND /usr/bin/python3
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/servo/test_${servo_tool_test}.py
+      TIMEOUT ${servo_tool_timeout}
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+  endforeach()
 
   ament_lint_cmake()
   ament_xmllint()

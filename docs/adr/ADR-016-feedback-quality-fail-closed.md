@@ -137,3 +137,10 @@ motor1 的回报速率是 **50 Hz（周期 20 ms）**，由三个独立来源一
 - [ADR-006：条件式单通道部署](ADR-006-conditional-can0-deployment.md)，回报速率变更需重算的带宽模型。
 - [适配器契约 v1](../development/adapter_contract_v1.md)，「新增适配器检查表」第 7 条。
 - [CubeMars 资料评审](../planning/06_cubemars_material_review.md)，AK3.0 反馈报文与回报速率的可配置范围。
+
+
+## 2026-09-29 后续提案
+
+[ADR-020](ADR-020-declared-state-interfaces.md) 提议通用层按能力声明导出状态子集，
+使新伺服组合仅导出有明确映射的位置。该提案保持 Proposed；本文件关于原力控
+三状态形状的历史批准范围不变，现有力控配置和行为不受扩展影响。

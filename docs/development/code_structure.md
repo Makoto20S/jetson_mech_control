@@ -8,11 +8,11 @@
 | 层 | 包或目录 | 职责与边界 |
 |---|---|---|
 | 通用传输/运行时 | `mech_control_core` | 原始帧、路由、快照、命令租约、BusRuntime、SocketCAN、USB-CDC 和 POSIX 串口；不认识电机品牌 |
-| 协议 | `mech_protocol_cubemars`、`mech_protocol_damiao` | 各自的 wire codec、映射和 session；只准备候选命令，不自行拥有串口 |
+| 协议 | `mech_protocol_cubemars`、`mech_protocol_damiao` | 各自的 wire codec、映射和 session；AK3.0 力控/伺服与 DM4340 MIT 的 codec/session；只准备候选命令，不自行拥有串口 |
 | 传感器协议 | `mech_protocol_ctrboard` | 分片、CRC 和遥测载荷解析 |
 | 通用硬件接口 | `mech_hardware_ros2_control` | CompositeSystem 与 RuntimePort 契约 |
 | 通用控制器 | `mech_controllers` | 位置、速度、力矩控制器；边界、斜率、上游目标有效期，不判断电机品牌 |
-| 部署组合 | `mech_bringup` | Ak30System、Dm4340System、品牌运行时及 URDF/YAML/launch；负责生命周期与物理设备组合 |
+| 部署组合 | `mech_bringup` | Ak30System、Ak30ServoSystem、Dm4340System、品牌运行时及 URDF/YAML/launch；负责生命周期与物理设备组合 |
 | 传感器 ROS 接入 | `mech_ctrboard_bridge` | 只接收桥、标准消息与诊断；不发布电机目标 |
 | 膝角/观察 | `mech_knee_kinematics` | 纯估计核心、ROS 标定节点、面板、影子策略和离线模型 |
 | 应用策略 | `mech_assist_control` | 纯策略与 ROS 包装分离；速度跟随或阻力，默认预览 |
@@ -47,7 +47,7 @@ flowchart TD
 - `seven_channel_gateway.hpp` 统一电机网关参数构造，位速率未知时保持未知。
 - `Dm4340System` 在启动时固定 velocity 或 effort，每个接口都与
   `command_generation` 整组申领/释放；同一网关最多六个达妙关节共享一条运行时。
-- `dm4340_velocity_runtime.*` 是已有名称，当前也承载 effort；配置中的
+- `dm4340_runtime.*` 统一承载 velocity 与 effort，旧 velocity 头仅保留类型别名；配置中的
   `Dm4340CommandMode` 决定模式，不同时暴露两种写入口。
 - CubeMars 和达妙用同一启动入口互斥选择，不能同时打开同一串口，也尚不支持
   在一个网关内混合两种品牌的运行时。

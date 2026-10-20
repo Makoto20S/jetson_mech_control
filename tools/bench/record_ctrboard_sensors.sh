@@ -169,6 +169,7 @@ topics=(
   /fsr/right/total
   /ctrboard/sensor_status
   /ctrboard/timestamp_ms
+  /ctrboard/diagnostics
 )
 
 echo "Recording ${#topics[@]} STM32 sensor topics for ${duration_s}s"

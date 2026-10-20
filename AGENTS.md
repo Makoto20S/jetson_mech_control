@@ -25,6 +25,7 @@
 - 从 handoff 恢复时，必须先用 `write-codex-handoff` 的 `RESUME` 流程验证结构和时效，再与当前 Git、文件和测试核对。
 - 创建 handoff 后必须验证；已宣布为最终交接的文件不可继续改写，后续变化创建新的 successor handoff。
 - 两个 skill 的唯一批准来源、已核验提交和用途记录在 `manifests/ai_skills.yaml`。项目负责人已授权在缺失时从其中列出的仓库安装；不得静默替换为 fork 或其他同名来源。
+- 新增或扩展 CAN 电机适配时，使用仓库维护的 `skills/mech-can-motor-adapter/SKILL.md`；它整理扩展层选择、协议证据与验证流程，不授予额外实机操作权限。其源文件随本仓库 PR 评审，不替代以上两个上下文 skill。
 - 若当前 AI 环境缺少 skill，先读取 manifest，并在当前环境权限允许时安装对应仓库。优先使用已核验提交；若只能安装移动中的 `main`，必须核对实际 HEAD 并报告与 manifest 的差异，不得静默更新基线。
 - 若网络、权限或 AI 产品不支持安装，必须明确报告缺失，随后按统一流程手工执行等价步骤；不得声称已运行不存在的 skill 或 validator，也不得另建第四种项目记忆格式。
 
@@ -63,9 +64,9 @@
 
 ## 6. 项目专用约束
 
-- 当前实施入口是 `docs/planning/07_framework_bootstrap_plan.md`；当前先完成 Foundation，不提前开发真实 CubeMars/HI12 adapter。
-- FND-004 完成后、FND-005 开始前执行 FND-004A Jetson ARM64 原生烟测；仅做 clean clone、依赖解析、context check 和五包 build/test，不启用 CAN、不操作真实设备。
-- FND-004A 通过后，给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed` 并保护 `main`；FND-005 起所有修改（包括项目负责人自己的修改）均通过短生命周期任务分支和 PR 合并，外部成员可使用 fork。烟测后若有修复，必须在新 commit 上重跑完整 FND-004A 后再打 tag。
-- `CubeMars/` 是独立供应商资料仓库，不得进入未来主仓库。
+- 当前实施入口是 `docs/planning/README.md` 及其活动任务/设计/操作文档。Foundation 已完成，`docs/planning/07_framework_bootstrap_plan.md` 为实施记录；AK3.0 力控与 SERVO-001 伺服已实现。HI12 和完整安装初始化仍按规划推进，不能把已完成的软件/台架验证当作新的设备操作授权。
+- 历史里程碑要求（已完成）：FND-004 完成后、FND-005 开始前执行 FND-004A Jetson ARM64 原生烟测；仅做 clean clone、依赖解析、context check 和五包 build/test，不启用 CAN、不操作真实设备。
+- 历史里程碑与持续分支规则：FND-004A 通过后，给实际通过烟测的精确 commit 创建 annotated tag `fnd-004a-passed` 并保护 `main`；FND-005 起所有修改（包括项目负责人自己的修改）均通过短生命周期任务分支和 PR 合并，外部成员可使用 fork。烟测后若有修复，必须在新 commit 上重跑完整 FND-004A 后再打 tag。
+- `CubeMars/` 是独立供应商资料仓库，不得进入主仓库。
 - Windows 只作为编辑/Git 环境；ROS 2 Humble、vcan、性能和 ARM64 结论必须来自对应 Ubuntu/ARM64 环境。
 - 控制器、ros2_control hardware plugin 和厂商 codec/session 的边界不得为单个设备品牌而破坏。

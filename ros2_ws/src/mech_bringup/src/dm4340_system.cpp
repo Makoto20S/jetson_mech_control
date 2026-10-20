@@ -91,7 +91,7 @@ bool complete_claim_switch(const std::string& joint,
 }
 
 bool parse(const hardware_interface::HardwareInfo& info,
-           Dm4340VelocityConfig& config,
+           Dm4340RuntimeConfig& config,
            mech_control_core::CdcProtocolVersion& board,
            bool& enable_on_activate) {
   static const std::set<std::string> hardware_keys{
@@ -236,7 +236,7 @@ void Dm4340System::set_serial_factory_for_testing(SerialFactory factory) noexcep
 }
 
 void Dm4340System::set_clock_for_testing(
-    Dm4340VelocityRuntime::Clock clock) noexcept {
+    Dm4340Runtime::Clock clock) noexcept {
   if (!init_attempted_) clock_ = std::move(clock);
 }
 
@@ -249,7 +249,7 @@ hardware_interface::CallbackReturn Dm4340System::on_init(
     const hardware_interface::HardwareInfo& info) {
   if (init_attempted_) return hardware_interface::CallbackReturn::ERROR;
   init_attempted_ = true;
-  Dm4340VelocityConfig config{};
+  Dm4340RuntimeConfig config{};
   mech_control_core::CdcProtocolVersion board{};
   if (!parse(info, config, board, enable_on_activate_))
     return hardware_interface::CallbackReturn::ERROR;
@@ -270,7 +270,7 @@ hardware_interface::CallbackReturn Dm4340System::on_init(
   transport_ = std::make_unique<mech_control_core::UsbCdcTransport>(
       *serial_, options, clock_);
   if (!registry_) registry_ = &shared_registry();
-  auto runtime = std::make_unique<Dm4340VelocityRuntime>(
+  auto runtime = std::make_unique<Dm4340Runtime>(
       *transport_, clock_, config, *registry_);
   runtime_view_ = runtime.get();
   if (!set_runtime(std::move(runtime))) {

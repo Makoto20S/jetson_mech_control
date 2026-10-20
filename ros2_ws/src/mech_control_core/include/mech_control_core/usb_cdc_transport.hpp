@@ -124,6 +124,11 @@ class UsbCdcCodec final {
 class UsbCdcTransport final : public Transport {
  public:
   using Clock = std::function<MonotonicTime()>;
+
+  // The default stamps complete decoded packets with the host steady clock.
+  // Injected callbacks must not throw and must read shared external time
+  // without advancing it, in the same domain as the consumer. Queued frames
+  // retain their decode-time arrival stamp when popped later.
   UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options, Clock clock = {});
 
   [[nodiscard]] TransportKind kind() const noexcept override;

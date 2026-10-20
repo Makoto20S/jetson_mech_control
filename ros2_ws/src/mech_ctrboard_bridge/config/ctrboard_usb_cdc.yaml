@@ -7,5 +7,6 @@ stm32_ctrboard:
     board_version_minor: 8
     board_version_patch: 8
     poll_period_ms: 1
+    sensor_timeout_ms: 500
     imu_1_frame_id: thigh_imu_link
     imu_2_frame_id: shank_imu_link

@@ -40,7 +40,10 @@ TEST(FoundationIntegration, RunsFiveHundredHertzWhileTargetKeepsBeingRefreshed) 
   EXPECT_NEAR(harness.position(), 1.0, 1e-9);
   EXPECT_EQ(harness.metrics().cycles, 1000U);
   EXPECT_EQ(harness.metrics().failures, 0U);
-  EXPECT_LT(harness.metrics().maximum_cycle_nanoseconds, period);
+  // Hosted/sanitized functional CI cannot promise a host scheduling bound.
+  // Retain the measurement; the opt-in performance target enforces 2 ms.
+  RecordProperty("maximum_cycle_nanoseconds",
+                 std::to_string(harness.metrics().maximum_cycle_nanoseconds));
 }
 
 TEST(FoundationIntegration, StaleCommandHoldsThenFaultsWithinThreeCycles) {

@@ -35,6 +35,14 @@ skills:
     tags_observed: false
     use: create_validate_list_and_resume_event_triggered_handoffs_only
 
+# 仓库内维护的流程随当前仓库提交评审；不属于上面两个外部来源的安装基线。
+repository_skills:
+  - name: mech-can-motor-adapter
+    path: skills/mech-can-motor-adapter/SKILL.md
+    requirement: use_for_new_or_extended_can_motor_adapters
+    revision_policy: follow_reviewed_repository_revision
+    use: select_adapter_layers_capture_protocol_evidence_and_validate_motor_integration
+
 verification:
   method: git_ls_remote_symref_head_and_tags
   result: both_repositories_resolved_main_and_no_tags_were_observed

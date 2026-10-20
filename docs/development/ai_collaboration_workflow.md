@@ -2,7 +2,7 @@
 
 > 状态：Accepted for planning and Foundation work
 > 日期：2026-08-03
-> 最近修订：2026-08-07（个人 Memory 本地化、共享状态迁移至 GitHub）
+> 最近修订：2026-10-09（增加仓库内 CAN 电机适配 Skill 入口）
 > 适用对象：所有使用 AI 参与本仓库规划、开发、评审、验证和交接的人员
 > 强制入口：仓库根 `AGENTS.md`
 
@@ -60,6 +60,21 @@ flowchart LR
 | 跨人员、机器、仓库阶段或长暂停 | 必须 | 事件触发时 CREATE | handoff 是转交包，不是日记；普通任务不自动创建 |
 | 从指定 handoff 接手 | 必须 | 必须 RESUME | 先验证，再核对当前仓库 |
 | 检查交接完整性、秘密或过期 | 按需 | 必须 CHECK | 失败时不得直接恢复 |
+
+### 4.1 CAN 电机适配 Skill
+
+新增品牌、协议、不兼容固件或同协议电机时，使用仓库维护的 [mech-can-motor-adapter](../../skills/mech-can-motor-adapter/SKILL.md)。它将 CubeMars 开发经验整理为扩展层选择、协议与物理单位证据、codec/session、runtime/ROS 生产接入及分层验收步骤；支持只做协议调查或离线适配，不默认执行实机动作。纯传感器桥接不属于其范围。
+
+未安装 Skill 的 AI 可直接读取该文件，并按其中链接读取相关参考。需要在 Codex 中按名称调用时，将整个 `skills/mech-can-motor-adapter/` 文件夹复制到本机 `$CODEX_HOME/skills/`（未设置时为 `~/.codex/skills/`）；重新加载技能环境后使用 `$mech-can-motor-adapter`。仓库中的目录是维护源，本机副本更新前先检查自己的改动；仅克隆到本仓库的 `skills/` 不表示所有 AI 产品都会自动发现它。
+
+调用示例：
+
+```text
+使用 $mech-can-motor-adapter，为本框架增加某型号 CAN 电机的位置控制适配。
+请先核对我提供的协议和固件资料，完成离线实现与测试，列出实机验证待办。
+```
+
+Skill 自带代码地图、CubeMars 经验、验证矩阵与适配计划模板，路径见其入口。它与实际源码或当前契约冲突时，以当前事实为准并修正 Skill。其登记位于 `manifests/ai_skills.yaml` 的 `repository_skills`，不改动两个外部上下文 skill 的已核验版本。普通 PR 沿用普通 CI，专项长测按当前 CI 契约及改动风险选择。
 
 ## 5. 新对话启动 SOP
 

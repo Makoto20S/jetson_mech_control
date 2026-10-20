@@ -1,4 +1,4 @@
-#include "mech_bringup/dm4340_velocity_runtime.hpp"
+#include "mech_bringup/dm4340_runtime.hpp"
 
 #include <array>
 #include <chrono>
@@ -33,8 +33,8 @@ hardware_interface::InterfaceInfo interface(const std::string& name) {
   return result;
 }
 
-Dm4340VelocityConfig config() {
-  Dm4340VelocityConfig c{};
+Dm4340RuntimeConfig config() {
+  Dm4340RuntimeConfig c{};
   c.physical_bus = "fake-dm4340";
   c.logical_bus = 1U;
   c.control_period_ns = 2000000;
@@ -90,7 +90,7 @@ struct Fixture final {
   FakeTransport transport{32U};
   BusOwnershipRegistry ownership;
   std::int64_t now{0};
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [this] { return at(now); }, config(), ownership};
   CanonicalState state{};
 
@@ -118,37 +118,37 @@ struct Fixture final {
   }
 };
 
-TEST(Dm4340VelocityRuntime, RefusesMissingMotorWatchdogEvidence) {
+TEST(Dm4340Runtime, RefusesMissingMotorWatchdogEvidence) {
   FakeTransport transport;
   BusOwnershipRegistry ownership;
   auto c = config();
   c.motor_side_timeout_verified = false;
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [] { return at(0); }, c, ownership};
   EXPECT_FALSE(runtime.configure(1U));
   EXPECT_FALSE(transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, SupervisedBenchOnlyAllowsEffortMode) {
+TEST(Dm4340Runtime, SupervisedBenchOnlyAllowsEffortMode) {
   FakeTransport transport;
   BusOwnershipRegistry ownership;
   auto c = config();
   c.motor_side_timeout_verified = false;
   c.supervised_effort_bench = true;
-  Dm4340VelocityRuntime velocity{
+  Dm4340Runtime velocity{
       transport, [] { return at(0); }, c, ownership};
   EXPECT_FALSE(velocity.configure(1U));
   c.command_mode = Dm4340CommandMode::Effort;
   c.joints[0].kd = 0.0;
   c.joints[0].max_command_velocity_rad_s = 0.0;
   c.joints[0].max_command_effort_nm = 0.1;
-  Dm4340VelocityRuntime effort{
+  Dm4340Runtime effort{
       transport, [] { return at(0); }, c, ownership};
   EXPECT_TRUE(effort.configure(1U));
   EXPECT_FALSE(transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, EffortModeUsesSameBusAndRejectsVelocity) {
+TEST(Dm4340Runtime, EffortModeUsesSameBusAndRejectsVelocity) {
   FakeTransport transport{32U};
   BusOwnershipRegistry ownership;
   std::int64_t now = 0;
@@ -157,7 +157,7 @@ TEST(Dm4340VelocityRuntime, EffortModeUsesSameBusAndRejectsVelocity) {
   c.joints[0].kd = 0.0;
   c.joints[0].max_command_velocity_rad_s = 0.0;
   c.joints[0].max_command_effort_nm = 0.3;
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [&] { return at(now); }, c, ownership};
   ASSERT_TRUE(runtime.configure(1U));
   ASSERT_TRUE(runtime.start());
@@ -186,18 +186,18 @@ TEST(Dm4340VelocityRuntime, EffortModeUsesSameBusAndRejectsVelocity) {
   EXPECT_EQ(runtime.fault_reason(), Dm4340FaultReason::CommandRejected);
 }
 
-TEST(Dm4340VelocityRuntime, RejectsControlCycleNotShorterThanLease) {
+TEST(Dm4340Runtime, RejectsControlCycleNotShorterThanLease) {
   FakeTransport transport;
   BusOwnershipRegistry ownership;
   auto c = config();
   c.control_period_ns = c.joints[0].command_ttl_ns;
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [] { return at(0); }, c, ownership};
   EXPECT_FALSE(runtime.configure(1U));
   EXPECT_FALSE(transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, NoFeedbackNeverAuthorizesMotorCommand) {
+TEST(Dm4340Runtime, NoFeedbackNeverAuthorizesMotorCommand) {
   Fixture f;
   f.start();
   ASSERT_TRUE(f.runtime.read(&f.state, 1U));
@@ -214,7 +214,7 @@ TEST(Dm4340VelocityRuntime, NoFeedbackNeverAuthorizesMotorCommand) {
   EXPECT_FALSE(f.transport.take_transmit(sent));
 }
 
-TEST(Dm4340VelocityRuntime, DisabledFeedbackNeverAuthorizesMotorCommand) {
+TEST(Dm4340Runtime, DisabledFeedbackNeverAuthorizesMotorCommand) {
   Fixture f;
   f.start();
   f.now = 1000000;
@@ -234,7 +234,7 @@ TEST(Dm4340VelocityRuntime, DisabledFeedbackNeverAuthorizesMotorCommand) {
   EXPECT_FALSE(f.transport.take_transmit(sent));
 }
 
-TEST(Dm4340VelocityRuntime, PreservesFirstRejectedFeedbackStatus) {
+TEST(Dm4340Runtime, PreservesFirstRejectedFeedbackStatus) {
   Fixture f;
   f.start();
   f.now = 1000000;
@@ -247,7 +247,7 @@ TEST(Dm4340VelocityRuntime, PreservesFirstRejectedFeedbackStatus) {
   EXPECT_EQ(f.runtime.fault_reason(), Dm4340FaultReason::FeedbackRejected);
 }
 
-TEST(Dm4340VelocityRuntime, DisabledFeedbackTriggersOneExplicitEnable) {
+TEST(Dm4340Runtime, DisabledFeedbackTriggersOneExplicitEnable) {
   Fixture f;
   f.start();
   EXPECT_FALSE(f.runtime.adopt_or_enable_from_feedback());
@@ -278,7 +278,7 @@ TEST(Dm4340VelocityRuntime, DisabledFeedbackTriggersOneExplicitEnable) {
   EXPECT_FALSE(f.transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, EnabledFeedbackIsAdoptedWithoutEnableFrame) {
+TEST(Dm4340Runtime, EnabledFeedbackIsAdoptedWithoutEnableFrame) {
   Fixture f;
   f.start();
   f.enabled_feedback();
@@ -293,12 +293,12 @@ TEST(Dm4340VelocityRuntime, EnabledFeedbackIsAdoptedWithoutEnableFrame) {
   EXPECT_EQ(sent.payload[7], 0xFDU);
 }
 
-TEST(Dm4340VelocityRuntime, CompositeSystemClaimsAndReleasesVelocity) {
+TEST(Dm4340Runtime, CompositeSystemClaimsAndReleasesVelocity) {
   FakeTransport transport{32U};
   BusOwnershipRegistry ownership;
   std::int64_t now = 0;
   CompositeSystem system;
-  ASSERT_TRUE(system.set_runtime(std::make_unique<Dm4340VelocityRuntime>(
+  ASSERT_TRUE(system.set_runtime(std::make_unique<Dm4340Runtime>(
       transport, [&now] { return at(now); }, config(), ownership)));
 
   hardware_interface::HardwareInfo info;
@@ -365,7 +365,7 @@ TEST(Dm4340VelocityRuntime, CompositeSystemClaimsAndReleasesVelocity) {
   ASSERT_EQ(system.on_deactivate(lifecycle), hardware_interface::CallbackReturn::SUCCESS);
 }
 
-TEST(Dm4340VelocityRuntime, OtherMotorOnSharedFeedbackIdIsIgnored) {
+TEST(Dm4340Runtime, OtherMotorOnSharedFeedbackIdIsIgnored) {
   Fixture f;
   f.start();
   f.now = 1000000;
@@ -380,7 +380,7 @@ TEST(Dm4340VelocityRuntime, OtherMotorOnSharedFeedbackIdIsIgnored) {
   EXPECT_TRUE(f.runtime.has_valid_sample());
 }
 
-TEST(Dm4340VelocityRuntime, TwoMotorsShareOneBusWithoutCrossCommand) {
+TEST(Dm4340Runtime, TwoMotorsShareOneBusWithoutCrossCommand) {
   auto c = config();
   auto second = c.joints[0];
   second.command_can_id = 3U;
@@ -389,7 +389,7 @@ TEST(Dm4340VelocityRuntime, TwoMotorsShareOneBusWithoutCrossCommand) {
   FakeTransport transport{32U};
   BusOwnershipRegistry ownership;
   std::int64_t now = 0;
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [&now] { return at(now); }, c, ownership};
   ASSERT_TRUE(runtime.configure(2U));
   ASSERT_TRUE(runtime.start());
@@ -438,7 +438,7 @@ TEST(Dm4340VelocityRuntime, TwoMotorsShareOneBusWithoutCrossCommand) {
   runtime.stop();
 }
 
-TEST(Dm4340VelocityRuntime, FaultOnOneMotorHaltsBothOnSharedBus) {
+TEST(Dm4340Runtime, FaultOnOneMotorHaltsBothOnSharedBus) {
   auto c = config();
   auto second = c.joints[0];
   second.command_can_id = 3U;
@@ -447,7 +447,7 @@ TEST(Dm4340VelocityRuntime, FaultOnOneMotorHaltsBothOnSharedBus) {
   FakeTransport transport{32U};
   BusOwnershipRegistry ownership;
   std::int64_t now = 0;
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [&now] { return at(now); }, c, ownership};
   ASSERT_TRUE(runtime.configure(2U));
   ASSERT_TRUE(runtime.start());
@@ -491,19 +491,19 @@ TEST(Dm4340VelocityRuntime, FaultOnOneMotorHaltsBothOnSharedBus) {
   EXPECT_FALSE(runtime.has_valid_sample());
 }
 
-TEST(Dm4340VelocityRuntime, RejectsDuplicateMotorOrCommandId) {
+TEST(Dm4340Runtime, RejectsDuplicateMotorOrCommandId) {
   auto c = config();
   c.joints.push_back(c.joints[0]);
   c.joints[1].motor_id = 3U;
   FakeTransport transport;
   BusOwnershipRegistry ownership;
-  Dm4340VelocityRuntime runtime{
+  Dm4340Runtime runtime{
       transport, [] { return at(0); }, c, ownership};
   EXPECT_FALSE(runtime.configure(2U));
   EXPECT_FALSE(transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, ReadOnlyUntilClaimedFreshVelocity) {
+TEST(Dm4340Runtime, ReadOnlyUntilClaimedFreshVelocity) {
   Fixture f;
   f.start();
   f.enabled_feedback();
@@ -515,7 +515,7 @@ TEST(Dm4340VelocityRuntime, ReadOnlyUntilClaimedFreshVelocity) {
   EXPECT_FALSE(f.transport.take_transmit(sent));
 }
 
-TEST(Dm4340VelocityRuntime, HardDeadlineNeutralizesAndDisables) {
+TEST(Dm4340Runtime, HardDeadlineNeutralizesAndDisables) {
   Fixture f;
   f.start();
   f.enabled_feedback();
@@ -532,7 +532,7 @@ TEST(Dm4340VelocityRuntime, HardDeadlineNeutralizesAndDisables) {
   EXPECT_FALSE(f.runtime.has_valid_sample());
 }
 
-TEST(Dm4340VelocityRuntime, ClaimReleaseDisablesAndRequiresNewEpoch) {
+TEST(Dm4340Runtime, ClaimReleaseDisablesAndRequiresNewEpoch) {
   Fixture f;
   f.start();
   f.enabled_feedback();
@@ -548,7 +548,7 @@ TEST(Dm4340VelocityRuntime, ClaimReleaseDisablesAndRequiresNewEpoch) {
   EXPECT_FALSE(f.transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, RetriesFailedDisableBeforeClosingPort) {
+TEST(Dm4340Runtime, RetriesFailedDisableBeforeClosingPort) {
   Fixture f;
   f.start();
   f.enabled_feedback();
@@ -569,7 +569,7 @@ TEST(Dm4340VelocityRuntime, RetriesFailedDisableBeforeClosingPort) {
   EXPECT_FALSE(f.transport.is_open());
 }
 
-TEST(Dm4340VelocityRuntime, FaultFeedbackStopsMotion) {
+TEST(Dm4340Runtime, FaultFeedbackStopsMotion) {
   Fixture f;
   f.start();
   f.enabled_feedback();
@@ -586,7 +586,7 @@ TEST(Dm4340VelocityRuntime, FaultFeedbackStopsMotion) {
   EXPECT_EQ(sent.payload[7], 0xFDU);
 }
 
-TEST(Dm4340VelocityRuntime, StaleFeedbackStopsMotion) {
+TEST(Dm4340Runtime, StaleFeedbackStopsMotion) {
   Fixture f;
   f.start();
   f.enabled_feedback();
