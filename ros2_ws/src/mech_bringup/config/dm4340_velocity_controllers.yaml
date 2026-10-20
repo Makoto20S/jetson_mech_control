@@ -1,0 +1,31 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    dm4340_velocity_controller:
+      type: mech_controllers/VelocityCommandController
+    dm4340_effort_controller:
+      type: mech_controllers/EffortCommandController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+dm4340_velocity_controller:
+  ros__parameters:
+    joint: dm4340_joint
+    minimum: -1.5
+    maximum: 1.5
+    max_slew_per_second: 1.0
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000
+
+dm4340_effort_controller:
+  ros__parameters:
+    joint: dm4340_joint
+    minimum: -0.3
+    maximum: 0.3
+    max_slew_per_second: 1.0
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000

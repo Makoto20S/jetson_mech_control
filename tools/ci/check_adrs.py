@@ -27,6 +27,7 @@ ADR_FILES = {
     "ADR-017": ("ADR-017-command-freshness-generation-interface.md", "Accepted"),
     "ADR-018": ("ADR-018-upstream-target-lifetime.md", "Accepted"),
     "ADR-019": ("ADR-019-hardware-position-envelope.md", "Proposed"),
+    "ADR-021": ("ADR-021-damiao-mit-profile.md", "Proposed"),
 }
 
 REQUIRED_HEADINGS = (

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mech_protocol_damiao</name>
+  <version>0.1.0</version>
+  <description>Damiao DM4340 MIT CAN wire codec and bounded device session.</description>
+  <maintainer email="project-owners@example.invalid">Project Owners</maintainer>
+  <license>Internal Research Use - All Rights Reserved</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>mech_control_core</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>mech_simulation</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

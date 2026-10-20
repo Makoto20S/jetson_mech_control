@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,6 +23,15 @@ class CdcSerialPort {
   [[nodiscard]] virtual TransportResult write_all(
       const std::uint8_t* data, std::size_t size) noexcept = 0;
 };
+
+// Vendor MODE_FDCAN_PASS configuration with send_flag=0. It enables USB-to-CAN
+// receive forwarding but does not contain or transmit an application CAN frame.
+inline constexpr std::array<std::uint8_t, 13U> kUsbCdcPassThroughInitFrame{
+    0xF7, 0x12, 0x06, 0x00, 0x7D, 0x70, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00};
+
+[[nodiscard]] bool initialize_usb_cdc_pass_through(
+    CdcSerialPort& serial) noexcept;
 
 struct CdcProtocolVersion final {
   std::uint8_t major{0U};
@@ -113,7 +123,8 @@ class UsbCdcCodec final {
 // tests independent of /dev/ttyACM* and keeping device ownership outside core.
 class UsbCdcTransport final : public Transport {
  public:
-  UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options);
+  using Clock = std::function<MonotonicTime()>;
+  UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options, Clock clock = {});
 
   [[nodiscard]] TransportKind kind() const noexcept override;
   [[nodiscard]] const TransportCapabilities& capabilities() const noexcept override;
@@ -128,6 +139,7 @@ class UsbCdcTransport final : public Transport {
   [[nodiscard]] TransportResult fill_rx() noexcept;
   CdcSerialPort& serial_;
   UsbCdcOptions options_;
+  Clock clock_;
   TransportCapabilities capabilities_;
   std::array<std::uint8_t, 1024U> input_{};
   std::array<std::uint8_t, 4096U> pending_{};

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <utility>
 
 namespace mech::mech_control_core {
 namespace {
@@ -75,6 +76,20 @@ MonotonicTime current_time() noexcept {
 }
 
 }  // namespace
+
+bool initialize_usb_cdc_pass_through(CdcSerialPort& serial) noexcept {
+  if (!serial.is_open()) {
+    return false;
+  }
+  TransportResult result = TransportResult::WouldBlock;
+  std::size_t attempts = 0U;
+  do {
+    result = serial.write_all(kUsbCdcPassThroughInitFrame.data(),
+                              kUsbCdcPassThroughInitFrame.size());
+    ++attempts;
+  } while (result == TransportResult::WouldBlock && attempts < 100U);
+  return result == TransportResult::Ok;
+}
 
 bool UsbCdcCodec::encode(const RawCanFrame& frame,
                          std::array<std::uint8_t, 528U>& output,
@@ -190,9 +205,11 @@ bool UsbCdcCodec::supports_version(CdcProtocolVersion version) noexcept {
   return version.patch >= kMinimumBoardVersion.patch;
 }
 
-UsbCdcTransport::UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options)
+UsbCdcTransport::UsbCdcTransport(CdcSerialPort& serial, UsbCdcOptions options,
+                                 Clock clock)
     : serial_(serial),
       options_(options),
+      clock_(std::move(clock)),
       rx_(options_.receive_queue_capacity) {
   // Named assignment on purpose: see the note in SocketCanTransport.
   capabilities_.supports_classic_can = true;
@@ -293,7 +310,7 @@ TransportResult UsbCdcTransport::fill_rx() noexcept {
     if (pending_size_ < total) break;
     CdcFrameBatch batch;
     if (!UsbCdcCodec::decode(pending_.data(), total, options_.logical_bus,
-                             current_time(), batch)) {
+                             clock_ ? clock_() : current_time(), batch)) {
       std::move(pending_.begin() + 1U, pending_.begin() + pending_size_, pending_.begin());
       --pending_size_;
       ++stats_.rx_dropped;

@@ -1,5 +1,102 @@
 # mech_bringup
 
+## 单总线、互斥电机配置
+
+`launch/motor_backend_bringup.launch.py` 在启动时要求明确指定
+`backend:=ak30` 或 `backend:=dm4340`，以及同一物理 CAN 通道对应的
+`device_path:=/dev/ttyACM<N>`。它只加载所选品牌的一套 URDF 和控制器配置；
+控制器默认保持未激活。缺少品牌或串口、或请求同时选择两种品牌时会直接拒绝。
+状态广播器成功加载后才加载所选电机控制器；广播器加载失败或控制器管理器退出时，
+启动进程会关闭，以释放已打开的设备。启动失败后应确认设备已释放，再排查配置。
+达妙的四项验证参数可显式传入，但默认均为 `false`；未全部验证时，
+启动器在创建 ROS 节点前直接拒绝。只有取得每项实际证据后才能将其改为 `true`，
+不能为通过启动检查而直接填写 `true`。
+切换品牌必须完整停止当前启动进程、确认串口已释放，再启动另一种配置；
+不能通过同时运行两个插件来实现切换。底层串口的非阻塞独占锁仍阻止两个
+进程同时配置和使用同一设备。两种电机的帧格式无需一致，但实际物理 CAN
+速率必须相同；CubeMars 在此配置中的速率尚未实机核实，因此此入口不是
+混用或实机启动的验证结果。不要仅因控制器未激活就将硬件视为失能。
+
+## 达妙 DM4340 速度链路（离线集成）
+
+`mech_bringup/Dm4340System` 与 CubeMars 的 `Ak30System` 并列注册为
+`ros2_control` 硬件插件。一个达妙插件管理一条 USB-CAN 网关及最多 6 个
+达妙关节；每个关节有独立 MIT session、CAN 命令 ID、反馈有效性和命令期限。
+反馈 CAN ID 可以相同，接收后按载荷中的电机编号分流。重复命令 ID 或电机编号
+在打开串口前拒绝。上层仍使用
+`mech_controllers/VelocityCommandController` 输入关节速度（rad/s）；选择
+`dm4340_command_mode:=effort` 时改用同一插件的
+`mech_controllers/EffortCommandController` 输入关节力矩（N·m），
+读取关节位置、速度、力矩；达妙 MIT 编码、ID 和 USB-CAN 网关收发留在
+达妙插件内。两种电机不能共享同一个设备参数文件，但不需要在通用控制器里
+判断品牌。
+
+两种插件共用 `seven_channel_gateway_options()` 构造 USB-CAN 传输参数。
+CubeMars 的 `nominal_bitrate_hz=0` 表示板上 CAN 仲裁率未知，不能据此推断
+达妙通道的速率；板级版本证据也只能在确认是同一块物理通信板时复用。
+
+配置示例为 `config/dm4340_velocity.urdf.xacro` 和
+`config/dm4340_velocity_controllers.yaml`；只有明确选择 `backend:=dm4340`
+时，互斥启动入口才会加载它们。
+示例只声明一台电机；同一网关上增加电机应在同一个 `<ros2_control>`
+组件中增加关节和对应控制器，不能复制插件并让两个组件打开同一串口。
+当前不支持 CubeMars 与达妙在同一物理网关内混用；那需要跨协议组合运行时，
+不能靠两个插件争抢串口实现。
+示例中的电机侧通讯超时、网关版本、CAN 速率和关节映射验证位默认是
+`false`，因此不能直接激活实机。必须先独立核对电机侧超时确实能够在
+主机停发后停止输出、物理 CAN 速率为 1 Mbit/s、网关版本和电机到关节的
+方向与比例，再据实填写验证位。`nominal_bitrate_hz` 是驱动的已核实声明，
+不是对七路板重新设置波特率。电机固件、ID、MIT 范围也必须与实物一致。
+
+插件按启动模式只接受同时申领、同时释放 `velocity` 或 `effort` 与
+`command_generation` 的控制器，要求
+电机已有有效的使能反馈。若显式设置 `enable_on_activate:=true`，则仅在
+`ros2_control` 硬件组件从 `inactive` 手动切换到 `active` 时，等待新鲜的
+状态 `0` 或 `1`：状态 `0` 时发送达妙 `0xFC` 使能帧，状态 `1` 时直接接管且
+不重复使能；两条路径均须在 1.2 秒内确认状态 `1`。反馈缺失、过期或故障时
+激活失败；若已接管或发送使能帧，则尝试发送 `0xFD` 失能。此选项默认
+`false`；启动文件将达妙硬件初始化为 `inactive`，不会因启动
+`controller_manager` 而使能。硬件停用或故障
+时会尝试失能。需先经独立验证并填写前述四项证据，再使用
+`ros2 control set_hardware_component_state dm4340_system active` 明确触发使能；
+结束时使用 `ros2 control set_hardware_component_state dm4340_system inactive`，
+并独立核对反馈状态。只有硬件已激活且收到使能反馈后，才能手动激活预加载的
+所选的速度或力矩控制器；话题本身不能使能电机。一次新目标对应一代命令；
+旧目标、超时反馈、越界速度/力矩或错误状态均停止继续发送运动命令。
+单路撤销申领时只停止并锁住该路；任一路故障或硬截止时停止整组。
+停止时会尽力发送中性帧和失能帧。
+这些主机侧操作不能代替经过验证的电机侧超时和现场断电措施。
+离体电机上的速度控制演示与力矩控制模式是不同验证项。力矩模式目前只通过
+ARM64 构建、协议假传输和 ROS 图测试，尚无实际力矩输出记录；不能将速度
+演示或硬件激活成功视为抗阻训练通过。力矩模式使用 `Kp=Kd=0` 的 MIT 前馈
+力矩，示例上限为关节侧 0.3 N·m，仍保留新鲜使能反馈、速度/力矩反馈限值、
+命令期限与失能处理。零力矩并非制动；使用前必须验证电机与膝关节映射、
+双 IMU 固定标定及现场停机手段。
+
+仅做离体单电机、无传感器的短时力矩链路检查时，可显式选择
+`dm4340_command_mode:=effort supervised_effort_bench:=true`。此模式允许
+`motor_side_timeout_verified:=false joint_mapping_verified:=false`，并把
+MIT 命令上限收紧为 0.1 N·m；板版本与 CAN 速率仍须核实。它只使用
+电机轴坐标 (`joint_scale=1`, `joint_offset_rad=0`)，不能接入膝关节
+抗阻策略或人体负载。控制器 YAML 上限仍为 0.3 N·m，实际台架目标
+必须不超过 0.1 N·m，否则底层拒绝命令。该模式不提供电机侧断联停机：
+主机退出、USB 断开时，零力矩/失能帧可能无法送达。仅在有人现场监护且
+能独立切断电机电源的空载固定台架上使用。普通部署没有改变默认门槛。
+
+2026-10-15 在 `/dev/ttyACM1` 只读查询本台 DM4340：参数 20 `Gr` 的
+IEEE-754 浮点值为 `40.000`，参数 10 控制模式为 `1`（MIT），参数 9
+超时值为 `0`；状态反馈为 `0`（失能）。`Gr` 是电机内部减速比配置，
+不能在未确认 MIT 反馈坐标含义和外部联轴器传动比时再次乘以 40。
+当前 `joint_scale=1` 仅为离体电机轴示例，不是外骨骼膝关节标定结果。
+控制循环只使用位置、速度、力矩反馈及已配置的映射和限值；减速比、
+固件和模式等静态参数通过独立诊断读取，不按控制周期重复查询。
+
+ROS 硬件激活不会读取或修改电机参数 9；只按反馈状态选择接管已使能电机
+或发送使能指令，并确认使能反馈。参数 9 的诊断留在独立台架工具中，不参与
+正常控制循环。
+`motor_side_timeout_verified` 仍是部署配置的显式证据门，不会因删除自动
+寄存器操作而被置为 `true`。
+
 Deployment composition boundary: bring-up harnesses, device probes, and the
 AK3.0 force-control runtime wiring. The `Ak30System` plugin
 (`mech_bringup/Ak30System`) is the production composition point that connects
@@ -29,6 +126,29 @@ all three deployment xacro examples load it.
   unknown keys, non-numeric values, and over-budget TTLs reject configure.
   `sub_mode` is an explicit parameter (`position`|`velocity`|`torque`,
   default `position`); the URDF's command interface must match it.
+- **`Ak30ServoSystem`** — the position-only servo plugin
+  (`mech_bringup/Ak30ServoSystem`). A single serial port and
+  `UsbCdcTransport` feed one `Ak30ServoRuntime`, which uses the existing
+  `BusRuntime` and one `Ak30ServoPositionSession` per joint. The exported
+  state is position alone; each joint declares position and
+  `command_generation` commands. A standard position controller may claim
+  position alone, while a controller that also claims generation gets the
+  stronger refresh rule. No velocity or effort state is inferred from raw
+  eRPM or Iq.
+- **`Ak30ServoRuntimeParams`** — strict, I/O-free parsing for that servo
+  plugin. Hardware parameters must include `profile=ak30_servo_extended`,
+  `device_path`, `logical_bus`, `control_period_ns`,
+  `command_ttl_ns`, `command_hard_ttl_ns`, and `feedback_ttl_ns`.
+  Optional `trace_name` (1–32 lowercase letters, digits or hyphens) partitions
+  bounded snapshot filenames when multiple servo components share one manager.
+  All other unknown parameters remain rejected. The operator admits the total
+  memory budget before starting any component and divides it across the buses.
+  Each joint must explicitly supply `drive_id`, separate verified
+  `target_scale`/`target_offset` and `feedback_scale`/`feedback_offset`,
+  `speed_erpm`, `acceleration_raw`, and
+  `position_min_rad`/`position_max_rad`/`position_max_error_rad`.
+  Unknown or missing keys, duplicate IDs, unsafe time budgets, or invalid
+  interface declarations reject initialization before a serial port is made.
 - **`FoundationHarness`** — the Foundation-era simulation harness
   (CompositeSystem + TargetLimiter through exported interfaces).
 - **Device probes** (`ak30_torque_probe`, `ak30_position_probe`) — the
@@ -42,6 +162,45 @@ all three deployment xacro examples load it.
   one per force-control sub-mode. The position-controller spawner ships
   commented out: uncommenting it arms position commands, which stay
   gated by ADR-006 and per-test owner authorization.
+
+## Servo position composition
+
+`Ak30ServoSystem::on_init` validates the complete declaration, constructs
+one stable serial/CDC chain, and installs the runtime into `CompositeSystem`
+without opening a port. Configure validates only. Activation lets the
+runtime's `BusRuntime` acquire the shared physical-bus registry entry and
+open the port, then sends the gateway's existing 0x12 pass-through init once
+for that activation before any read/write cycle. A second plugin using the
+same physical path cannot open it while the first owns it. Deactivation,
+error, cleanup, and active destruction stop the runtime, revoke pending host
+commands, and close the port. Reactivation needs new feedback and a new
+claim; it sends the gateway init again. The init count is separate from
+motor-frame transmit statistics.
+
+Both production plugins construct `PosixCdcSerialPort`. Its open path takes
+a nonblocking advisory lock on the opened device inode before terminal
+configuration or flush. This excludes another repository process using the
+same serial implementation, including one naming the port through a symlink;
+close or destruction releases the lock. It does not prevent unrelated tools
+that ignore advisory locks from opening the device.
+
+During active cycles, `CompositeSystem` owns exported state, claims and
+generation checks; `Ak30ServoRuntime` drives the shared bus and existing
+servo sessions. All configured feedback routes must be fresh before any motor
+target can be sent. Invalid or stale sampled feedback faults the group and
+cancels pending host submissions. Releasing one claim cancels only that
+joint's pending target. Stopping submissions does not establish that either
+physical motor has stopped; the plugin sends no automatic disable, zero,
+hold or keepalive frame. The offline fixtures use synthetic mappings solely
+to verify this composition. They are not calibrated deployment parameters.
+
+Command TTLs require `0 < soft < hard`, with hard bounded by three control
+periods and 6 ms. An unsent target fails at soft expiry. A target actually
+accepted by the transport stops refreshing at soft expiry and remains in the
+host Holding stage until its original hard deadline. Expiry is checked even
+when the receive budget is exhausted and before a fresh write can replace an
+old target. Claim release clears that member's watchdog history. None of
+these host states proves that the device's internal trajectory has stopped.
 
 ## Position deployment envelope (ADR-019)
 
@@ -320,3 +479,20 @@ tests run against `mech_simulation::FakeTransport` with injected clocks.
 Real-device activation is gated by [ADR-006](../../../docs/adr/ADR-006-conditional-can0-deployment.md)
 (still Proposed) and the G0–G3 evidence gates; every real-motor run needs
 the owner's explicit per-test authorization.
+### 达妙 ROS 台架运动测试
+
+`tools/bench/run_dm4340_ros_motion.py --execute` 只连接已启动的 `controller_manager`，不替代 `motor_backend_bringup.launch.py` 的四项验证门槛。启动参数必须明确包含 `backend:=dm4340`、正确设备路径和 `enable_on_activate:=true`；四项 `*_verified` 仅在取得各自实测证据后填写 `true`，不能仅凭寄存器写入成功设置。
+
+`tools/bench/run_dm4340_ros_motion.py --preflight` 是同一入口的只读检查：查询硬件和控制器是否均为 `inactive`，不激活硬件、不发送电机指令。它要求已有 `controller_manager`，且不能与运动档位选项混用。
+
+脚本要求硬件与速度控制器初始均为 `inactive`。它通过 ROS 服务激活硬件并确认状态，再激活速度控制器。`--execute --diagnose-only` 仅发布零速度，分别观察硬件和控制器约 2 秒；普通 `--execute` 在两段 0.5 秒零速度观察后，向 `/dm4340_velocity_controller/target_velocity` 发布 1.5 rad/s 目标 0.5 秒，再发布零速度 0.8 秒。控制器以 1 rad/s² 限斜率，电机并不会立即收到 1.5 rad/s。脚本读取 `/joint_states` 的 `dm4340_joint`，检查反馈新鲜度、位移不超过 0.35 rad、速度不超过 2 rad/s、最终停稳，并在结束或异常时释放控制器和停用硬件。测试仅适用于已验证方向和自由行程的离体电机轴；返回成功要求实际位移至少 0.005 rad 且停稳。主机清理失败时必须现场断电；脚本不能代替电机侧断联保护。
+
+离体台架需要更明显的单次演示时，可显式使用 `--execute --extended`：非零目标 0.8 秒、零目标 1.0 秒，位移上限 0.8 rad，其他反馈和停机检查不变。此选项不改变默认测试或启动门槛。
+
+五秒档必须显式使用 `--execute --five-second --operator-supervised`：非零目标 5 秒、零目标 2 秒，位移上限 9 rad，反馈速度上限仍为 2 rad/s；启动前还检查沿运动方向的反馈量程。`--operator-supervised` 只声明现场有人可立即断电，**不证明**电机侧断联停机。主机断联时，软件位移限幅无法继续执行。
+
+周期闭环台架档使用 `--execute --follower-simulation --operator-supervised`。脚本在硬件激活并取得真实反馈后启动 `mech_assist_control` 的 `motor_feedback_simulation` 模式，用电机轴相对角度模拟膝角；算法节点发布周期速度目标，经 ROS 速度控制器返回电机。周期阶段 4 秒，位移限值 0.48 rad；随后持续发送零速度 1 秒，再停用控制器和硬件。成功判据包括双向目标、实际轴位置变化至少 0.02 rad、最终速度不超过 0.05 rad/s。它不读取 IMU，也不能证明真实膝角标定或人体助力效果。2026-10-16 的一次空载实测范围为 8.7623--9.0152 rad，目标为 -0.2667--0.2072 rad/s，最终独立回读状态 0。该次启动的四项验证参数由操作者手动设为 `true`，不是各项独立验证完成的证据。
+
+需要更明显、连续的观察时，使用 `--execute --follower-extended --operator-supervised`：目标范围 0--20 度、两个 4 秒周期，算法运行上限 9 秒，仍保持 0.48 rad 位移边界、2 rad/s 反馈速度边界和 1 秒持续零速收尾。2026-10-16 的一次空载实测轴位置范围为 8.7623--9.1072 rad（0.3449 rad，约 19.8 度），双向目标 -0.2593--0.2743 rad/s，结束后独立回读状态 0。此档位同样只验证电机轴模拟膝角闭环，不等同于人体膝角或穿戴控制。
+
+`--execute --follower-40deg --operator-supervised` 是单独的空载大幅度档位：40 度、三个 4 秒周期，运行上限 13 秒、位移边界 0.75 rad，其他反馈速度和零速收尾检查不变。2026-10-16 一次获准的台架实测轴位置 8.7505--9.4665 rad（0.7160 rad，约 41.0 度），双向速度目标 -0.5454--0.5723 rad/s，峰值反馈 0.5690 rad/s，停机后独立回读状态 0。该试验距离 0.75 rad 软件边界仅剩约 0.034 rad 的范围余量，不能据此继续增大角度或用于人体负载。

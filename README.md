@@ -2,7 +2,7 @@
 
 面向 NVIDIA Jetson 与 ROS 2 的机电设备控制框架。项目以供应商无关的 C++ 核心为基础，通过统一的传输、协议和设备会话边界接入 CAN/CAN FD 电机与传感器，并以 `ros2_control` 提供标准化的控制接口。
 
-本项目当前处于研究开发阶段。硬件无关的 Foundation 与仿真链路已经建立，CubeMars AK3.0 等设备适配器正在按证据门控流程开发；真实电机与传感器的部署仍需完成逐台设备取证、总线验证和台架安全验收。
+本项目当前处于研究开发阶段。硬件无关的 Foundation 与仿真链路已经建立，CubeMars AK3.0 和达妙 DM4340 已具备独立协议与硬件插件，传感器及膝关节应用层持续集成；真实电机与传感器的部署仍需完成逐台设备取证、总线验证和台架安全验收。
 
 ## 设计目标
 
@@ -48,7 +48,9 @@ flowchart TB
 - 确定性虚拟时钟、Fake transport、模拟设备与故障注入；
 - SocketCAN/vcan 路径和可注入串口的 USB-CDC 帧传输实现；
 - 复合 `ros2_control::SystemInterface` 与有界 C++ controller 插件；
-- STM32 CtrBoard 双 IMU 与双足底压力数据的只接收 SocketCAN/ROS 2 桥接；
+- STM32 CtrBoard 双 IMU 与足底压力字段的只接收 SocketCAN/USB-CDC ROS 2 桥接；
+- 达妙 DM4340 MIT 独立会话及速度/力矩命令接口，速度已有空载台架验证；
+- 双 IMU 膝角估计、标定、影子策略及默认预览的速度跟随/阻力策略。
 
 以下内容尚不属于已完成能力：
 
@@ -67,10 +69,16 @@ flowchart TB
 | `mech_controllers` | 带边界、变化率和超时约束的 C++ controller 插件 |
 | `mech_bringup` | 仿真与部署组合、URDF/xacro、launch 和 controller 配置 |
 | `mech_protocol_cubemars` | CubeMars AK3.0 力控 profile：wire 编解码、证据门映射、会话与看门狗 |
+| `mech_protocol_damiao` | 达妙 DM4340 MIT 编解码、状态解析与有界设备会话 |
+| `mech_knee_kinematics` | 双 IMU 膝角估计、标定、只读面板与影子验证 |
+| `mech_assist_control` | 可选速度跟随/阻力策略，默认预览，显式选择电机输出 |
 | `mech_protocol_ctrboard` | CtrBoard 传感器流分片重组、CRC16 校验和 196 字节载荷解析 |
-| `mech_ctrboard_bridge` | 只接收的 SocketCAN ROS 2 节点，发布两路 IMU 与左右足底压力话题 |
+| `mech_ctrboard_bridge` | 只接收的 SocketCAN/USB-CDC ROS 2 节点，发布两路 IMU 与左右足底压力话题 |
 
 `mech_protocol_cubemars` 实现 CubeMars AK3.0 力控 profile，已在单电机取证台架上完成真机闭环验证（力矩、速度、位置三个子模式）。CtrBoard 两个包仅提供传感器接收路径，不配置 CAN 接口、不发送控制帧，也不改变现有 `ros2_control` 所有权。真实设备激活仍受硬件安全闸门（G0–G3）与 ADR-006 约束；HI12 等其他供应商协议包仍推迟。
+
+详细目录、数据流、控制模式和验收边界见 [代码结构说明](docs/development/code_structure.md)。
+达妙力矩接口的软件实现不等于独立力矩模式实机验收；鞋垫未接入时零压力字段不代表压力测量。
 
 ## 环境要求
 
@@ -118,6 +126,7 @@ git diff --check
 ## 文档导航
 
 - [贡献指南](CONTRIBUTING.md)：分支、Issue、Pull Request、验证和信息边界
+- [代码结构说明](docs/development/code_structure.md)：11 个包的职责、数据流与验证入口
 - [架构决策记录](docs/adr/README.md)：已接受及待验证的架构约束
 - [AdapterContract v1](docs/development/adapter_contract_v1.md)：协议适配器与通用核心的冻结接口
 - [规划与证据索引](docs/planning/README.md)：项目路线、硬件闸门和资料来源

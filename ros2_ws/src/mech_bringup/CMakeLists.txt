@@ -14,6 +14,7 @@ find_package(mech_simulation REQUIRED)
 find_package(mech_hardware_ros2_control REQUIRED)
 find_package(mech_controllers REQUIRED)
 find_package(mech_protocol_cubemars REQUIRED)
+find_package(mech_protocol_damiao REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(realtime_tools REQUIRED)
@@ -23,11 +24,12 @@ find_package(realtime_tools REQUIRED)
 add_library(${PROJECT_NAME} SHARED
   src/package_marker.cpp
   src/foundation_harness.cpp
-  src/posix_cdc_serial_port.cpp
   src/ak30_force_runtime.cpp
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
+  src/dm4340_velocity_runtime.cpp
+  src/dm4340_system.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -41,6 +43,7 @@ ament_target_dependencies(
   mech_hardware_ros2_control
   mech_controllers
   mech_protocol_cubemars
+  mech_protocol_damiao
   hardware_interface
   pluginlib
   realtime_tools)
@@ -83,7 +86,7 @@ install(FILES
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   mech_control_core mech_simulation mech_hardware_ros2_control
-  mech_controllers mech_protocol_cubemars realtime_tools)
+  mech_controllers mech_protocol_cubemars mech_protocol_damiao realtime_tools)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -124,6 +127,8 @@ if(BUILD_TESTING)
     test/test_ak30_runtime_params.cpp
     test/test_ak30_system_integration.cpp
     test/test_ak30_system_plugin.cpp
+    test/test_dm4340_velocity_runtime.cpp
+    test/test_dm4340_system_plugin.cpp
     test/test_deployment_files.cpp
     test/test_package_marker.cpp
   )
@@ -198,6 +203,12 @@ if(BUILD_TESTING)
   ament_add_test(${PROJECT_NAME}_effort_launch
     COMMAND "${Python3_EXECUTABLE}"
       ${CMAKE_CURRENT_SOURCE_DIR}/test/test_effort_launch.py
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_motor_backend_launch
+    COMMAND "${Python3_EXECUTABLE}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/test_motor_backend_launch.py
     TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 

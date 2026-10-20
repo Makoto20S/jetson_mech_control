@@ -21,11 +21,11 @@ struct FrameSnapshot final {
 };
 
 // Thread-affinity: SnapshotStore performs NO internal synchronization (no
-// mutex, no atomics). publish() is expected to be called only from the bus
-// poller thread (via BusRuntime::poll()); read()/size() may be called from
-// a different thread (e.g. a ros2_control read cycle) ONLY if the caller
-// provides its own external synchronization against concurrent publish().
-// Without that, concurrent publish()/read() is a data race.
+// mutex, no atomics). publish() (via BusRuntime::poll()/receive()) and
+// clear() (via stop()/fault/recover epoch reset) must run on the bus poller
+// thread. read()/size() may run from another thread ONLY with external
+// synchronization against these mutations. Without it, concurrent access
+// is a data race.
 class SnapshotStore final {
  public:
   explicit SnapshotStore(std::size_t capacity = 32U) : capacity_(capacity) {
@@ -75,6 +75,8 @@ class SnapshotStore final {
   }
 
   [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
+
+  void clear() noexcept { entries_.clear(); }
 
  private:
   struct Entry final {
@@ -146,6 +148,10 @@ class CommandSlot final {
            lease_->generation != sent_generation_;
   }
 
+  [[nodiscard]] bool was_sent(std::uint64_t generation) const noexcept {
+    return generation != 0U && sent_generation_ == generation;
+  }
+
   void mark_sent() noexcept {
     if (lease_.has_value()) {
       sent_generation_ = lease_->generation;
@@ -153,6 +159,13 @@ class CommandSlot final {
   }
 
   void clear() noexcept { lease_.reset(); }
+
+  void reset_epoch() noexcept {
+    route_id_ = 0U;
+    lease_.reset();
+    last_generation_ = 0U;
+    sent_generation_ = 0U;
+  }
 
  private:
   std::uint16_t route_id_{0U};
@@ -260,22 +273,42 @@ struct RuntimeStats final {
 // perform NO internal synchronization: no mutex, no atomics).
 //
 // BusRuntime is intended to be driven by exactly one "bus poller" thread
-// which owns start()/stop()/recover()/poll() and must call them serially
+// which owns start()/stop()/recover()/poll()/receive()/transmit() and must call them serially
 // (never concurrently with each other, and never re-entrantly). submit()
 // is expected to be called from a *different* thread -- typically a
 // ros2_control read/write cycle -- but submit() and poll()/start()/stop()/
-// recover() on the SAME BusRuntime instance MUST NOT be invoked
+// recover()/receive()/transmit()/cancel() on the SAME BusRuntime instance MUST NOT be invoked
 // concurrently without external synchronization added by the caller.
 // There is no lock-free guarantee here: CommandSlot/SnapshotStore state is
 // read and written without ordering constraints, so a caller that wants
 // submit() to run on a different thread than poll() must add its own
 // mutex (or equivalent) around both call sites. Similarly, snapshots() and
-// stats() return const references/values that alias mutable runtime state;
-// reading them from a thread other than the poller thread while poll() is
-// concurrently running is a data race unless externally synchronized.
+// stats() expose mutable runtime state; reading them from another thread while
+// receive()/poll() publishes or stop()/fault/recover clears an epoch is a data
+// race unless externally synchronized.
 // -----------------------------------------------------------------------
 class BusRuntime final {
  public:
+  // A synchronous, non-owning callback. Returning false faults the runtime
+  // and prevents transmit. It must not call back into this runtime; all
+  // runtime entry points are non-reentrant and require external synchronization
+  // when used from different threads.
+  struct RxObserver final {
+    void* context{nullptr};
+    bool (*on_frame)(void*, std::uint16_t, const RawCanFrame&) noexcept{nullptr};
+  };
+
+  // Optional synchronous guard for each pending TX attempt. The callback may
+  // supply a newer monotonic time and reject the send. It must not call any
+  // driving/mutating BusRuntime method; the read-only was_sent() query is
+  // permitted for checking a peer's accepted generation. A rejection or
+  // clock rollback faults the bus epoch.
+  struct TxGuard final {
+    void* context{nullptr};
+    bool (*before_send)(void*, const CommandLease&,
+                        MonotonicTime&) noexcept{nullptr};
+  };
+
   BusRuntime(std::uint16_t logical_bus, std::string physical_channel,
              Transport& transport, FrameRouter& router,
              BusOwnershipRegistry& ownership, std::size_t command_capacity = 32U,
@@ -325,6 +358,7 @@ class BusRuntime final {
       ownership_.release(physical_channel_);
     }
     state_ = RuntimeState::Stopped;
+    reset_epoch();
   }
 
   // Deliberate recovery path out of RuntimeState::Fault. Equivalent to
@@ -373,50 +407,54 @@ class BusRuntime final {
     return RuntimeResult::Ok;
   }
 
-  // May only be called from the bus-poller thread. See the thread-affinity
-  // contract above BusRuntime.
-  [[nodiscard]] RuntimeResult poll(MonotonicTime now) noexcept {
+  // Cancels only a bound route's host-side pending lease. The generation
+  // watermark remains until stop/fault, so a stale lease cannot be replayed.
+  // This does not stop a physical device or retract a frame already sent.
+  [[nodiscard]] RuntimeResult cancel(std::uint16_t route_id) noexcept {
     if (state_ != RuntimeState::Running) {
       return RuntimeResult::NotRunning;
     }
-    RawCanFrame frame{};
-    constexpr std::size_t kReceiveBudget = 64U;
-    for (std::size_t received = 0U; received < kReceiveBudget; ++received) {
-      const auto result = transport_.try_receive(frame);
-      if (result == TransportResult::WouldBlock) {
-        break;
-      }
-      if (result == TransportResult::Invalid) {
-        // A malformed/truncated frame from a peer is a normal bus event,
-        // not a runtime failure: count it and keep receiving so one bad
-        // peer cannot wedge the whole bus.
-        ++runtime_stats_.rx_invalid;
-        continue;
-      }
-      if (result != TransportResult::Ok) {
-        return fault_for(result);
-      }
-      ++runtime_stats_.rx_frames;
-      std::array<std::uint16_t, 32U> destinations{};
-      std::size_t destination_count = 0U;
-      if (!router_.route_into(frame, destinations, destination_count)) {
-        ++runtime_stats_.transport_errors;
-        state_ = RuntimeState::Fault;
-        return RuntimeResult::Fault;
-      }
-      if (destination_count == 0U) {
-        ++runtime_stats_.rx_unrouted;
-      }
-      for (std::size_t index = 0U; index < destination_count; ++index) {
-        if (!snapshots_.publish(destinations[index], frame)) {
-          // Distinct from transport_errors: this is a configuration
-          // mismatch (snapshot capacity smaller than the number of routes
-          // actually published to), not a transport fault.
-          ++runtime_stats_.snapshot_overflow;
-        }
+    for (auto& slot : command_slots_) {
+      if (slot.route_id() == route_id && route_id != 0U) {
+        slot.clear();
+        return RuntimeResult::Ok;
       }
     }
+    return RuntimeResult::InvalidCommand;
+  }
+
+  // May only be called from the bus-poller thread. See the thread-affinity
+  // contract above BusRuntime.
+  [[nodiscard]] RuntimeResult poll(MonotonicTime now) noexcept {
+    // Legacy path keeps its historical count-only snapshot overflow behavior.
+    const auto result = receive_impl(RxObserver{}, false);
+    return result == RuntimeResult::Ok ? transmit(now) : result;
+  }
+
+  // Guarded receive phase. Each routed frame reaches the observer in receive
+  // order, even if a later frame would overwrite its route's snapshot.
+  // Snapshot capacity failure faults this path before any subsequent TX.
+  // The caller must validate session feedback freshness before transmit().
+  [[nodiscard]] RuntimeResult receive(MonotonicTime now) noexcept {
+    return receive(now, RxObserver{});
+  }
+
+  [[nodiscard]] RuntimeResult receive(
+      MonotonicTime /*now*/, RxObserver observer) noexcept {
+    return receive_impl(observer, true);
+  }
+
+  [[nodiscard]] RuntimeResult transmit(MonotonicTime now) noexcept {
+    return transmit(now, TxGuard{});
+  }
+
+  [[nodiscard]] RuntimeResult transmit(MonotonicTime now,
+                                       TxGuard guard) noexcept {
+    if (state_ != RuntimeState::Running) {
+      return RuntimeResult::NotRunning;
+    }
     bool backpressure = false;
+    auto last_attempt_time = now;
     const std::size_t slot_count = command_slots_.size();
     for (std::size_t offset = 0U; offset < slot_count; ++offset) {
       // Rotate the starting slot each cycle so sustained backpressure on
@@ -432,6 +470,19 @@ class BusRuntime final {
       if (!pending.has_value()) {
         continue;
       }
+      auto attempt_time = now;
+      if (guard.before_send != nullptr) {
+        if (!guard.before_send(guard.context, *pending, attempt_time) ||
+            attempt_time < last_attempt_time) {
+          return fault_runtime();
+        }
+        last_attempt_time = attempt_time;
+        if (slot.has_expired(attempt_time)) {
+          ++runtime_stats_.expired_commands;
+          slot.clear();
+          continue;
+        }
+      }
       const auto result = transport_.try_send(pending->frame);
       if (result == TransportResult::Ok) {
         slot.mark_sent();
@@ -440,9 +491,6 @@ class BusRuntime final {
         ++runtime_stats_.queue_full;
         backpressure = true;
       } else if (result == TransportResult::WouldBlock) {
-        // Backpressure, not a fault: leave the lease pending (mark_sent()
-        // is NOT called) so it is retried on a later cycle, exactly like
-        // QueueFull.
         ++runtime_stats_.would_block;
         backpressure = true;
       } else {
@@ -462,17 +510,102 @@ class BusRuntime final {
   [[nodiscard]] const RuntimeStats& stats() const noexcept {
     return runtime_stats_;
   }
+  // True only when the most recent receive observed an empty nonblocking RX
+  // queue. A caller must defer TX when the bounded receive budget was used up.
+  [[nodiscard]] bool last_receive_drained() const noexcept {
+    return last_receive_drained_;
+  }
+  // Actual accepted TX, scoped to one route and generation. Aggregate frame
+  // counts cannot tell a caller which member entered a holding watchdog.
+  [[nodiscard]] bool was_sent(std::uint16_t route_id,
+                              std::uint64_t generation) const noexcept {
+    if (route_id == 0U || generation == 0U) return false;
+    for (const auto& slot : command_slots_) {
+      if (slot.route_id() == route_id) return slot.was_sent(generation);
+    }
+    return false;
+  }
 
  private:
+  [[nodiscard]] RuntimeResult receive_impl(
+      RxObserver observer, bool fail_on_snapshot_overflow) noexcept {
+    if (state_ != RuntimeState::Running) {
+      return RuntimeResult::NotRunning;
+    }
+    last_receive_drained_ = false;
+    RawCanFrame frame{};
+    constexpr std::size_t kReceiveBudget = 64U;
+    for (std::size_t received = 0U; received < kReceiveBudget; ++received) {
+      const auto result = transport_.try_receive(frame);
+      if (result == TransportResult::WouldBlock) {
+        last_receive_drained_ = true;
+        break;
+      }
+      if (result == TransportResult::Invalid) {
+        // A malformed/truncated frame from a peer is a normal bus event,
+        // not a runtime failure: count it and keep receiving so one bad
+        // peer cannot wedge the whole bus.
+        ++runtime_stats_.rx_invalid;
+        continue;
+      }
+      if (result != TransportResult::Ok) {
+        return fault_for(result);
+      }
+      ++runtime_stats_.rx_frames;
+      std::array<std::uint16_t, 32U> destinations{};
+      std::size_t destination_count = 0U;
+      if (!router_.route_into(frame, destinations, destination_count)) {
+        ++runtime_stats_.transport_errors;
+        return fault_runtime();
+      }
+      if (destination_count == 0U) {
+        ++runtime_stats_.rx_unrouted;
+      }
+      for (std::size_t index = 0U; index < destination_count; ++index) {
+        if (observer.on_frame != nullptr &&
+            !observer.on_frame(observer.context, destinations[index], frame)) {
+          return fault_runtime();
+        }
+        if (!snapshots_.publish(destinations[index], frame)) {
+          // Distinct from transport_errors: this is a configuration
+          // mismatch (snapshot capacity smaller than the number of routes
+          // actually published to), not a transport fault.
+          ++runtime_stats_.snapshot_overflow;
+          if (fail_on_snapshot_overflow) {
+            return fault_runtime();
+          }
+        }
+      }
+    }
+    return RuntimeResult::Ok;
+  }
+
+  void reset_epoch() noexcept {
+    for (auto& slot : command_slots_) {
+      slot.reset_epoch();
+    }
+    snapshots_.clear();
+    next_slot_ = 0U;
+    last_receive_drained_ = false;
+  }
+
+  [[nodiscard]] RuntimeResult fault_runtime() noexcept {
+    state_ = RuntimeState::Fault;
+    reset_epoch();
+    return RuntimeResult::Fault;
+  }
+
   [[nodiscard]] RuntimeResult fault_for(TransportResult result) noexcept {
     if (result == TransportResult::Disconnected) {
       ++runtime_stats_.bus_faults;
       ++runtime_stats_.transport_errors;
       state_ = RuntimeState::Fault;
+      reset_epoch();
       return RuntimeResult::Disconnected;
     }
     ++runtime_stats_.transport_errors;
     state_ = RuntimeState::Fault;
+    reset_epoch();
     return RuntimeResult::Fault;
   }
 
@@ -486,6 +619,7 @@ class BusRuntime final {
   RuntimeStats runtime_stats_;
   std::vector<CommandSlot> command_slots_;
   std::size_t next_slot_{0U};
+  bool last_receive_drained_{false};
 };
 
 }  // namespace mech::mech_control_core

@@ -22,9 +22,13 @@ EXPECTED_PACKAGES = {
         "mech_hardware_ros2_control",
         "mech_controllers",
         "mech_protocol_cubemars",
+        "mech_protocol_damiao",
     },
     "mech_protocol_cubemars": {"mech_control_core", "mech_simulation"},
     "mech_protocol_ctrboard": {"mech_control_core"},
+    "mech_protocol_damiao": {"mech_control_core", "mech_simulation"},
+    "mech_knee_kinematics": set(),
+    "mech_assist_control": {"mech_knee_kinematics"},
     "mech_ctrboard_bridge": {
         "mech_control_core",
         "mech_protocol_ctrboard",
@@ -248,6 +252,18 @@ def main() -> int:
                     f"actual={sorted(internal_dependencies)}"
                 )
             package_dir = discovered[expected_name].parent
+            document = ElementTree.parse(discovered[expected_name]).getroot()
+            build_type = document.findtext("export/build_type", default="ament_cmake")
+            if build_type == "ament_python":
+                for required in ("setup.py", "setup.cfg", f"resource/{expected_name}",
+                                 f"{expected_name}/__init__.py"):
+                    if not (package_dir / required).is_file():
+                        fail(f"{expected_name}: Python package file missing: {required}")
+                if not list((package_dir / "test").glob("test_*.py")):
+                    fail(f"{expected_name}: Python tests are missing")
+                continue
+            if build_type != "ament_cmake":
+                fail(f"{expected_name}: unsupported build type: {build_type}")
             if not (package_dir / "CMakeLists.txt").is_file():
                 fail(f"{expected_name}: CMakeLists.txt is missing")
             if not (package_dir / "test/test_package_marker.cpp").is_file():

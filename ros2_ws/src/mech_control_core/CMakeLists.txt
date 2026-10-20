@@ -12,9 +12,11 @@ find_package(ament_cmake REQUIRED)
 
 add_library(${PROJECT_NAME}
   src/package_marker.cpp
+  src/posix_cdc_serial_port.cpp
   src/socketcan_transport.cpp
   src/usb_cdc_transport.cpp
 )
+set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -39,6 +41,7 @@ if(BUILD_TESTING)
     test/test_config_router.cpp
     test/test_adapter_contract.cpp
     test/test_transport_backends.cpp
+    test/test_posix_cdc_serial_port.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})

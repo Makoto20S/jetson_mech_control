@@ -130,6 +130,22 @@ TEST(ConfigValidation, AcceptsForceControlAsExtendedFrame) {
   EXPECT_FALSE(result.has(ConfigErrorCode::IncompatibleFrameFormat));
 }
 
+TEST(ConfigValidation, DamiaoMitRequiresClassicStandardFrames) {
+  auto config = valid_configuration();
+  config.devices.front().profile = ProtocolProfile::Dm4340MitStandard;
+  config.devices.front().frame_type = CanFrameType::Classic;
+  config.devices.front().frame_format = CanFrameFormat::Standard;
+  EXPECT_FALSE(validate_deployment(config).has(
+      ConfigErrorCode::IncompatibleFrameFormat));
+  config.devices.front().frame_format = CanFrameFormat::Extended;
+  EXPECT_TRUE(validate_deployment(config).has(
+      ConfigErrorCode::IncompatibleFrameFormat));
+  config.devices.front().frame_format = CanFrameFormat::Standard;
+  config.devices.front().frame_type = CanFrameType::FlexibleDataRate;
+  EXPECT_TRUE(validate_deployment(config).has(
+      ConfigErrorCode::IncompatibleFrameFormat));
+}
+
 TEST(ConfigValidation, RejectsInvalidCapabilitiesAndPayload) {
   auto config = valid_configuration();
   config.buses.front().capabilities.max_payload_bytes = 4U;

@@ -7,4 +7,10 @@
     runtime chain (PosixCdcSerialPort, UsbCdcTransport, Ak30ForceControlRuntime)
     into the composite SystemInterface.</description>
   </class>
+  <class name="mech_bringup/Dm4340System"
+         type="mech::mech_bringup::Dm4340System"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>DM4340 MIT velocity system using the shared USB-CAN
+    transport and ros2_control command lifecycle.</description>
+  </class>
 </library>

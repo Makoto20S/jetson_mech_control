@@ -1,8 +1,8 @@
-# Foundation ROS 2 workspace
+# ROS 2 workspace
 
-The workspace contains the five Foundation v0.1 packages planned in
-`docs/planning/07_framework_bootstrap_plan.md`, plus protocol and sensor
-integration packages:
+The workspace contains eleven packages. See the Chinese
+[code structure guide](../docs/development/code_structure.md) for ownership,
+data flow and the distinction between offline and live validation.
 
 - `mech_control_core`
 - `mech_simulation`
@@ -11,8 +11,12 @@ integration packages:
 - `mech_bringup`
 - `mech_protocol_cubemars` — the CubeMars AK3.0 force-control adapter. It is
   offline-only: it opens no device and performs no real device access.
+- `mech_protocol_damiao` — DM4340 MIT codec/session, used by the separate
+  `Dm4340System` velocity/effort hardware plugin in `mech_bringup`.
+- `mech_knee_kinematics` — dual-IMU calibration/estimation and sensor-only tools.
+- `mech_assist_control` — selectable follow/resistance policies; preview by default.
 - `mech_protocol_ctrboard` — receive-side decoder for the STM32 sensor stream.
-- `mech_ctrboard_bridge` — receive-only SocketCAN ROS 2 publisher for two IMUs
+- `mech_ctrboard_bridge` — receive-only SocketCAN/USB-CDC ROS 2 publisher for two IMUs
   and two 20-point plantar-pressure samples.
 
 From Ubuntu 22.04 with ROS 2 Humble installed, run from the repository root:
@@ -46,5 +50,6 @@ MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build \
 bash tools/ci/build_workspace.sh
 ```
 
-This workspace is hardware-independent. The build script does not enable CAN,
+Building and automated testing are hardware-independent. Runtime launch files
+may open devices and must be reviewed separately. The build script does not enable CAN,
 open a device, or modify Jetson configuration.

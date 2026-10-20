@@ -19,3 +19,10 @@ TEST(ProductionPluginLoading, HardwareThenControllerHaveIndependentFactories) {
   EXPECT_NE(controller_loader.createSharedInstance("mech_controllers/EffortCommandController"),
             nullptr);
 }
+
+TEST(ProductionPluginLoading, DamiaoSystemLoadsByPublicNameWithoutDeviceIo) {
+  pluginlib::ClassLoader<hardware_interface::SystemInterface> hardware_loader(
+      "hardware_interface", "hardware_interface::SystemInterface");
+  auto damiao = hardware_loader.createSharedInstance("mech_bringup/Dm4340System");
+  ASSERT_NE(damiao, nullptr);
+}

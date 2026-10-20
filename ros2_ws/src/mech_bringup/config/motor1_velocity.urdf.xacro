@@ -20,6 +20,7 @@
      an unknown or missing key fails configure. The command interface
      name must match sub_mode (pinned offline by test_deployment_files). -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="motor1_ak30_velocity">
+  <xacro:arg name="device_path" default="/dev/ttyACM0"/>
   <link name="world"/>
   <link name="motor1_joint">
     <visual>
@@ -39,7 +40,7 @@
   <ros2_control name="motor1_ak30_system" type="system">
     <hardware>
       <plugin>mech_bringup/Ak30System</plugin>
-      <param name="device_path">/dev/ttyACM0</param>
+      <param name="device_path">$(arg device_path)</param>
       <param name="logical_bus">1</param>
       <param name="drive_id">104</param>
       <param name="sub_mode">velocity</param>
