@@ -123,7 +123,11 @@ TEST(Ak30ServoSystemPlugin, NamedCommandHandlesAndFeedbackCannotAliasOtherRoute)
   for (const bool reverse_declaration : {false, true}) {
     SCOPED_TRACE(reverse_declaration ? "right-first hardware" : "left-first hardware");
     auto serial = std::make_shared<FakeSerial>();
+    std::int64_t now_ns = 1000000000;
     Ak30ServoSystem plugin;
+    plugin.set_clock_for_testing([&now_ns] {
+      return *mech::mech_control_core::MonotonicTime::from_nanoseconds(now_ns);
+    });
     plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
     auto declaration = info();
     if (reverse_declaration)
@@ -159,6 +163,10 @@ TEST(Ak30ServoSystemPlugin, NamedCommandHandlesAndFeedbackCannotAliasOtherRoute)
         {-27500, -8750}, {-26250, -8750}, {-26250, -3125}, {-28750, -6875}}};
     for (std::size_t stage = 0; stage < targets.size(); ++stage) {
       for (unsigned sample = 0; sample < 128U; ++sample) {
+        // Route isolation is a logical-cycle test, not a host scheduling test.
+        // Keep feedback, command and watchdog timestamps in the same clock
+        // domain; slow CI must not fabricate a 6 ms hard-deadline violation.
+        now_ns += 2000000;
         left->set_value(targets[stage][0]);
         EXPECT_DOUBLE_EQ(right->get_value(), sample == 0U && stage == 0U
             ? 0.5 : 0.68);  // writing the left handle cannot alter the right handle
@@ -210,7 +218,11 @@ TEST(Ak30ServoSystemPlugin, NamedCommandHandlesAndFeedbackCannotAliasOtherRoute)
 
 TEST(Ak30ServoSystemPlugin, FeedbackAtPeerTargetCannotRewriteHeldCommand) {
   auto serial = std::make_shared<FakeSerial>();
+  std::int64_t now_ns = 1000000000;
   Ak30ServoSystem plugin;
+  plugin.set_clock_for_testing([&now_ns] {
+    return *mech::mech_control_core::MonotonicTime::from_nanoseconds(now_ns);
+  });
   plugin.set_serial_port_factory_for_testing([serial](const std::string&) { return serial; });
   auto declaration = info();
   for (auto& joint : declaration.joints) {
@@ -236,6 +248,7 @@ TEST(Ak30ServoSystemPlugin, FeedbackAtPeerTargetCannotRewriteHeldCommand) {
   commands[0].set_value(1.1);
   commands[2].set_value(1.25);
   for (int repeat = 0; repeat < 20; ++repeat) {
+    now_ns += 2000000;
     ASSERT_EQ(plugin.write(time, period), hardware_interface::return_type::OK);
     // The 105 feedback deliberately equals 104's canonical command. A
     // receive-path alias or read-time command seeding would now be exposed.
