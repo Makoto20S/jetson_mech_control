@@ -8,6 +8,10 @@ ENV LANG=C.UTF-8 \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# rosdep invokes apt-get too. Bound transient DNS/download retries for both
+# direct toolchain installs and rosdep; exhausted retries still fail the image.
+RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80mech-network-retries
+
 # The ros-base image intentionally contains the runtime, not the complete
 # build/test toolchain. Keep this list aligned with `base_image_tools` in the
 # dependency manifest so a clean image can run the shared workspace script.
