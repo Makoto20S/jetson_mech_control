@@ -3,6 +3,8 @@ controller_manager:
     update_rate: 500
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
+    dm4340_position_controller:
+      type: mech_controllers/PositionCommandController
     dm4340_velocity_controller:
       type: mech_controllers/VelocityCommandController
     dm4340_effort_controller:
@@ -27,5 +29,16 @@ dm4340_effort_controller:
     minimum: -0.3
     maximum: 0.3
     max_slew_per_second: 1.0
+    target_ttl_nanoseconds: 100000000
+    target_hard_ttl_nanoseconds: 106000000
+
+# Shaft-radian example, not a calibrated anatomical range. Hardware applies
+# its independently configured per-axis bounds and target-error guard.
+dm4340_position_controller:
+  ros__parameters:
+    joint: dm4340_joint
+    minimum: -12.5
+    maximum: 12.5
+    max_slew_per_second: 0.2
     target_ttl_nanoseconds: 100000000
     target_hard_ttl_nanoseconds: 106000000

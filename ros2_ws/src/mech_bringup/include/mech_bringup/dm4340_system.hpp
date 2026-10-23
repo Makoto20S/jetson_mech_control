@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "mech_bringup/dm4340_runtime.hpp"
+#include "mech_bringup/command_trace.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
 #include "mech_hardware_ros2_control/composite_system.hpp"
 
@@ -21,6 +22,10 @@ class Dm4340System final : public mech_hardware_ros2_control::CompositeSystem {
   hardware_interface::CallbackReturn on_init(
       const hardware_interface::HardwareInfo& info) override;
   hardware_interface::CallbackReturn on_activate(
+      const rclcpp_lifecycle::State& state) override;
+  hardware_interface::CallbackReturn on_deactivate(
+      const rclcpp_lifecycle::State& state) override;
+  hardware_interface::CallbackReturn on_error(
       const rclcpp_lifecycle::State& state) override;
   hardware_interface::CallbackReturn on_shutdown(
       const rclcpp_lifecycle::State& state) override;
@@ -45,8 +50,10 @@ class Dm4340System final : public mech_hardware_ros2_control::CompositeSystem {
   SerialFactory serial_factory_;
   Dm4340Runtime::Clock clock_;
   mech_control_core::BusOwnershipRegistry* registry_{nullptr};
+  std::unique_ptr<CommandTrace> command_trace_;
   std::shared_ptr<mech_control_core::CdcSerialPort> serial_;
   std::unique_ptr<mech_control_core::UsbCdcTransport> transport_;
+  std::unique_ptr<CommandTraceTransport> traced_transport_;
   Dm4340Runtime* runtime_view_{nullptr};
   std::vector<std::string> joint_names_;
   bool enable_on_activate_{false};

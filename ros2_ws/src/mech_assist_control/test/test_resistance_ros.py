@@ -61,6 +61,7 @@ class ResistanceRosTests(unittest.TestCase):
                     motor.velocity = [-0.4]
                     motor_pub.publish(motor)
                     diagnostic = DiagnosticArray()
+                    diagnostic.header.stamp = probe.get_clock().now().to_msg()
                     status = DiagnosticStatus()
                     status.name = 'knee_kinematics'
                     status.level = DiagnosticStatus.OK
@@ -135,6 +136,7 @@ class ResistanceRosTests(unittest.TestCase):
                     status.name = 'knee_kinematics'
                     status.level = DiagnosticStatus.OK
                     diagnostic = DiagnosticArray()
+                    diagnostic.header.stamp = probe.get_clock().now().to_msg()
                     diagnostic.status = [status]
                     diag_pub.publish(diagnostic)
                     executor.spin_once(timeout_sec=0.01)
@@ -204,6 +206,7 @@ class ResistanceRosTests(unittest.TestCase):
                     status.level = (DiagnosticStatus.OK if healthy else
                                     DiagnosticStatus.WARN)
                     diagnostic = DiagnosticArray()
+                    diagnostic.header.stamp = probe.get_clock().now().to_msg()
                     diagnostic.status = [status]
                     diag_pub.publish(diagnostic)
                     executor.spin_once(timeout_sec=0.01)

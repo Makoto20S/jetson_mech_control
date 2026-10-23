@@ -1,6 +1,9 @@
 #include "mech_bringup/dm4340_runtime.hpp"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <thread>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -75,8 +78,17 @@ bool Dm4340Runtime::configure(std::size_t count) noexcept {
         joint.command_ttl_ns <= config_.control_period_ns ||
         config_.command_hard_ttl_ns <= joint.command_ttl_ns ||
         config_.query_period_ns >= joint.feedback_ttl_ns ||
-        (config_.command_mode == Dm4340CommandMode::Velocity
-             ? joint.max_command_velocity_rad_s <= 0.0 ||
+        (config_.command_mode == Dm4340CommandMode::Position
+             ? joint.kp <= 0.0 || joint.kd <= 0.0 ||
+                   joint.max_command_velocity_rad_s != 0.0 ||
+                   joint.max_command_effort_nm != 0.0 ||
+                   joint.velocity_feedforward_nm != 0.0 ||
+                   joint.kp * joint.max_target_error_rad / std::abs(joint.joint.scale) +
+                       joint.kd * joint.max_feedback_velocity_rad_s >
+                           joint.max_feedback_torque_nm
+             : config_.command_mode == Dm4340CommandMode::Velocity
+             ? joint.kp != 0.0 || joint.kd <= 0.0 ||
+                   joint.max_command_velocity_rad_s <= 0.0 ||
                    joint.max_command_effort_nm != 0.0
              : joint.max_command_effort_nm <= 0.0 ||
                    joint.max_command_velocity_rad_s != 0.0 ||
@@ -126,6 +138,7 @@ bool Dm4340Runtime::start() noexcept {
     device.lease.reset();
     device.hard_deadline.reset();
     device.last_query.reset();
+    device.last_command_tx.reset();
     device.generation = 0U;
     device.ever_fresh = false;
     device.command_sent = false;
@@ -133,6 +146,12 @@ bool Dm4340Runtime::start() noexcept {
     device.disarmed = false;
     device.disable_pending = false;
   }
+  last_query_tx_.reset();
+  last_read_entry_.reset();
+  last_write_entry_.reset();
+  read_gap_ns_ = write_gap_ns_ = read_work_ns_ = -1;
+  deadline_diagnostic_.reset();
+  feedback_diagnostic_.reset();
   faulted_ = false;
   fault_reason_ = Dm4340FaultReason::None;
   rejected_status_ = 0U;
@@ -146,6 +165,56 @@ void Dm4340Runtime::stop() noexcept {
   for (auto& device : devices_) device.session.deactivate();
   bus_.stop();
   running_ = false;
+}
+
+bool Dm4340Runtime::confirm_disabled() noexcept {
+  if (!running_) return true;
+  (void)halt_all(false);
+  std::array<bool, kMaxJoints> confirmed{};
+  // Clear queued feedback before sending a new disable/query exchange. A stale
+  // disabled packet must not acknowledge this lifecycle transition.
+  for (std::size_t n = 0; n < 4096U; ++n) {
+    RawCanFrame frame{};
+    const auto result = transport_.try_receive(frame);
+    if (result == TransportResult::WouldBlock) break;
+    if (result != TransportResult::Ok || n == 4095U) return false;
+  }
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(300);
+  // Lifecycle-only serialized disable/query exchanges: back-to-back USB-CAN
+  // frames were observed to lose replies on the real dual-motor gateway.
+  for (std::size_t i = 0; i < devices_.size(); ++i) {
+    const auto& joint = config_.joints[i];
+    auto next_send = std::chrono::steady_clock::now();
+    while (!confirmed[i] && std::chrono::steady_clock::now() < deadline) {
+      if (std::chrono::steady_clock::now() >= next_send) {
+        if (!send_special(joint.command_can_id, kDisable)) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (!send_special(0x7FFU, {joint.motor_id, 0U, 0xCCU, 0U,
+                                 0U, 0U, 0U, 0U})) return false;
+        next_send = std::chrono::steady_clock::now() + std::chrono::milliseconds(30);
+      }
+      for (std::size_t n = 0; n < 128U; ++n) {
+        RawCanFrame frame{};
+        const auto result = transport_.try_receive(frame);
+        if (result == TransportResult::WouldBlock) break;
+        if (result != TransportResult::Ok) return false;
+        mech_protocol_damiao::MitFeedback feedback{};
+        if (mech_protocol_damiao::decode_mit_feedback(
+                frame, config_.logical_bus, joint.feedback_can_id,
+                joint.motor_id, joint.limits, feedback))
+          confirmed[i] = feedback.raw_fault == 0U;
+      }
+      if (!confirmed[i]) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (!confirmed[i]) break;
+  }
+  bool all = true;
+  for (std::size_t i = 0; i < devices_.size(); ++i) all = all && confirmed[i];
+  if (all) return true;
+  faulted_ = true;
+  fault_reason_ = Dm4340FaultReason::StopFailed;
+  return false;
 }
 
 bool Dm4340Runtime::send_special(
@@ -207,6 +276,23 @@ bool Dm4340Runtime::fail(Dm4340FaultReason reason) noexcept {
   return halt_all(true);
 }
 
+bool Dm4340Runtime::fail_deadline(
+    std::size_t index, MonotonicTime now, bool during_write) noexcept {
+  if (!deadline_diagnostic_) {
+    const auto& device = devices_[index];
+    const auto duration = [now](const std::optional<MonotonicTime>& from) {
+      const auto elapsed = from ? elapsed_since(*from, now) : std::nullopt;
+      return elapsed ? elapsed->nanoseconds() : std::int64_t{-1};
+    };
+    const auto overdue = elapsed_since(*device.hard_deadline, now)->nanoseconds();
+    deadline_diagnostic_ = Dm4340DeadlineDiagnostic{
+        index, during_write, config_.command_hard_ttl_ns + overdue, overdue,
+        read_gap_ns_, write_gap_ns_, read_work_ns_,
+        duration(device.last_command_tx)};
+  }
+  return fail(Dm4340FaultReason::CommandDeadline);
+}
+
 bool Dm4340Runtime::observe(void* context, std::uint16_t selected,
                                     const RawCanFrame& frame) noexcept {
   auto& self = *static_cast<Dm4340Runtime*>(context);
@@ -223,7 +309,9 @@ bool Dm4340Runtime::observe(void* context, std::uint16_t selected,
       AdapterResult::Ok) {
     if (self.fault_reason_ == Dm4340FaultReason::None) {
       self.fault_reason_ = Dm4340FaultReason::FeedbackRejected;
-      self.rejected_status_ = frame.payload[0] >> 4U;
+      self.rejected_status_ = frame.payload_size > 0U ? frame.payload[0] >> 4U : 0U;
+      const auto& diagnostic = self.devices_[index].session.feedback_diagnostic();
+      if (diagnostic) self.feedback_diagnostic_ = Dm4340FeedbackDiagnostic{index, *diagnostic};
     }
     self.faulted_ = true;
     return false;
@@ -257,7 +345,9 @@ bool Dm4340Runtime::prepare_and_transmit(MonotonicTime now) noexcept {
     RawCanFrame frame{};
     const auto prepared = config_.command_mode == Dm4340CommandMode::Velocity
         ? device.session.prepare_velocity(*device.pending, now, frame)
-        : device.session.prepare_effort(*device.pending, now, frame);
+        : config_.command_mode == Dm4340CommandMode::Effort
+        ? device.session.prepare_effort(*device.pending, now, frame)
+        : device.session.prepare_position(*device.pending, now, frame);
     if (prepared !=
         AdapterResult::Ok) return fail(Dm4340FaultReason::CommandPreparation);
     const auto submitted = CommandLease::create(
@@ -269,12 +359,14 @@ bool Dm4340Runtime::prepare_and_transmit(MonotonicTime now) noexcept {
   }
   if (!any_pending) return true;
   const auto result = bus_.transmit(clock_(), {this, &authorize_send});
+  const auto tx_observed = clock_();
   if (result != RuntimeResult::Ok && result != RuntimeResult::QueueFull)
     return fail(Dm4340FaultReason::CommandTransmit);
   for (std::size_t index = 0; index < devices_.size(); ++index) {
     auto& device = devices_[index];
     if (device.pending && bus_.was_sent(route(index), device.pending->generation)) {
       device.command_sent = true;
+      device.last_command_tx = tx_observed;
       device.pending.reset();
       device.lease.reset();
     }
@@ -287,22 +379,34 @@ bool Dm4340Runtime::read(
     std::size_t count) noexcept {
   if (!running_ || faulted_ || !states || count != devices_.size()) return false;
   auto now = clock_();
+  const auto read_gap = last_read_entry_ ? elapsed_since(*last_read_entry_, now)
+                                         : std::nullopt;
+  read_gap_ns_ = read_gap ? read_gap->nanoseconds() : -1;
+  last_read_entry_ = now;
   for (std::size_t index = 0; index < devices_.size(); ++index) {
     auto& device = devices_[index];
     const auto elapsed = device.last_query ? elapsed_since(*device.last_query, now)
                                            : std::nullopt;
     if (!device.last_query || !elapsed ||
         elapsed->nanoseconds() >= config_.query_period_ns) {
+      if (config_.stagger_status_queries && last_query_tx_) {
+        const auto gap = elapsed_since(*last_query_tx_, now);
+        if (gap && gap->nanoseconds() < config_.query_period_ns /
+                static_cast<std::int64_t>(devices_.size())) continue;
+      }
       const std::array<std::uint8_t, 8> query{
           config_.joints[index].motor_id, 0U, 0xCCU, 0U, 0U, 0U, 0U, 0U};
       if (!send_special(0x7FFU, query))
         return fail(Dm4340FaultReason::StatusQuerySend);
       device.last_query = now;
+      last_query_tx_ = now;
     }
   }
   if (bus_.receive(now, {this, &observe}) != RuntimeResult::Ok || faulted_)
     return fail(Dm4340FaultReason::Receive);
   now = clock_();
+  const auto read_work = elapsed_since(*last_read_entry_, now);
+  read_work_ns_ = read_work ? read_work->nanoseconds() : -1;
   for (std::size_t index = 0; index < devices_.size(); ++index) {
     auto& device = devices_[index];
     const auto sample = device.session.snapshot(now);
@@ -321,7 +425,7 @@ bool Dm4340Runtime::read(
         !mech_protocol_damiao::feedback_motor_enabled(sample.raw_fault))
       return fail(Dm4340FaultReason::MotorNotEnabled);
     if (device.hard_deadline && *device.hard_deadline <= now)
-      return fail(Dm4340FaultReason::CommandDeadline);
+      return fail_deadline(index, now, false);
   }
   return prepare_and_transmit(now);
 }
@@ -332,26 +436,29 @@ bool Dm4340Runtime::write(
   if (!running_ || faulted_ || !commands || count != devices_.size())
     return false;
   const auto now = clock_();
+  const auto write_gap = last_write_entry_ ? elapsed_since(*last_write_entry_, now)
+                                           : std::nullopt;
+  write_gap_ns_ = write_gap ? write_gap->nanoseconds() : -1;
+  last_write_entry_ = now;
   for (std::size_t index = 0; index < count; ++index) {
     const auto& dispatch = commands[index];
     const auto& device = devices_[index];
     if (!dispatch.authorized) continue;
     if (device.hard_deadline && *device.hard_deadline <= now)
-      return fail(Dm4340FaultReason::CommandDeadline);
+      return fail_deadline(index, now, true);
     if (!dispatch.fresh) continue;
     const auto& config = config_.joints[index];
     if (!valid_sample(index) || !std::isfinite(dispatch.command.velocity) ||
         !std::isfinite(dispatch.command.position) ||
         !std::isfinite(dispatch.command.effort) ||
-        dispatch.command.position != 0.0 ||
-        (config_.command_mode == Dm4340CommandMode::Velocity
-             ? dispatch.command.effort != 0.0 ||
+        (config_.command_mode == Dm4340CommandMode::Position
+             ? dispatch.command.velocity != 0.0 || dispatch.command.effort != 0.0
+             : config_.command_mode == Dm4340CommandMode::Velocity
+             ? dispatch.command.position != 0.0 || dispatch.command.effort != 0.0 ||
                    std::abs(dispatch.command.velocity) >
                        config.max_command_velocity_rad_s *
                            std::abs(config.joint.scale)
-             : dispatch.command.velocity != 0.0 ||
-                   std::abs(dispatch.command.effort) >
-                       config.max_command_effort_nm) ||
+             : dispatch.command.position != 0.0 || dispatch.command.velocity != 0.0) ||
         now.nanoseconds() > std::numeric_limits<std::int64_t>::max() -
                                 config_.command_hard_ttl_ns ||
         device.generation == std::numeric_limits<std::uint64_t>::max())
@@ -371,7 +478,12 @@ bool Dm4340Runtime::write(
     device.lease.reset();
     ++device.generation;
     device.pending = CanonicalDeviceCommand{
-        0.0, dispatch.command.velocity, dispatch.command.effort, device.generation,
+        dispatch.command.position, dispatch.command.velocity,
+        config_.command_mode == Dm4340CommandMode::Effort
+            ? std::clamp(dispatch.command.effort,
+                         -config_.joints[index].max_command_effort_nm,
+                         config_.joints[index].max_command_effort_nm)
+            : dispatch.command.effort, device.generation,
         *MonotonicTime::from_nanoseconds(
             now.nanoseconds() + config_.joints[index].command_ttl_ns)};
     device.hard_deadline = *MonotonicTime::from_nanoseconds(
@@ -386,6 +498,14 @@ void Dm4340Runtime::cancel_pending(std::size_t index) noexcept {
   if (!device.claimed && !device.pending && !device.command_sent &&
       !device.disable_pending) return;
   if (!halt_device(index)) (void)fail(Dm4340FaultReason::StopFailed);
+}
+
+std::optional<std::uint8_t> Dm4340Runtime::fresh_feedback_status(
+    std::size_t index) const noexcept {
+  if (!running_ || faulted_ || index >= devices_.size()) return std::nullopt;
+  const auto sample = devices_[index].session.snapshot(clock_());
+  if (sample.availability != DmFeedbackAvailability::Fresh) return std::nullopt;
+  return sample.raw_fault;
 }
 
 bool Dm4340Runtime::valid_sample(std::size_t index) const noexcept {
@@ -425,10 +545,15 @@ bool Dm4340Runtime::adopt_or_enable_from_feedback() noexcept {
       (void)halt_all(true);
       return false;
     }
-    if (sample.raw_fault == 0U &&
-        !send_special(config_.joints[index].command_can_id, kEnable)) {
-      (void)halt_all(true);
-      return false;
+    if (sample.raw_fault == 0U) {
+      if (!send_special(config_.joints[index].command_can_id, kEnable)) {
+        (void)halt_all(true);
+        return false;
+      }
+      // Lifecycle-only handshake, not the active control loop. The gateway
+      // needs spaced management frames, including consecutive enable requests.
+      if (config_.stagger_status_queries)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     device.disable_pending = true;
   }

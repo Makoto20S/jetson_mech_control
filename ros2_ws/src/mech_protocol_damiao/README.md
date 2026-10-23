@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-本包提供标准帧 Classic CAN 的 MIT 报文编解码，以及仅用于离线验证的位置/速度会话。会话本身不会打开 CAN 通道、使能或失能电机、设置零位或发布 ROS 控制接口。可选 ROS 监视节点只接收反馈；目前还不能在 `mech_bringup` 中选作生产电机。
+本包提供标准帧 Classic CAN 的 MIT 报文编解码，以及无I/O的位置/速度/力矩会话。会话本身不会打开 CAN 通道、使能或失能电机、设置零位或发布 ROS 控制接口。可选 ROS 监视节点只接收反馈；已通过独立 `mech_bringup/Dm4340System` 接入生产代码路径，实机验收范围另行记录。
 
 本包与 `ros2_ws/src/mech_protocol_cubemars` 平级，分别拥有自己的库、包清单和测试；两个品牌协议包互不依赖。后续可共用 `mech_control_core` 的总线机制和 `mech_bringup` 的生产组合层，但通用控制器不应加入品牌分支。
 
@@ -26,7 +26,7 @@ MIT 速度指令的驱动力矩近似为 `Kd * (目标速度 - 实际速度) + �
 
 ## 尚未完成
 
-当前已有独立 `mech_bringup/Dm4340System` 和 ROS 速度/力矩接口，
+当前已有独立 `mech_bringup/Dm4340System` 和 ROS 位置/速度/力矩接口，
 详见 [部署说明](../mech_bringup/README.md)；协议包负责 wire 编解码及 session，
 不拥有串口或 ROS 控制器。速度已有空载台架记录，力矩模式尚待实机验收。
 台架程序与只接收监视器是可选工具，不替代硬件插件；真实部署仍需关节映射、
@@ -116,3 +116,12 @@ Jetson 本地终端运行：`/tmp/dm4340_gate_ws/install/mech_protocol_damiao/li
 七路板说明书标注 `FDCAN 波特率：5 Mbps`，达妙 Orin 示例区分 1 Mbps 仲裁段与 5 Mbps CAN-FD 数据段；电机配置截图为 `CAN Baud: 1M`。这不能直接证明速率不匹配，当前接口的实际设置仍未读回。程序中的 USB-CDC `nominal_bitrate_hz=1000000` 是软件声明，不会配置七路板的实际 CAN 速率。不要用 ROS1 自动运动例程替代台架闸门。
 `--set-timeout-200ms`：仅在反馈状态为失能 `0` 时，向寄存器 9 暂写 `4000` 个计数周期（按协议资料 50 us/周期，对应 200 ms），并回读确认。不发送使能、运动或 Flash 保存指令，掉电后可能失效。回读成功不等于已经实测停发后的停机行为；完成实测前，ROS 的 `motor_side_timeout_verified` 保持 `false`。
 `--verify-timeout-200ms` 仅在初始失能、寄存器 9 回读 `4000` 且 MIT 模式读回 `1` 时，短时使能并发送零速度/零增益帧；随后停止所有发送 450 ms，清除积压接收帧，再查询新状态，最后主动发送三次失能。只有查询得到通信丢失状态 `13` 且速度接近零才报告通过。2026-10-15 首次测试的即时查询先拿到队列中的旧状态 `1`，随后两次独立查询得到状态 `13`；因此确认发生过通信丢失故障，但尚未准确量出触发时间，也未验证带负载时的停转时间。故障未清除前不要启动 ROS 运动测试。
+
+位置接口复用通用位置控制器及原生MIT Kp/Kd路径，默认无速度／力矩前馈。
+参数单位、双机配置与仅软件验收边界见[位置阻抗说明](../../../docs/development/dm4340_position_impedance.md)。
+
+
+普通DM4310双机使用显式`dm4310_mit_standard`配置，复用现有Damiao会话/runtime/插件；
+`dm4310_dual_bringup.launch.py`从实测端点内缩文件同步加载控制器及下层位置范围。
+默认inactive、缺少证据或范围确认拒绝启动，不沿用DM4340的量程/固件/原点。
+见[DM4310位置限位](../../../docs/development/dm4310_position_limits.md)。

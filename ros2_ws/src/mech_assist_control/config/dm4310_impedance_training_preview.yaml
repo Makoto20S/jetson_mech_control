@@ -1,0 +1,49 @@
+# Preview fixture only; real motion must load measured bounds and the fixed-position C++ backend.
+exoskeleton_control:
+  ros__parameters:
+    input_source: motor_encoder
+    policy: impedance_training
+    resistance_execution: application  # Legacy speed-mode preview selector only.
+    impedance_stiffness: 15.0
+    impedance_damping: 0.5
+    output_mode: preview
+    allow_motor_output: false
+    joint_mapping_verified: false
+    feedback_topic: /joint_states
+    joint_names:
+    - dm4310_motor1_joint
+    - dm4310_motor2_joint
+    actuator_joint_names:
+    - dm4310_motor1_joint
+    - dm4310_motor2_joint
+    controller_topics:
+    - /dm4310_motor1_effort_controller/training_command
+    - /dm4310_motor2_effort_controller/training_command
+    joint_scales:
+    - 1.0
+    - 1.0
+    joint_offsets:
+    - 0.0
+    - 0.0
+    max_command:
+    - 7.0
+    - 7.0
+    max_actuator_command:
+    - 7.0
+    - 7.0
+    max_slew:
+    - 1000.0
+    - 1000.0
+    max_velocity:
+    - 50.0
+    - 50.0
+    position_min:
+    - -12.5
+    - -12.5
+    position_max:
+    - 12.5
+    - 12.5
+    position_soft_margin_rad: 0.1
+    enforce_excursion_limit: false
+    max_excursion_rad: 0.2
+    run_limit_s: 5.0

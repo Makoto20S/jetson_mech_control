@@ -41,6 +41,7 @@ struct MitFeedback final {
 
 // These are SDK reference ranges, not verified limits of the attached motor.
 inline constexpr MitLimits kSdkDm4340Limits{12.5, 10.0, 28.0};
+inline constexpr MitLimits kSdkDm4310Limits{12.5, 30.0, 10.0};
 
 [[nodiscard]] bool valid_limits(const MitLimits& limits) noexcept;
 

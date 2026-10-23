@@ -126,16 +126,19 @@ std::uint64_t SingleJointCommandController::target_generation() const noexcept {
 // Runs on the executor thread for a topic message, or on the caller's thread
 // for set_target(). The generation is published last, with release ordering,
 // so update() can never see a new generation paired with an older value.
-bool SingleJointCommandController::accept(double target, std::int64_t arrival_nanoseconds,
+bool SingleJointCommandController::accept(TargetCommand command, std::int64_t arrival_nanoseconds,
                             std::uint64_t activation_epoch) noexcept {
   std::lock_guard<std::mutex> lock(producer_mutex_);
+  command.arrival_nanoseconds = arrival_nanoseconds;
+  command.activation_epoch = activation_epoch;
   if (!active_.load(std::memory_order_acquire) ||
-      activation_epoch != activation_epoch_.load(std::memory_order_acquire)) {
+      activation_epoch != activation_epoch_.load(std::memory_order_acquire) ||
+      !std::isfinite(command.value) || !valid_command(command)) {
     return false;
   }
   const auto generation = generation_.load(std::memory_order_relaxed) + 1U;
-  inbox_.writeFromNonRT(
-      TargetCommand{target, generation, arrival_nanoseconds, activation_epoch});
+  command.generation = generation;
+  inbox_.writeFromNonRT(command);
   generation_.store(generation, std::memory_order_release);
   return true;
 }
@@ -181,7 +184,8 @@ controller_interface::CallbackReturn SingleJointCommandController::on_configure(
 
   // Controller-relative, so the full topic name follows the controller's
   // namespace and two deployments of this controller cannot collide.
-  subscription_ = get_node()->create_subscription<std_msgs::msg::Float64>(
+  subscription_.reset();
+  if (scalar_subscription()) subscription_ = get_node()->create_subscription<std_msgs::msg::Float64>(
       target_topic_, rclcpp::SystemDefaultsQoS(),
       [this](const std_msgs::msg::Float64::SharedPtr message) {
         if (message == nullptr) return;
@@ -197,7 +201,9 @@ controller_interface::CallbackReturn SingleJointCommandController::on_configure(
         // that bug into a full-scale motion command.
         if (!std::isfinite(message->data)) return;
         const auto arrival_nanoseconds = clock_();
-        (void)accept(message->data, arrival_nanoseconds, activation_epoch);
+        TargetCommand command;
+        command.value = message->data;
+        (void)accept(command, arrival_nanoseconds, activation_epoch);
       });
 
   command_ = 0.0;
@@ -218,6 +224,8 @@ controller_interface::CallbackReturn SingleJointCommandController::on_activate(
     return controller_interface::CallbackReturn::ERROR;
   }
   command_ = seed;
+  command_parameters_ = {};
+  activated_at_.store(needs_activation_time() ? clock_() : 0, std::memory_order_release);
   limiter_.clear();
   // Ignore anything already in the inbox: a target that predates this
   // activation is not a target for this activation.
@@ -276,6 +284,8 @@ controller_interface::return_type SingleJointCommandController::update(
         // with a target whose deadline is unknown.
         return controller_interface::return_type::ERROR;
       }
+      if (pending.activation_epoch == activation_epoch_.load(std::memory_order_acquire))
+        command_parameters_ = pending.parameters;
     }
   }
 
@@ -284,7 +294,12 @@ controller_interface::return_type SingleJointCommandController::update(
     return controller_interface::return_type::ERROR;
   }
   command_ = limiter_.update(command_, period.seconds(), now);
-  command_interfaces_[0].set_value(command_);
+  double output = command_;
+  if (!compute_command(command_, period.seconds(), now, current_stage, output) ||
+      !std::isfinite(output)) {
+    return controller_interface::return_type::ERROR;
+  }
+  command_interfaces_[0].set_value(output);
   // ADR-017 Decision 3: the generation changes only when this controller
   // actually has something new to say, which is exactly while it is following a
   // target it still considers live. Deliberately NOT every cycle:
@@ -313,13 +328,19 @@ controller_interface::return_type SingleJointCommandController::update(
 // executor. It routes through the same buffer and counter as the
 // subscription, so the two entries cannot drift apart.
 bool SingleJointCommandController::set_target(double target) noexcept {
+  TargetCommand command;
+  command.value = target;
+  return set_command(command);
+}
+
+bool SingleJointCommandController::set_command(TargetCommand command) noexcept {
   const auto activation_epoch =
       activation_epoch_.load(std::memory_order_acquire);
-  if (!active_.load(std::memory_order_acquire) || !std::isfinite(target)) {
+  if (!active_.load(std::memory_order_acquire) || !std::isfinite(command.value)) {
     return false;
   }
   const auto arrival_nanoseconds = clock_();
-  return accept(target, arrival_nanoseconds, activation_epoch);
+  return accept(command, arrival_nanoseconds, activation_epoch);
 }
 
 }  // namespace mech::mech_controllers

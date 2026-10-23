@@ -5,6 +5,7 @@ import math
 import time
 
 import rclpy
+from geometry_msgs.msg import QuaternionStamped, Vector3Stamped
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -12,6 +13,7 @@ from sensor_msgs.msg import Imu, JointState
 from std_msgs.msg import Float64
 from std_srvs.srv import Trigger
 
+from .attitude import SegmentAttitudes, euler_zyx
 from .dual_imu_knee import (
     KneeEstimator, calibrate_hinge_axis_from_gyroscopes,
     hipnuc_quaternion_to_standard, hipnuc_vector_to_standard,
@@ -37,10 +39,13 @@ class KneeKinematicsNode(Node):
         self.declare_parameter('motion_seconds', 6.0)
         self.declare_parameter('pair_timeout_ms', 500.0)
         self.declare_parameter('max_pair_delay_ms', 100.0)
+        self.declare_parameter('source_max_age_ms', 300.0)
         mapping = self.get_parameter('basis_mapping').value
         if mapping not in ('identity', 'hipnuc'):
             raise ValueError('basis_mapping must be identity or hipnuc')
         self.mapping = mapping
+        self.attitudes = SegmentAttitudes()
+        self.attitude_pairs = 0
         self.estimator = KneeEstimator()
         self.estimator.set_direction(self.get_parameter('flexion_sign').value)
         self.axis_ready = False
@@ -57,8 +62,17 @@ class KneeKinematicsNode(Node):
         self.last_error = 'not calibrated'
         self.pair_timeout = self.get_parameter('pair_timeout_ms').value / 1000.0
         self.max_pair_delay = self.get_parameter('max_pair_delay_ms').value / 1000.0
+        self.source_max_age = self.get_parameter('source_max_age_ms').value / 1000.0
+        if not math.isfinite(self.source_max_age) or not 0 < self.source_max_age <= self.pair_timeout:
+            raise ValueError('source_max_age_ms must be finite, positive and <= pair_timeout_ms')
         if not 0 < self.max_pair_delay < self.pair_timeout:
             raise ValueError('max_pair_delay_ms must be positive and below pair_timeout_ms')
+        self.orientation_pubs = {name: self.create_publisher(
+            QuaternionStamped, f'attitude/{name}/orientation', 10)
+            for name in ('thigh', 'shank', 'relative', 'thigh_from_zero', 'shank_from_zero')}
+        self.euler_pubs = {name: self.create_publisher(
+            Vector3Stamped, f'attitude/{name}/rpy_rad', 10)
+            for name in ('thigh', 'shank')}
         self.joint_pub = self.create_publisher(JointState, 'knee/joint_state', 10)
         self.angle_pub = self.create_publisher(Float64, 'knee/flexion_deg', 10)
         self.diagnostic_pub = self.create_publisher(DiagnosticArray, 'knee/diagnostics', 10)
@@ -92,12 +106,19 @@ class KneeKinematicsNode(Node):
             q = hipnuc_quaternion_to_standard(q)
             gyro_dps = hipnuc_vector_to_standard(gyro_dps)
             accel = hipnuc_vector_to_standard(accel)
-        return Reading(q, gyro_dps, accel)
+        return Reading(tuple(value / math.sqrt(sum(v*v for v in q)) for value in q),
+                       gyro_dps, accel)
 
     def _receive(self, index, msg):
         stamp = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
         if stamp <= 0:
             self._interrupt_pair('missing ROS timestamp')
+            return
+        # Source headers and node clock must share the ROS time domain. Queue
+        # arrival cannot renew an old measurement's lifetime.
+        age = (self.get_clock().now().nanoseconds - stamp) / 1e9
+        if not 0 <= age <= self.source_max_age:
+            self._interrupt_pair('IMU source timestamp stale or future')
             return
         now = time.monotonic()
         self._expire_pending(now)
@@ -128,8 +149,10 @@ class KneeKinematicsNode(Node):
             self._interrupt_pair('IMU orientation, gyro or acceleration unavailable')
             return
         readings = (pair[0], pair[1])
-        self.last_pair_time = now
+        self.last_pair_time = now - age
         self.pair_timed_out = False
+        if self.capture_mode is None:
+            self._publish_attitudes(readings, msg.header.stamp)
         if self.capture_mode == 'static':
             self.static_pairs.append(readings)
         elif self.capture_mode == 'axis':
@@ -138,11 +161,18 @@ class KneeKinematicsNode(Node):
             try:
                 estimate = self.estimator.update(
                     readings[0].orientation, readings[1].orientation,
-                    now,
+                    stamp / 1_000_000_000.0,
                     readings[0].gyro_dps, readings[1].gyro_dps,
                 )
             except (RuntimeError, ValueError) as exc:
                 self.last_error = str(exc)
+                self._publish_diagnostic(now)
+                return
+            if not estimate.within_limits:
+                self.last_error = estimate.reason
+                # Event publication cannot be deferred to the 100 ms timer:
+                # a following healthy sample must not hide this invalid one.
+                self._publish_diagnostic(now)
                 return
             joint = JointState()
             joint.header.stamp = msg.header.stamp
@@ -155,6 +185,31 @@ class KneeKinematicsNode(Node):
             self.angle_pub.publish(value)
             self.last_error = '' if estimate.within_limits else estimate.reason
 
+    def _publish_attitudes(self, readings, stamp):
+        snapshot = self.attitudes.update(readings[0].orientation, readings[1].orientation)
+        for name, publisher in self.orientation_pubs.items():
+            q = getattr(snapshot, name)
+            if q is None:
+                continue
+            message = QuaternionStamped()
+            message.header.stamp = stamp
+            # Reference frames are sensor-derived, not geographic ENU or anatomy.
+            message.header.frame_id = ('thigh_imu' if name == 'relative' else
+                                       name.removesuffix('_from_zero') + '_imu_zero'
+                                       if name.endswith('_from_zero') else
+                                       'imu_reference')
+            message.quaternion.w, message.quaternion.x = q[0], q[1]
+            message.quaternion.y, message.quaternion.z = q[2], q[3]
+            publisher.publish(message)
+        for name, publisher in self.euler_pubs.items():
+            message = Vector3Stamped()
+            message.header.stamp = stamp
+            message.header.frame_id = 'imu_reference'
+            message.vector.x, message.vector.y, message.vector.z = euler_zyx(
+                getattr(snapshot, name))
+            publisher.publish(message)
+        self.attitude_pairs += 1
+
     def _interrupt_pair(self, reason):
         self.dropped_pairs += 1
         self.estimator.reset_filter()
@@ -163,6 +218,7 @@ class KneeKinematicsNode(Node):
             self.static_pairs.clear()
             self.motion_pairs.clear()
         self.last_error = reason
+        self._publish_diagnostic(time.monotonic())
 
     def _expire_pending(self, now):
         for stamp, (first_arrival, _) in tuple(self.pending.items()):
@@ -176,6 +232,7 @@ class KneeKinematicsNode(Node):
         if self.capture_mode is not None:
             response.success, response.message = False, 'calibration already running'
             return response
+        self.attitudes.reset()
         self.estimator.neutral_relative = None
         self.estimator.reset_filter()
         self.static_pairs.clear()
@@ -204,6 +261,7 @@ class KneeKinematicsNode(Node):
         self.last_closed_stamp = 0
         self.last_pair_time = None
         self.pair_timed_out = False
+        self.attitudes.reset()
         self.estimator.neutral_relative = None
         self.estimator.set_axis((0.0, 1.0, 0.0))
         self.axis_ready = False
@@ -240,6 +298,10 @@ class KneeKinematicsNode(Node):
                         relative_quaternion(thigh.orientation, shank.orientation)
                         for thigh, shank in self.static_pairs
                     ])
+                    self.attitudes.calibrate_zero([
+                        (thigh.orientation, shank.orientation)
+                        for thigh, shank in self.static_pairs
+                    ])
                     self.last_error = ('axis calibration required' if not self.axis_ready else '')
                 except ValueError as exc:
                     self.static_pairs.clear()
@@ -256,12 +318,17 @@ class KneeKinematicsNode(Node):
                     )
                     self.estimator.set_hinge_axes(result.proximal_axis, result.distal_axis)
                     self.axis_ready = True
-                    self.last_error = ''
+                    self.estimator.neutral_relative = None
+                    self.attitudes.reset()
+                    self.last_error = 'repeat standing zero required'
                     self.get_logger().info(
                         f'axis calibration ready: quality={result.explained_ratio:.3f}, '
                         f'samples={result.sample_count}; repeat standing zero')
                 except ValueError as exc:
                     self.last_error = str(exc)
+        self._publish_diagnostic(now)
+
+    def _publish_diagnostic(self, now):
         age = None if self.last_pair_time is None else now - self.last_pair_time
         stale = age is None or age >= self.pair_timeout
         status = DiagnosticStatus()
@@ -274,7 +341,8 @@ class KneeKinematicsNode(Node):
         status.message = ('calibrating ' + self.capture_mode if self.capture_mode else
                           'IMU pair timed out' if stale else
                           self.last_error or 'calibrated')
-        status.values = [KeyValue(key='basis_mapping', value=self.mapping),
+        status.values = [KeyValue(key='attitude_pairs', value=str(self.attitude_pairs)),
+                         KeyValue(key='basis_mapping', value=self.mapping),
                          KeyValue(key='dropped_pairs', value=str(self.dropped_pairs)),
                          KeyValue(key='out_of_order_messages',
                                   value=str(self.out_of_order_messages)),

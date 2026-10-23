@@ -8,7 +8,10 @@
   <buildtool_depend>python3-setuptools</buildtool_depend>
   <exec_depend>mech_knee_kinematics</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>

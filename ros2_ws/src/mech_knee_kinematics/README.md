@@ -36,8 +36,8 @@ before relying on its per-field safety status.
 
 This receive-only ROS 2 node consumes the existing CtrBoard bridge topics
 `imu/imu1/data` (thigh) and `imu/imu2/data` (shank). It does not send CAN frames
-or motor commands. `dual_imu_knee.py` is a byte-for-byte copy of the PC viewer's
-pure estimator core. The node uses the same standing relative-quaternion zero,
+or motor commands. `dual_imu_knee.py` reuses the PC viewer's pure estimator core, with an additional
+matching body-vector basis transform for the ROS adapter. The node uses the same standing relative-quaternion zero,
 gyro-based functional hinge-axis calibration, signed twist angle, gyro prediction,
 orientation correction and 6 Hz display low-pass filter. Synchronize changes to
 the PC core and this packaged copy together. This is **not** Song and Baxter's
@@ -251,3 +251,34 @@ IMUs must be fixed on separate leg segments and calibrated against a physical
 angle reference, the insoles connected and validated, and a separately
 specified joint-to-motor mapping and stop behavior verified before considering
 any physical assistance loop.
+
+## Jetson segment attitudes (IMU-ATT-001)
+
+The receive-only node now also publishes each segment orientation, their relative
+quaternion, standing-relative orientations and display RPY. It reuses onboard
+IMU quaternions, not a new raw-sensor AHRS. See the
+[Chinese design and usage guide](../../../docs/development/dual_imu_attitude_design.md)
+for frame conventions, topic contracts, launch configuration and acceptance limits.
+
+### Posture viewer
+
+Run `ros2 run mech_knee_kinematics dual_imu_attitude_viewer` in a sourced graphical
+Jetson session. Complete the estimator calibrations to enable the two-segment
+pose, RPY, knee angle/rate and rolling charts. Stale or unhealthy input greys
+the animation and blanks live values. `--demo` provides labelled synthetic
+animation without initializing ROS or accessing devices. The viewer only subscribes;
+it does not open serial ports, command motors or invoke calibration services.
+
+For unmounted sensors on a desk, use `--raw`: it shows independent I1/I2
+orientations, RPY and pitch histories with bridge validity diagnostics; knee
+angle remains uncalibrated. Both sensor orientations update atomically on a
+matching packet stamp, retaining the previous complete pair only until its
+original freshness deadline.
+
+### PR #34 数据质量与时间合同
+
+源header必须与节点ROS时钟同域；IMU `source_max_age_ms` 默认300ms且不得超过配对超时，
+迟到但合法的样本保留原年龄，未来/过期源不参与配对。
+估计质量或角度/速度校验失败时不发布控制JointState，立即发布诊断WARN，
+短暂恢复不能替代下游显式故障复位。原始姿态可视化不等于有效膝角控制输入。
+处理及未完成实机项见[审核记录](../../../docs/validation/2026-10-23-pr34-review.md)。

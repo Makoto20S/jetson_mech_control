@@ -205,6 +205,7 @@ if(BUILD_TESTING)
     test/test_controller_manager_integration.cpp
     test/test_velocity_controller_manager.cpp
     test/test_effort_controller_manager.cpp
+    test/test_dm4340_position_manager.cpp
   )
   target_compile_definitions(${PROJECT_NAME}_controller_manager_test PRIVATE
     MECH_BRINGUP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -274,6 +275,17 @@ if(BUILD_TESTING)
   ament_add_test(${PROJECT_NAME}_motor_backend_launch
     COMMAND "${Python3_EXECUTABLE}"
       ${CMAKE_CURRENT_SOURCE_DIR}/test/test_motor_backend_launch.py
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
+  ament_add_test(${PROJECT_NAME}_dm4310_launch
+    COMMAND "${Python3_EXECUTABLE}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/test_dm4310_launch.py
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+  ament_add_test(${PROJECT_NAME}_dm4310_range
+    COMMAND "${Python3_EXECUTABLE}"
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/validation/test_dm4310_range.py
     TIMEOUT 20
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
 

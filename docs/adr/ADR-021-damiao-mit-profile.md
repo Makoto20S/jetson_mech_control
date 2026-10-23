@@ -1,10 +1,10 @@
-# ADR-021：达妙 DM4340 MIT 协议档案
+# ADR-021：达妙 DM4340 / DM4310 MIT 协议档案
 
 - **Decision ID:** ADR-021
 - **Status:** Proposed
 - **Date:** 2026-10-13
 - **Owner:** 项目负责人（设备参数与实机授权待复核）
-- **Scope:** DM4340 MIT 协议、会话与独立 ros2_control 部署
+- **Scope:** DM4340 / 普通 DM4310 MIT 协议、会话与独立 ros2_control 部署
 
 ## Status rationale / 状态依据
 
@@ -30,9 +30,13 @@ standard-frame profile. Place wire conversion, mapping and session logic in
 `mech_protocol_damiao`, parallel to `mech_protocol_cubemars`. Reuse the core
 bus owner and generic controller interfaces in the production composition; never add a Damiao branch to CubeMars or the generic controller.
 
-The production slice selects exactly one command mode at startup: velocity
-or effort, paired with command_generation. Position commands are not exposed
-by Dm4340System. Each joint owns a separate MIT session; all joints on one
+The production slice selects exactly one command mode at startup: position, velocity
+or effort, paired with command_generation. The position slice reuses the generic
+PositionCommandController with fixed native MIT Kp/Kd and zero velocity/torque
+feedforward. Mode-specific gain/field validation, mapped target envelope and
+final-TX checks remain in the Damiao composition/session. See
+[position impedance](../development/dm4340_position_impedance.md) for units,
+nominal torque budgeting and software-only acceptance boundaries. Each joint owns a separate MIT session; all joints on one
 physical gateway share one runtime and one serial owner.
 Firmware identity/range, CAN IDs, motor type, encoder/gearbox mapping, target
 envelope and watchdog timing must be explicit. An SDK encoding range alone is
@@ -77,3 +81,22 @@ ARM64 历史联合构建和 ROS 速度台架结果见
 - [达妙官方 motor-sdk](https://github.com/dmBots/motor-sdk/blob/main/Python%E4%BE%8B%E7%A8%8B/u2can/DM_CAN.py)
 - [适配契约](../development/adapter_contract_v1.md)
 - [固定协议档案](ADR-004-fixed-protocol-profile.md)
+
+
+### Effort saturation refinement (2026-10-22; Proposed ADR unchanged)
+
+The effort runtime saturates finite per-joint requests before mapping. Sessions
+retain internal range rejection, and effort encoding constrains the quantized
+field inward to the mapped command cap. Invalid/stale/faulted requests remain
+errors. This does not limit native position PD or certify drive current limiting.
+See [resistance training](../development/resistance_training.md).
+
+### 普通 DM4310 profile 扩展（2026-10-22；仍为 Proposed）
+
+新增 `Dm4310MitStandard`，要求Classic标准帧，与DM4340复用同一MIT字段、
+session/runtime及硬件插件，保留插件历史类名。型号在配置期显式选择，不从帧自动猜测。
+普通DM4310 SDK参考编码范围12.5/30/10，不能套用DM4340的12.5/10/28，
+也不能把默认值声明为新设备读回证据。48V版不在本次profile部署范围内。
+新双机模板不预填固件证据或可用位置范围；启动入口加载端点内缩候选，将同一边界
+传入URDF、底层和位置控制器，证据声明及范围确认缺失时拒绝创建设备节点。
+见[位置限位设计与操作](../development/dm4310_position_limits.md)。

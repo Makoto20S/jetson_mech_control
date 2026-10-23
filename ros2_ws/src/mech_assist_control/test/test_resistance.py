@@ -2,6 +2,7 @@
 
 import math
 import sys
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -148,7 +149,7 @@ class FakeNode:
 
     def get_clock(self):
         return types.SimpleNamespace(now=lambda: types.SimpleNamespace(
-            to_msg=lambda: types.SimpleNamespace()))
+            nanoseconds=int(time.monotonic()*1e9), to_msg=lambda: types.SimpleNamespace()))
 
 
 class FakeStatus:
@@ -220,7 +221,8 @@ class ResistanceNodeTests(unittest.TestCase):
                                              'knee_control/reset'])
             with patch('mech_assist_control.node.time.monotonic',
                        return_value=1.0):
-                node._on_diagnostic(types.SimpleNamespace(status=[
+                node._on_diagnostic(types.SimpleNamespace(
+                    header=types.SimpleNamespace(stamp=types.SimpleNamespace(sec=1, nanosec=0)), status=[
                     types.SimpleNamespace(name='knee_kinematics',
                                           level=FakeStatus.OK)]))
                 node._on_knee(types.SimpleNamespace(
@@ -234,7 +236,8 @@ class ResistanceNodeTests(unittest.TestCase):
             self.assertLess(node.command_pub.messages[-1].data, 0)
             with patch('mech_assist_control.node.time.monotonic',
                        return_value=1.03):
-                node._on_diagnostic(types.SimpleNamespace(status=[]))
+                node._on_diagnostic(types.SimpleNamespace(
+                    header=types.SimpleNamespace(stamp=types.SimpleNamespace(sec=1, nanosec=0)), status=[]))
                 node._tick()
             self.assertEqual(node.command_pub.messages[-1].data, 0)
             self.assertEqual(node.diagnostic_pub.messages[-1].status[0].level,

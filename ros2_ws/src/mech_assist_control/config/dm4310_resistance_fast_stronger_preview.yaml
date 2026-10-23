@@ -1,0 +1,56 @@
+# Preview only. Pair with fast bringup: resistance_velocity_guard=false,
+# resistance_damping=24, resistance_buildup_nm_per_second=40.
+# 50 rad/s is current readback VMAX decoding validity, not a training speed trip.
+# C++ controller owns the damping/slew; these upper values are diagnostic metadata.
+exoskeleton_control:
+  ros__parameters:
+    actuator_joint_names:
+    - dm4310_motor1_joint
+    - dm4310_motor2_joint
+    allow_motor_output: false
+    controller_topics:
+    - /dm4310_motor1_effort_controller/enable
+    - /dm4310_motor2_effort_controller/enable
+    enforce_excursion_limit: false
+    feedback_topic: /joint_states
+    input_source: motor_encoder
+    joint_mapping_verified: false
+    joint_names:
+    - dm4310_motor1_joint
+    - dm4310_motor2_joint
+    joint_offsets:
+    - 0.0
+    - 0.0
+    joint_scales:
+    - 1.0
+    - 1.0
+    max_actuator_command:
+    - 8.0
+    - 8.0
+    max_command:
+    - 8.0
+    - 8.0
+    max_excursion_rad: 0.2
+    max_slew:
+    - 40.0
+    - 40.0
+    max_velocity:
+    - 50.0
+    - 50.0
+    output_mode: preview
+    policy: resistance_training
+    position_max:
+    - 12.5
+    - 12.5
+    position_min:
+    - -12.5
+    - -12.5
+    position_soft_margin_rad: 0.1
+    resistance_execution: controller
+    run_limit_s: 5.0
+    training_damping:
+    - 24.0
+    - 24.0
+    training_start_velocity_rad_s: 0.06
+    training_velocity_filter_tau_s: 0.025
+    velocity_deadband: 0.02

@@ -33,6 +33,6 @@ cleanup
 knee_pid=''
 
 for check in check_shadow_ros_graph.py check_gait_shadow_ros_graph.py \
-             check_architecture_ros_graph.py; do
+             check_architecture_ros_graph.py check_exoskeleton_ros_graph.py; do
   timeout 60s python3 "$script_dir/$check"
 done

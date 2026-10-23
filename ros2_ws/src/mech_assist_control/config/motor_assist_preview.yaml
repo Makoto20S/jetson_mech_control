@@ -1,0 +1,22 @@
+exoskeleton_control:
+  ros__parameters:
+    input_source: motor_encoder
+    policy: motion_assist
+    output_mode: preview
+    allow_motor_output: false
+    feedback_topic: /joint_states
+    # Software fixture only; replace with measured output-shaft name and bounds.
+    joint_names: [motor_joint]
+    position_min: [-3.14]
+    position_soft_margin_rad: 0.1  # rad; outward command cap falls near position bounds
+    position_max: [3.14]
+    max_velocity: [0.5]
+    max_command: [0.1]
+    max_slew: [0.2]
+    assist_gain: 0.3
+    assist_deadband: 0.04
+    assist_taper_speed: 0.3
+    assist_cutoff_speed: 0.5
+    assist_work_budget_j: 0.05
+    max_excursion_rad: 0.3
+    run_limit_s: 3.0

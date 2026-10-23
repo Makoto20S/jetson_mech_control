@@ -1,0 +1,26 @@
+# Shaft-coordinate software fixture, not measured wearable limits or motion authorization.
+exoskeleton_control:
+  ros__parameters:
+    input_source: motor_encoder
+    policy: resistance_training
+    output_mode: preview
+    allow_motor_output: false
+    joint_mapping_verified: false
+    feedback_topic: /joint_states
+    joint_names: [dm4340_motor1_joint, dm4340_motor2_joint]
+    actuator_joint_names: [dm4340_motor1_joint, dm4340_motor2_joint]
+    controller_topics: [/dm4340_motor1_effort_controller/target_effort, /dm4340_motor2_effort_controller/target_effort]
+    joint_scales: [1.0, 1.0]
+    joint_offsets: [0.0, 0.0]
+    training_damping: [1.0, 1.0]
+    training_velocity_filter_tau_s: 0.05
+    velocity_deadband: 0.02
+    max_command: [0.2, 0.2]
+    max_actuator_command: [0.2, 0.2]
+    max_slew: [0.5, 0.5]
+    max_velocity: [1.0, 1.0]
+    position_min: [-12.5, -12.5]
+    position_max: [12.5, 12.5]
+    position_soft_margin_rad: 0.1
+    max_excursion_rad: 0.5
+    run_limit_s: 5.0

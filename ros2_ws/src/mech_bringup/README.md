@@ -496,3 +496,42 @@ the owner's explicit per-test authorization.
 需要更明显、连续的观察时，使用 `--execute --follower-extended --operator-supervised`：目标范围 0--20 度、两个 4 秒周期，算法运行上限 9 秒，仍保持 0.48 rad 位移边界、2 rad/s 反馈速度边界和 1 秒持续零速收尾。2026-10-16 的一次空载实测轴位置范围为 8.7623--9.1072 rad（0.3449 rad，约 19.8 度），双向目标 -0.2593--0.2743 rad/s，结束后独立回读状态 0。此档位同样只验证电机轴模拟膝角闭环，不等同于人体膝角或穿戴控制。
 
 `--execute --follower-40deg --operator-supervised` 是单独的空载大幅度档位：40 度、三个 4 秒周期，运行上限 13 秒、位移边界 0.75 rad，其他反馈速度和零速收尾检查不变。2026-10-16 一次获准的台架实测轴位置 8.7505--9.4665 rad（0.7160 rad，约 41.0 度），双向速度目标 -0.5454--0.5723 rad/s，峰值反馈 0.5690 rad/s，停机后独立回读状态 0。该试验距离 0.75 rad 软件边界仅剩约 0.034 rad 的范围余量，不能据此继续增大角度或用于人体负载。
+
+## DM4340 双电机单总线
+
+`motor_backend_bringup.launch.py backend:=dm4340_dual` 提供同一网关/同一路 CAN
+的两个独立电机轴，支持 velocity 或 effort，默认硬件和控制器 inactive。
+逐轴 ID、坐标与限位、历史证据及实机验收流程见
+[双机部署说明](../../../docs/development/dm4340_dual_motor_bench.md)。
+
+达妙单机／双机也支持固定增益的位置阻抗模式，接口为 position + command_generation；
+配置、参数单位与软件／实机边界见[位置阻抗说明](../../../docs/development/dm4340_position_impedance.md)。
+
+当前保留原生MIT位置阻抗：`dm4340_command_mode:=position`。试验性主机阻抗插件与`impedance`启动选项已移除。
+
+
+双机effort可显式选择`dm4340_effort_profile:=torque8`，控制器／runtime命令上限±8N·m，
+反馈停机阈值8N·m，仍默认inactive。runtime对有限effort饱和，session保留独立拒绝，
+编码向限值内侧约束；不改变position语义或驱动器寄存器。详见
+[抗阻训练说明](../../../docs/development/resistance_training.md)。
+
+
+普通DM4310双机使用显式`dm4310_mit_standard`配置，复用现有Damiao会话/runtime/插件；
+`dm4310_dual_bringup.launch.py`从实测端点内缩文件同步加载控制器及下层位置范围。
+默认inactive、缺少证据或范围确认拒绝启动，不沿用DM4340的量程/固件/原点。
+见[DM4310位置限位](../../../docs/development/dm4310_position_limits.md)。
+
+## 可选抗阻快环
+
+新增通用 `ResistanceTrainingController`：借用位置/速度状态，在500 Hz目标更新周期计算有界反向力矩；
+Python只发送50 Hz许可。原有应用抗阻路径保留，快环需显式选择。
+参数、`resistance_training_fast`入口、许可TTL与下层保护边界见[抗阻快环说明](../../../docs/development/resistance_fast_loop.md)。
+软件及无设备回环已验证，新路径实机阻力与抖动尚未验收。
+
+## 固定位置阻抗（显式可选）
+
+新增 `mech_controllers/FixedPositionImpedanceController`：激活时固定编码器参考点，
+Jetson每次update计算K15/D0.5的PD力矩并饱和到±7N·m，内部MIT Kp/Kd=0。
+`dm4310_dual_bringup.launch.py fixed_position_impedance:=true`默认只做离线配置检查；
+真实分支仍默认inactive，没有自动使能。旧速度抗阻与原生位置模式保留。
+参数、STM32来源及验证边界见[固定位置阻抗说明](../../../docs/development/fixed_position_impedance.md)。

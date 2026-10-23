@@ -1,4 +1,33 @@
-# Knee control modes
+# Whole-exoskeleton application and compatibility entries
+
+`exoskeleton_control_node` is the new whole-robot application entry. The pure
+`robot/` modules separate immutable observations/commands, policies, supervision
+and controller routing. The ROS wrapper defaults to preview and never starts a
+serial bridge or activates hardware. See the
+[Chinese architecture and remaining work](../../../docs/development/exoskeleton_control_architecture.md).
+
+```bash
+ros2 launch mech_assist_control exoskeleton_preview.launch.py
+ros2 service call /exoskeleton/arm std_srvs/srv/Trigger '{}'
+ros2 topic echo /exoskeleton/command_envelope
+```
+
+Arm requires complete fresh calibrated joint data and healthy estimator diagnostics.
+One to six configured joints are supported by the application contract; the current
+estimator remains a single knee. Policies: `transparent`, `resistance`,
+`hold_velocity`. Higher algorithms implement the same `Policy` contract; insole
+and gait/adaptive assistance are not supplied by this entry. The preview launch
+has no motor mode argument and supplies no serial or device launch.
+
+Explicit motor compatibility output requires measured coordinate mapping, current
+actuator feedback and unique configured controller topics. Routing is independent
+of motor brand; existing C++ controllers and hardware gates remain authoritative.
+The diagnostic JSON envelope is versioned locally; the existing Float64 controller
+input does not yet transport its source sequence/deadline. Multi-topic publication
+is not an atomic multi-joint transaction. Physical stop must be checked independently.
+
+## Legacy single-knee entries
+
 
 `knee_control_node` is the preferred application entry point. It selects
 exactly one strategy at startup; `knee_motor_follow_node` remains an alias for
@@ -138,3 +167,55 @@ mapping, both IMUs fixed and physically calibrated, verified motor-side stop
 behavior, and the existing `mech_bringup` gates. This package never sets those
 gates or activates `dm4340_system`; do not treat simulated ROS messages as
 deployment evidence.
+
+## Desktop IMU bench entry
+
+`desk_imu_follow_node` is a separate preview-by-default bench application for
+unmounted IMUs. It maps relative-orientation change about standard Y to bounded
+velocity; it does not assert a motor-to-knee mechanical mapping. See the
+[Chinese bench design](../../../docs/development/desktop_imu_follow_bench.md)
+for fixed limits, lifecycle runner and per-session hardware gates. It neither
+replaces the calibrated knee application nor enables hardware by itself.
+
+### 无 IMU 阻力预览
+
+`ros2 launch mech_assist_control motor_resistance_preview.launch.py` 从 `/joint_states`
+读取电机输出轴编码器，显式 arm 后预览有死区的粘性阻尼力矩，不启动硬件或 IMU。
+配置示例的轴名、范围和限幅需按设备核对；默认不发布电机目标。
+详见[整机架构无 IMU 入口](../../../docs/development/exoskeleton_control_architecture.md#无-imu-电机阻力入口exo-arch-001)。
+
+### 无 IMU 轴运动助力预览
+
+`ros2 launch mech_assist_control motor_assist_preview.launch.py` 使用独立 motion_assist
+策略，按轴运动方向提供有限助力；死区静止归零、速度渐退/截止、指令做功预算和短时限约束。
+阻力配置保持原样。此模式没有人体意图识别，不能保证松手即停；默认仅预览，未做真实助力验收。
+参数与限制见[整机设计](../../../docs/development/exoskeleton_control_architecture.md#无-imu-轴运动助力motion_assist)。
+
+
+双轴无IMU抗阻训练：`policy=resistance_training`，预览入口
+`dual_motor_resistance_training_preview.launch.py`；逐轴阻尼、时间常数滤波、
+静止与反向卸力复用统一supervisor。参数与边界见
+[抗阻训练说明](../../../docs/development/resistance_training.md)。
+
+## 可选抗阻快环
+
+新增通用 `ResistanceTrainingController`：借用位置/速度状态，在500 Hz目标更新周期计算有界反向力矩；
+Python只发送50 Hz许可。原有应用抗阻路径保留，快环需显式选择。
+参数、`resistance_training_fast`入口、许可TTL与下层保护边界见[抗阻快环说明](../../../docs/development/resistance_fast_loop.md)。
+软件及无设备回环已验证，新路径实机阻力与抖动尚未验收。
+
+## 默认训练入口：位置阻抗训练
+
+`ros2 launch mech_assist_control motor_training_preview.launch.py` 默认选择
+`policy=impedance_training`，只做预览、默认不输出电机许可。
+统一上层监督新鲜度/范围/运行时长及显式arm；通用C++
+`FixedPositionImpedanceController` 负责固定参考PD和力矩限幅，上层只发0/1许可。
+原 `resistance_training` 及所有明确命名的速度抗阻配置保留。
+配置、后端配对与参考点生命周期见[位置阻抗训练](../../../docs/development/fixed_position_impedance.md)。
+
+## 规范分层入口（2026-10-23）
+
+上层选择模式、参考角度和K/D/力矩上限；C++唯一执行实时PD；hardware/runtime独立保护。
+固定位置控制器显式 `command_source=training_command` 接收原子8字段计划，旧enable台架入口保留且互斥。
+统一上层的其他Python反馈策略只允许离线预览，尚未迁移的模式不允许motor输出。
+完整字段、生命周期、默认参数和限制见[训练指令合同](../../../docs/development/training_command_contract.md)。

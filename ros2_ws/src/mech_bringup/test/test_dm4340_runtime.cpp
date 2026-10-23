@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -69,7 +70,7 @@ Dm4340RuntimeConfig config() {
 }
 
 RawCanFrame feedback(std::int64_t ns, std::uint8_t status = 1U,
-                     std::uint8_t motor_id = 2U) {
+                     std::uint8_t motor_id = 2U, std::uint32_t can_id = 0U) {
   std::array<std::uint8_t, kMaxCanPayloadBytes> bytes{};
   bytes[0] = static_cast<std::uint8_t>((status << 4U) | motor_id);
   bytes[1] = 0x7FU;
@@ -78,7 +79,7 @@ RawCanFrame feedback(std::int64_t ns, std::uint8_t status = 1U,
   bytes[4] = 0xF7U;
   bytes[5] = 0xFFU;
   return *RawCanFrame::create(
-      1U, *CanId::create(0U, CanFrameFormat::Standard),
+      1U, *CanId::create(can_id, CanFrameFormat::Standard),
       CanFrameType::Classic, FrameDirection::Rx, 8U, bytes, at(ns));
 }
 
@@ -243,6 +244,14 @@ TEST(Dm4340Runtime, PreservesFirstRejectedFeedbackStatus) {
   EXPECT_FALSE(f.runtime.read(&f.state, 1U));
   EXPECT_EQ(f.runtime.fault_reason(), Dm4340FaultReason::FeedbackRejected);
   EXPECT_EQ(f.runtime.rejected_status(), 9U);
+  ASSERT_TRUE(f.runtime.feedback_diagnostic());
+  EXPECT_EQ(f.runtime.feedback_diagnostic()->joint_index, 0U);
+  EXPECT_EQ(f.runtime.feedback_diagnostic()->rejected.reason,
+            mech::mech_protocol_damiao::DmFeedbackRejection::DeviceStatus);
+  EXPECT_TRUE(f.runtime.feedback_diagnostic()->rejected.decoded);
+  f.runtime.stop();
+  ASSERT_TRUE(f.runtime.feedback_diagnostic()); // Survives session cleanup.
+
   EXPECT_FALSE(f.runtime.read(&f.state, 1U));
   EXPECT_EQ(f.runtime.fault_reason(), Dm4340FaultReason::FeedbackRejected);
 }
@@ -250,12 +259,15 @@ TEST(Dm4340Runtime, PreservesFirstRejectedFeedbackStatus) {
 TEST(Dm4340Runtime, DisabledFeedbackTriggersOneExplicitEnable) {
   Fixture f;
   f.start();
+  EXPECT_FALSE(f.runtime.fresh_feedback_status(0U));
+  EXPECT_FALSE(f.runtime.fresh_feedback_status(1U));
   EXPECT_FALSE(f.runtime.adopt_or_enable_from_feedback());
   f.now = 1000000;
   ASSERT_EQ(f.transport.inject_receive(feedback(f.now, 0U)),
             TransportResult::Ok);
   ASSERT_TRUE(f.runtime.read(&f.state, 1U));
   ASSERT_TRUE(f.runtime.has_fresh_ready_feedback());
+  EXPECT_EQ(f.runtime.fresh_feedback_status(0U), 0U);
   RawCanFrame sent{};
   ASSERT_TRUE(f.transport.take_transmit(sent));
   EXPECT_EQ(sent.id.value, 0x7FFU);
@@ -271,7 +283,9 @@ TEST(Dm4340Runtime, DisabledFeedbackTriggersOneExplicitEnable) {
             TransportResult::Ok);
   ASSERT_TRUE(f.runtime.read(&f.state, 1U));
   EXPECT_TRUE(f.runtime.has_valid_sample());
+  EXPECT_EQ(f.runtime.fresh_feedback_status(0U), 1U);
   f.runtime.stop();
+  EXPECT_FALSE(f.runtime.fresh_feedback_status(0U));
   ASSERT_TRUE(f.transport.take_transmit(sent));
   EXPECT_EQ(sent.id.value, 2U);
   EXPECT_EQ(sent.payload[7], 0xFDU);
@@ -380,6 +394,76 @@ TEST(Dm4340Runtime, OtherMotorOnSharedFeedbackIdIsIgnored) {
   EXPECT_TRUE(f.runtime.has_valid_sample());
 }
 
+TEST(Dm4340Runtime, HistoricalDualIdsRequireBothCanAndPayloadRouting) {
+  auto c = config();
+  c.joints[0].command_can_id = 1U;
+  c.joints[0].motor_id = 1U;
+  c.joints[0].feedback_can_id = 4U;
+  auto second = c.joints[0];
+  second.command_can_id = 2U;
+  second.motor_id = 2U;
+  second.feedback_can_id = 5U;
+  c.joints.push_back(second);
+  FakeTransport transport{32U};
+  BusOwnershipRegistry ownership;
+  std::int64_t now = 0;
+  Dm4340Runtime runtime{transport, [&now] { return at(now); }, c, ownership};
+  ASSERT_TRUE(runtime.configure(2U));
+  ASSERT_TRUE(runtime.start());
+  CanonicalState states[2]{};
+  ASSERT_TRUE(runtime.read(states, 2U));
+  RawCanFrame sent{};
+  while (transport.take_transmit(sent)) {}
+  now = 1000000;
+  // Correct CAN ID with the wrong embedded motor ID cannot make either axis fresh.
+  ASSERT_EQ(transport.inject_receive(feedback(now, 1U, 2U, 4U)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states, 2U));
+  EXPECT_FALSE(runtime.has_valid_sample());
+  ++now;
+  ASSERT_EQ(transport.inject_receive(feedback(now, 1U, 2U, 5U)), TransportResult::Ok);
+  ++now;
+  ASSERT_EQ(transport.inject_receive(feedback(now, 1U, 1U, 4U)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states, 2U));
+  ASSERT_TRUE(runtime.has_valid_sample());
+  CommandDispatch commands[2]{};
+  commands[1].authorized = commands[1].fresh = true;
+  commands[1].command.velocity = -0.2;
+  ASSERT_TRUE(runtime.write(commands, 2U));
+  ASSERT_TRUE(runtime.read(states, 2U));
+  ASSERT_TRUE(transport.take_transmit(sent));
+  EXPECT_EQ(sent.id.value, 2U);
+  EXPECT_FALSE(transport.take_transmit(sent));
+  runtime.stop();
+}
+
+TEST(Dm4340Runtime, StaggersDualQueriesWithoutRelaxingFeedbackDeadline) {
+  auto c = config();
+  c.stagger_status_queries = true;
+  auto second = c.joints[0]; second.command_can_id=3U; second.motor_id=3U;
+  c.joints.push_back(second);
+  FakeTransport transport{32U}; BusOwnershipRegistry ownership;
+  std::int64_t now=0;
+  Dm4340Runtime runtime{transport,[&now]{return at(now);},c,ownership};
+  ASSERT_TRUE(runtime.configure(2U)); ASSERT_TRUE(runtime.start());
+  CanonicalState states[2]{}; RawCanFrame sent{};
+  ASSERT_TRUE(runtime.read(states,2U));
+  ASSERT_TRUE(transport.take_transmit(sent)); EXPECT_EQ(sent.payload[0],2U);
+  EXPECT_FALSE(transport.take_transmit(sent));
+  now=9000000; ASSERT_TRUE(runtime.read(states,2U));
+  EXPECT_FALSE(transport.take_transmit(sent));
+  now=10000000; ASSERT_TRUE(runtime.read(states,2U));
+  ASSERT_TRUE(transport.take_transmit(sent)); EXPECT_EQ(sent.payload[0],3U);
+  EXPECT_FALSE(transport.take_transmit(sent));
+  ASSERT_EQ(transport.inject_receive(feedback(now,1U,2U)),TransportResult::Ok);
+  ASSERT_EQ(transport.inject_receive(feedback(now,1U,3U)),TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states,2U));
+  now=20000000; ASSERT_TRUE(runtime.read(states,2U));
+  ASSERT_TRUE(transport.take_transmit(sent)); EXPECT_EQ(sent.payload[0],2U);
+  EXPECT_FALSE(transport.take_transmit(sent));
+  now=60000000; EXPECT_FALSE(runtime.read(states,2U));
+  EXPECT_EQ(runtime.fault_reason(),Dm4340FaultReason::FeedbackExpired);
+}
+
 TEST(Dm4340Runtime, TwoMotorsShareOneBusWithoutCrossCommand) {
   auto c = config();
   auto second = c.joints[0];
@@ -480,6 +564,10 @@ TEST(Dm4340Runtime, FaultOnOneMotorHaltsBothOnSharedBus) {
   ASSERT_EQ(transport.inject_receive(feedback(now, 9U, 3U)),
             TransportResult::Ok);
   EXPECT_FALSE(runtime.read(states, 2U));
+  ASSERT_TRUE(runtime.feedback_diagnostic());
+  EXPECT_EQ(runtime.feedback_diagnostic()->joint_index, 1U);
+  EXPECT_EQ(runtime.feedback_diagnostic()->rejected.frame.payload[0], 0x93U);
+
   for (const std::uint32_t id : {2U, 3U}) {
     ASSERT_TRUE(transport.take_transmit(sent));
     EXPECT_EQ(sent.id.value, id);
@@ -530,6 +618,138 @@ TEST(Dm4340Runtime, HardDeadlineNeutralizesAndDisables) {
   ASSERT_TRUE(f.transport.take_transmit(sent));
   EXPECT_EQ(sent.payload[7], 0xFDU);
   EXPECT_FALSE(f.runtime.has_valid_sample());
+}
+
+TEST(Dm4340Runtime, Dual120SecondReplayAndInjectedDeadlineStopBothAxes) {
+  FakeTransport transport{64U};
+  BusOwnershipRegistry ownership;
+  auto c = config();
+  c.stagger_status_queries = true;
+  c.joints.push_back(c.joints.front());
+  c.joints[0].motor_id = 1U;
+  c.joints[0].command_can_id = 1U;
+  std::int64_t now = 0;
+  Dm4340Runtime runtime{transport, [&] { return at(now); }, c, ownership};
+  ASSERT_TRUE(runtime.configure(2U));
+  ASSERT_TRUE(runtime.start());
+  CanonicalState states[2]{};
+  CommandDispatch commands[2]{};
+  for (auto& command : commands) {
+    command.authorized = true;
+    command.fresh = true;
+  }
+  RawCanFrame frame{};
+  std::size_t motion_frames = 0U;
+  // 60000 deterministic 2ms steps, not 120 seconds of wall-clock scheduling.
+  for (std::int64_t cycle = 0; cycle < 60000; ++cycle) {
+    now = 1000000 + cycle * 2000000;
+    for (const auto id : {1U, 2U})
+      ASSERT_EQ(transport.inject_receive(feedback(now, 1U, id)), TransportResult::Ok);
+    ASSERT_TRUE(runtime.read(states, 2U)) << cycle;
+    const auto phase = cycle % 5000;
+    for (auto& command : commands)
+      command.command.velocity = phase < 1500 ? -0.8 :
+                                 phase >= 2500 && phase < 4000 ? 0.8 : 0.0;
+    ASSERT_TRUE(runtime.write(commands, 2U)) << cycle;
+    ASSERT_TRUE(runtime.read(states, 2U)) << cycle;
+    while (transport.take_transmit(frame))
+      if (frame.id.value != 0x7FFU) ++motion_frames;
+  }
+  EXPECT_EQ(motion_frames, 120000U);
+  EXPECT_FALSE(runtime.deadline_diagnostic());
+  now += 6500000;
+  EXPECT_FALSE(runtime.read(states, 2U));
+  ASSERT_TRUE(runtime.deadline_diagnostic());
+  const auto snapshot = *runtime.deadline_diagnostic();
+  EXPECT_EQ(snapshot.joint_index, 0U);
+  EXPECT_FALSE(snapshot.during_write);
+  EXPECT_EQ(snapshot.command_age_ns, 6500000);
+  EXPECT_EQ(snapshot.overdue_ns, 500000);
+  EXPECT_EQ(snapshot.read_gap_ns, 6500000);
+  EXPECT_EQ(snapshot.read_work_ns, 0);
+  EXPECT_EQ(snapshot.tx_age_ns, 6500000);
+  std::size_t disables = 0U;
+  while (transport.take_transmit(frame))
+    if (frame.id.value != 0x7FFU && frame.payload[7] == 0xFDU) ++disables;
+  EXPECT_EQ(disables, 2U);
+  // New commands cannot erase the old fault or the diagnostic, even after stop.
+  EXPECT_FALSE(runtime.write(commands, 2U));
+  runtime.stop();
+  ASSERT_TRUE(runtime.deadline_diagnostic());
+  EXPECT_EQ(runtime.deadline_diagnostic()->overdue_ns, snapshot.overdue_ns);
+  ASSERT_TRUE(runtime.start());
+  EXPECT_FALSE(runtime.deadline_diagnostic());
+}
+
+TEST(Dm4340Runtime, DeadlineDiagnosticIdentifiesStaleSecondAxisDuringWrite) {
+  FakeTransport transport{64U};
+  BusOwnershipRegistry ownership;
+  auto c = config();
+  c.joints.push_back(c.joints.front());
+  c.joints[0].motor_id = 1U;
+  c.joints[0].command_can_id = 1U;
+  std::int64_t now = 1000000;
+  Dm4340Runtime runtime{transport, [&] { return at(now); }, c, ownership};
+  ASSERT_TRUE(runtime.configure(2U));
+  ASSERT_TRUE(runtime.start());
+  CanonicalState states[2]{};
+  for (const auto id : {1U, 2U})
+    ASSERT_EQ(transport.inject_receive(feedback(now, 1U, id)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(states, 2U));
+  CommandDispatch commands[2]{};
+  for (auto& command : commands) {
+    command.authorized = true;
+    command.fresh = true;
+    command.command.velocity = 0.8;
+  }
+  ASSERT_TRUE(runtime.write(commands, 2U));
+  ASSERT_TRUE(runtime.read(states, 2U));
+  now += 2000000;
+  commands[1].fresh = false;
+  ASSERT_TRUE(runtime.write(commands, 2U));
+  now += 4000000;
+  commands[1].fresh = true;
+  EXPECT_FALSE(runtime.write(commands, 2U));
+  ASSERT_TRUE(runtime.deadline_diagnostic());
+  const auto& d = *runtime.deadline_diagnostic();
+  EXPECT_EQ(d.joint_index, 1U);
+  EXPECT_TRUE(d.during_write);
+  EXPECT_EQ(d.command_age_ns, 6000000);
+  EXPECT_EQ(d.overdue_ns, 0);
+  EXPECT_EQ(d.write_gap_ns, 4000000);
+  EXPECT_EQ(d.tx_age_ns, 6000000);
+}
+
+TEST(Dm4340Runtime, DeadlineDiagnosticSeparatesReadWorkFromEntryGap) {
+  FakeTransport transport{32U};
+  BusOwnershipRegistry ownership;
+  std::int64_t now = 1000000;
+  bool delay_inside_read = false;
+  unsigned clock_calls = 0U;
+  Dm4340Runtime runtime{transport, [&] {
+    if (delay_inside_read && ++clock_calls == 2U) now += 6000000;
+    return at(now);
+  }, config(), ownership};
+  ASSERT_TRUE(runtime.configure(1U));
+  ASSERT_TRUE(runtime.start());
+  CanonicalState state{};
+  ASSERT_EQ(transport.inject_receive(feedback(now)), TransportResult::Ok);
+  ASSERT_TRUE(runtime.read(&state, 1U));
+  CommandDispatch command{};
+  command.authorized = command.fresh = true;
+  command.command.velocity = 0.8;
+  ASSERT_TRUE(runtime.write(&command, 1U));
+  ASSERT_TRUE(runtime.read(&state, 1U));
+  now += 2000000;
+  delay_inside_read = true;
+  // No status query due and no RX packets: second clock call follows receive.
+  EXPECT_FALSE(runtime.read(&state, 1U));
+  ASSERT_TRUE(runtime.deadline_diagnostic());
+  const auto& d = *runtime.deadline_diagnostic();
+  EXPECT_EQ(d.read_gap_ns, 2000000);
+  EXPECT_EQ(d.read_work_ns, 6000000);
+  EXPECT_EQ(d.command_age_ns, 8000000);
+  EXPECT_EQ(d.overdue_ns, 2000000);
 }
 
 TEST(Dm4340Runtime, ClaimReleaseDisablesAndRequiresNewEpoch) {
@@ -605,3 +825,167 @@ TEST(Dm4340Runtime, StaleFeedbackStopsMotion) {
   EXPECT_FALSE(f.runtime.has_valid_sample());
 }
 }  // namespace
+
+TEST(Dm4340Runtime, PositionViolationDisablesWithoutApplicationForBothModes) {
+  for (const bool effort : {false,true}) {
+    auto c=config();c.joints[0].position_min_rad=-1;c.joints[0].position_max_rad=1;
+    if (effort) {
+      c.command_mode=Dm4340CommandMode::Effort;
+      c.joints[0].kd=0;c.joints[0].max_command_velocity_rad_s=0;
+      c.joints[0].max_command_effort_nm=.3;
+    }
+    FakeTransport transport{32};BusOwnershipRegistry ownership;std::int64_t now=0;
+    Dm4340Runtime runtime(transport,[&]{return at(now);},c,ownership);
+    ASSERT_TRUE(runtime.configure(1));ASSERT_TRUE(runtime.start());
+    CanonicalState state{};
+    now=1000000;ASSERT_EQ(transport.inject_receive(feedback(now)),TransportResult::Ok);
+    ASSERT_TRUE(runtime.read(&state,1));
+    RawCanFrame sent{};while(transport.take_transmit(sent)) {}
+    CommandDispatch command{};command.authorized=true;command.fresh=true;
+    if(effort)command.command.effort=.1;else command.command.velocity=.1;
+    ASSERT_TRUE(runtime.write(&command,1));ASSERT_TRUE(runtime.read(&state,1));
+    while(transport.take_transmit(sent)) {}
+    now+=1000000;auto sample=feedback(now);sample.payload[1]=0xFF;sample.payload[2]=0xFF;
+    ASSERT_EQ(transport.inject_receive(sample),TransportResult::Ok);
+    EXPECT_FALSE(runtime.read(&state,1));
+    EXPECT_EQ(runtime.fault_reason(),Dm4340FaultReason::FeedbackRejected);
+    bool disabled=false;
+    while(transport.take_transmit(sent))
+      if(sent.id.value==2 && sent.payload[7]==0xFD)disabled=true;
+    EXPECT_TRUE(disabled);
+    EXPECT_FALSE(runtime.write(&command,1));
+  }
+}
+
+namespace {
+
+Dm4340RuntimeConfig position_config() {
+  auto c=config(); c.command_mode=Dm4340CommandMode::Position;
+  c.joints[0].kp=1; c.joints[0].kd=.2;
+  c.joints[0].max_command_velocity_rad_s=0;
+  return c;
+}
+
+TEST(Dm4340Runtime, PositionImpedanceValidatesGainsAndWorstCaseNominalTorque) {
+  for (int bad=0;bad<5;++bad) {
+    auto c=position_config();
+    if(bad==0) c.joints[0].kp=0;
+    if(bad==1) c.joints[0].kd=0;
+    if(bad==2) c.joints[0].kp=100;
+    if(bad==3) c.joints[0].velocity_feedforward_nm=.1;
+    if(bad==4) c.joints[0].max_command_effort_nm=.1;
+    FakeTransport tx; BusOwnershipRegistry ownership;
+    Dm4340Runtime rt{tx,[]{return at(0);},c,ownership};
+    EXPECT_FALSE(rt.configure(1)); EXPECT_FALSE(tx.is_open());
+  }
+}
+
+TEST(Dm4340Runtime, DualPositionImpedanceRoutesIndependentTargetsAndStopsGroupOnBadTarget) {
+  auto c=position_config();
+  auto second=c.joints[0]; second.command_can_id=1; second.motor_id=1;
+  second.joint.scale=-1; c.joints.push_back(second);
+  FakeTransport tx{64}; BusOwnershipRegistry ownership; std::int64_t now=0;
+  Dm4340Runtime rt{tx,[&]{return at(now);},c,ownership};
+  ASSERT_TRUE(rt.configure(2)); ASSERT_TRUE(rt.start());
+  CanonicalState state[2]{};
+  now=1000000;
+  ASSERT_EQ(tx.inject_receive(feedback(now,1,2)),TransportResult::Ok);
+  ASSERT_EQ(tx.inject_receive(feedback(now,1,1)),TransportResult::Ok);
+  ASSERT_TRUE(rt.read(state,2));
+  RawCanFrame out{}; while(tx.take_transmit(out)) {}
+  CommandDispatch cmd[2]{};
+  for(auto& x:cmd) {x.authorized=true;x.fresh=true;}
+  cmd[0].command.position=.1; cmd[1].command.position=-.15;
+  ASSERT_TRUE(rt.write(cmd,2)); ASSERT_TRUE(rt.read(state,2));
+  for(int i=0;i<2;++i) {
+    ASSERT_TRUE(tx.take_transmit(out)); EXPECT_EQ(out.id.value,c.joints[i].command_can_id);
+    const auto p=static_cast<unsigned>((out.payload[0]<<8)|out.payload[1]);
+    const double motor_position=p*25.0/65535-.0-12.5;
+    EXPECT_NEAR(motor_position,i==0?.1:.15,25.0/65535);
+    EXPECT_EQ(((out.payload[3]&0xf)<<8)|out.payload[4],8U); // Kp=1
+    EXPECT_EQ((out.payload[5]<<4)|(out.payload[6]>>4),163U); // Kd=.2
+  }
+  EXPECT_FALSE(tx.take_transmit(out));
+  now+=2000000; cmd[1].command.position=1; // > .3rad target error
+  ASSERT_TRUE(rt.write(cmd,2)); EXPECT_FALSE(rt.read(state,2));
+  EXPECT_EQ(rt.fault_reason(),Dm4340FaultReason::CommandPreparation);
+  int disables=0; while(tx.take_transmit(out)) if(out.payload[7]==0xfd) ++disables;
+  EXPECT_EQ(disables,2);
+}
+
+TEST(Dm4340Runtime, PositionImpedanceKeepsLeaseExpiryAndRejectsOtherCommandFields) {
+  for(bool expired:{false,true}) {
+    auto c=position_config(); FakeTransport tx{32}; BusOwnershipRegistry ownership;
+    std::int64_t now=0; Dm4340Runtime rt{tx,[&]{return at(now);},c,ownership};
+    ASSERT_TRUE(rt.configure(1)); ASSERT_TRUE(rt.start());
+    now=1000000; CanonicalState state{};
+    ASSERT_EQ(tx.inject_receive(feedback(now)),TransportResult::Ok);
+    ASSERT_TRUE(rt.read(&state,1));
+    CommandDispatch cmd{};cmd.authorized=true;cmd.fresh=true;cmd.command.position=.1;
+    if(!expired) cmd.command.velocity=.1;
+    if(expired) {
+      ASSERT_TRUE(rt.write(&cmd,1)); ASSERT_TRUE(rt.read(&state,1));
+      now+=6000000; // A new target cannot hide an expired prior lease.
+    }
+    EXPECT_FALSE(rt.write(&cmd,1));
+    EXPECT_EQ(rt.fault_reason(),expired?Dm4340FaultReason::CommandDeadline:Dm4340FaultReason::CommandRejected);
+  }
+}
+
+}  // namespace
+
+TEST(Dm4340Runtime, DualEffortSaturatesBeforeMappingAndKeepsFaultProtection) {
+  FakeTransport transport{128U};
+  BusOwnershipRegistry ownership;
+  std::int64_t now=0;
+  auto c=config();
+  c.command_mode=Dm4340CommandMode::Effort;
+  c.joints[0].kd=0;
+  c.joints[0].max_command_velocity_rad_s=0;
+  c.joints[0].max_command_effort_nm=8;
+  c.joints[0].max_feedback_torque_nm=8;
+  c.joints.push_back(c.joints[0]);
+  c.joints[1].command_can_id=3;
+  c.joints[1].motor_id=3;
+  c.joints[1].joint.scale=-2;
+  c.joints[1].max_command_effort_nm=3;
+  Dm4340Runtime runtime{transport,[&]{return at(now);},c,ownership};
+  ASSERT_TRUE(runtime.configure(2));
+  ASSERT_TRUE(runtime.start());
+  now=1000000;
+  ASSERT_EQ(transport.inject_receive(feedback(now)),TransportResult::Ok);
+  ASSERT_EQ(transport.inject_receive(feedback(now,1,3)),TransportResult::Ok);
+  CanonicalState states[2]{};
+  ASSERT_TRUE(runtime.read(states,2));
+  RawCanFrame sent{};
+  while(transport.take_transmit(sent)) {}
+  CommandDispatch commands[2]{};
+  for(auto& command:commands){command.authorized=true;command.fresh=true;}
+  for(double request : {10.0,-10.0,1e300}) {
+    for(auto& command:commands)command.command.effort=request;
+    ASSERT_TRUE(runtime.write(commands,2));
+    ASSERT_TRUE(runtime.read(states,2));
+    unsigned seen=0;
+    while(transport.take_transmit(sent)) {
+      if(sent.id.value!=2 && sent.id.value!=3)continue;
+      ++seen;
+      const auto axis=sent.id.value==2?0U:1U;
+      const auto code=((sent.payload[6]&15U)<<8U)|sent.payload[7];
+      const double motor=code*56.0/4095.0-28.0;
+      const double joint=motor/c.joints[axis].joint.scale;
+      const double cap=c.joints[axis].max_command_effort_nm;
+      EXPECT_LE(std::abs(joint),cap+1e-12);
+      EXPECT_NEAR(joint,request>0?cap:-cap,56.0/4095.0);
+      EXPECT_EQ(sent.payload[3]&15U,0U); // Kp=0
+      EXPECT_EQ(sent.payload[4],0U);
+      EXPECT_EQ(sent.payload[5],0U); // Kd=0
+      EXPECT_EQ(sent.payload[6]&240U,0U);
+    }
+    EXPECT_EQ(seen,2U);
+    EXPECT_EQ(runtime.fault_reason(),Dm4340FaultReason::None);
+    now+=1000000;
+  }
+  commands[0].command.effort=std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(runtime.write(commands,2));
+  EXPECT_EQ(runtime.fault_reason(),Dm4340FaultReason::CommandRejected);
+}

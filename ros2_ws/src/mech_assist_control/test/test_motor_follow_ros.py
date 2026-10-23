@@ -124,6 +124,7 @@ class MotorFollowRosTests(unittest.TestCase):
                     motor.velocity = [0.0]
                     motor_pub.publish(motor)
                     diagnostic = DiagnosticArray()
+                    diagnostic.header.stamp = probe.get_clock().now().to_msg()
                     status = DiagnosticStatus()
                     status.name = 'knee_kinematics'
                     status.level = DiagnosticStatus.OK

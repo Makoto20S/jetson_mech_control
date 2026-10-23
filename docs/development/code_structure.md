@@ -15,9 +15,18 @@
 | 部署组合 | `mech_bringup` | Ak30System、Ak30ServoSystem、Dm4340System、品牌运行时及 URDF/YAML/launch；负责生命周期与物理设备组合 |
 | 传感器 ROS 接入 | `mech_ctrboard_bridge` | 只接收桥、标准消息与诊断；不发布电机目标 |
 | 膝角/观察 | `mech_knee_kinematics` | 纯估计核心、ROS 标定节点、面板、影子策略和离线模型 |
-| 应用策略 | `mech_assist_control` | 纯策略与 ROS 包装分离；速度跟随或阻力，默认预览 |
+| 应用策略 | `mech_assist_control` | 整机合同/策略/监督/路由与ROS包装分离；保留单关节入口，默认预览 |
 | 模拟与故障注入 | `mech_simulation` | 虚拟时钟、FakeTransport 与确定性故障路径 |
 | 操作/验证工具 | `tools/bench`、`tools/validation` | 有界台架脚本与合成 ROS 图检查；不由默认构建自动执行实机操作 |
+
+## 整机应用入口
+
+[EXO-ARCH-001整机控制框架](exoskeleton_control_architecture.md)是当前应用层实施入口。
+`mech_assist_control/robot/`按合同、策略、监督、路由分文件；`robot_node.py`适配ROS。
+默认 `exoskeleton_preview.launch.py`不启动串口桥或电机manager。
+已配置的关节经统一状态进入策略，命令需经新鲜度、标定、包络和输出路由检查。
+策略不判断电机品牌；底层厂商适配保持并列，机械映射和支持接口必须显式配置。
+原有单关节/桌面入口保留用于历史复现，不充当整机调度器。
 
 ## 两条独立数据流
 
@@ -45,9 +54,9 @@ flowchart TD
 - 每个物理串口由一个插件拥有。串口在配置和清空缓冲前取得非阻塞 advisory flock，
   防止框架内两个进程争用；外部程序必须配合锁约定，锁不取代物理总线调度。
 - `seven_channel_gateway.hpp` 统一电机网关参数构造，位速率未知时保持未知。
-- `Dm4340System` 在启动时固定 velocity 或 effort，每个接口都与
+- `Dm4340System` 在启动时固定 position、velocity 或 effort，每个接口都与
   `command_generation` 整组申领/释放；同一网关最多六个达妙关节共享一条运行时。
-- `dm4340_runtime.*` 统一承载 velocity 与 effort，旧 velocity 头仅保留类型别名；配置中的
+- `dm4340_runtime.*` 统一承载 position、velocity 与 effort，旧 velocity 头仅保留类型别名；配置中的
   `Dm4340CommandMode` 决定模式，不同时暴露两种写入口。
 - CubeMars 和达妙用同一启动入口互斥选择，不能同时打开同一串口，也尚不支持
   在一个网关内混合两种品牌的运行时。
@@ -91,7 +100,7 @@ MECH_SKIP_ROSDEP=1 MECH_OUTPUT_ROOT=/tmp/mech-validation \
 bash tools/validation/run_sensor_ros_checks.sh /tmp/mech-validation/install/setup.bash
 ```
 
-该入口自动启动合成输入需要的膝角节点，顺序检查四张 ROS 图并清理进程；
+该入口自动启动合成输入需要的膝角节点，顺序检查五张 ROS 图并清理进程；
 不启动传感器串口桥或电机硬件。直接执行 `check_knee_ros_graph.py` 则要求
 调用方预先启动同参数的膝角节点。
 
@@ -102,3 +111,20 @@ bash tools/validation/run_sensor_ros_checks.sh /tmp/mech-validation/install/setu
 
 压力话题字段存在不证明鞋垫已接入；完整传感器驱动电机闭环、关节映射计量、
 断联保护及穿戴负载均不能由离线测试推定通过。
+
+当前位置阻抗保留原生MIT模式：通用PositionCommandController发送限斜率位置目标，
+厂商适配层编码Kp/Kd，由电机内部计算弹簧与阻尼。试验性主机PD插件已移除。
+
+## 可选抗阻快环
+
+新增通用 `ResistanceTrainingController`：借用位置/速度状态，在500 Hz目标更新周期计算有界反向力矩；
+Python只发送50 Hz许可。原有应用抗阻路径保留，快环需显式选择。
+参数、`resistance_training_fast`入口、许可TTL与下层保护边界见[抗阻快环说明](resistance_fast_loop.md)。
+软件及无设备回环已验证，新路径实机阻力与抖动尚未验收。
+
+### 当前控制权边界
+
+统一上层的固定位置阻抗通过 `training_command` 一帧给出参考/K/D/cap/许可；
+`mech_controllers` 独占实时控制律，hardware/runtime独立执行最终保护。
+Python策略中的反馈计算仅作离线参考，统一节点拒绝其motor输出。
+字段和迁移限制见[训练指令合同](training_command_contract.md)。

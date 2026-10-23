@@ -1,0 +1,30 @@
+# DM4310 8 Nm command cap; preview only. Load current measured shaft bounds before output.
+exoskeleton_control:
+  ros__parameters:
+    input_source: motor_encoder
+    policy: resistance_training
+    output_mode: preview
+    allow_motor_output: false
+    joint_mapping_verified: false
+    feedback_topic: /joint_states
+    joint_names: [dm4310_motor1_joint, dm4310_motor2_joint]
+    actuator_joint_names: [dm4310_motor1_joint, dm4310_motor2_joint]
+    controller_topics: [/dm4310_motor1_effort_controller/target_effort, /dm4310_motor2_effort_controller/target_effort]
+    joint_scales: [1.0, 1.0]
+    joint_offsets: [0.0, 0.0]
+    training_damping: [4.0, 4.0]
+    # STM32 alpha=0.15 at 1 ms: tau=-0.001/log(0.85).
+    training_velocity_filter_tau_s: 0.0061531294
+    velocity_deadband: 0.02
+    max_command: [8.0, 8.0]
+    max_actuator_command: [8.0, 8.0]
+    # Buildup only; decreasing resistance/rest/reversal unload immediately.
+    # This stronger candidate requires a new reviewed physical test envelope.
+    max_slew: [20.0, 20.0]
+    max_velocity: [1.0, 1.0]
+    position_min: [-12.5, -12.5]
+    position_max: [12.5, 12.5]
+    position_soft_margin_rad: 0.1
+    enforce_excursion_limit: false
+    max_excursion_rad: 0.2  # Ignored while enforce_excursion_limit is false.
+    run_limit_s: 5.0

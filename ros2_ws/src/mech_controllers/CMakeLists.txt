@@ -23,6 +23,8 @@ add_library(${PROJECT_NAME} SHARED
   src/single_joint_command_controller.cpp
   src/velocity_command_controller.cpp
   src/effort_command_controller.cpp
+  src/resistance_training_controller.cpp
+  src/fixed_position_impedance_controller.cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -41,6 +43,8 @@ add_library(${PROJECT_NAME}_plugin SHARED
   src/position_command_controller_plugin.cpp
   src/velocity_command_controller_plugin.cpp
   src/effort_command_controller_plugin.cpp
+  src/resistance_training_controller_plugin.cpp
+  src/fixed_position_impedance_controller_plugin.cpp
 )
 target_link_libraries(${PROJECT_NAME}_plugin ${PROJECT_NAME})
 ament_target_dependencies(${PROJECT_NAME}_plugin controller_interface pluginlib)
@@ -69,9 +73,13 @@ if(BUILD_TESTING)
     test/test_position_command_controller.cpp
     test/test_velocity_command_controller.cpp
     test/test_effort_command_controller.cpp
+    test/test_resistance_training_controller.cpp
+    test/test_fixed_position_impedance_controller.cpp
     test/test_package_marker.cpp
   )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME})
+  add_executable(resistance_controller_replay test/resistance_controller_replay.cpp)
+  target_link_libraries(resistance_controller_replay ${PROJECT_NAME})
   # The plugin-level tests stand up a real rclcpp node to exercise the
   # ~/target_position subscription, which under -fsanitize=address trips a
   # mismatch inside ROS 2 itself: rcutils_string_map_init() allocates 72 bytes

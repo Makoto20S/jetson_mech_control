@@ -74,7 +74,7 @@ int main() {
     return 5;
   }
   auto healthy = *frame;
-  healthy.payload[0] = 0x01U;
+  healthy.payload[0] = 0x11U;  // Position commands require enabled status.
   healthy.host_arrival = t1;
   if (session.accept_feedback(healthy, t1) != AdapterResult::Ok ||
       session.prepare_position(target, t1, prepared) != AdapterResult::Ok ||

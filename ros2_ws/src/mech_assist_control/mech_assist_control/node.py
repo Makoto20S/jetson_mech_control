@@ -72,6 +72,7 @@ class KneeControlNode(Node):
             raise ValueError('invalid simulated travel limit')
         self.last_knee_stamp = 0
         self.last_motor_stamp = 0
+        self.last_diagnostic_stamp = 0
         self.sim_motor_zero = None
         if self.resistance_mode:
             self.control = ResistanceLogic(ResistanceConfig(
@@ -121,6 +122,14 @@ class KneeControlNode(Node):
         return SetParametersResult(
             successful=False, reason='restart knee control to change configuration')
 
+    def _source_time(self, msg, previous, timeout):
+        stamp = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        age = (self.get_clock().now().nanoseconds - stamp) / 1e9
+        if stamp <= previous or not 0 <= age <= timeout:
+            raise ValueError('replayed, stale or future source timestamp')
+        # TTL is measured from source creation, not executor delivery.
+        return stamp, time.monotonic() - age
+
     def _on_knee(self, msg):
         if 'knee_joint' not in msg.name:
             return
@@ -128,13 +137,13 @@ class KneeControlNode(Node):
         if index >= len(msg.position) or index >= len(msg.velocity):
             self.control._fault('incomplete knee joint state')
             return
-        stamp = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
-        if stamp <= self.last_knee_stamp:
-            self.control._fault('missing or repeated knee sample timestamp')
+        try:
+            self.last_knee_stamp, sampled_at = self._source_time(msg, self.last_knee_stamp, .3)
+        except ValueError as error:
+            self.control._fault(str(error))
             return
-        self.last_knee_stamp = stamp
         self.control.update_knee(msg.position[index], msg.velocity[index],
-                                 time.monotonic())
+                                 time.monotonic(), sampled_at=sampled_at)
 
     def _on_motor(self, msg):
         if self.motor_joint_name not in msg.name:
@@ -143,12 +152,11 @@ class KneeControlNode(Node):
         if index >= len(msg.position) or index >= len(msg.velocity):
             self.control._fault('incomplete motor joint state')
             return
-        stamp = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
-        if stamp <= self.last_motor_stamp:
-            self.control._fault('missing or repeated motor feedback timestamp')
+        try:
+            self.last_motor_stamp, now = self._source_time(msg, self.last_motor_stamp, .1)
+        except ValueError as error:
+            self.control._fault(str(error))
             return
-        self.last_motor_stamp = stamp
-        now = time.monotonic()
         position = msg.position[index]
         velocity = msg.velocity[index]
         if self.selected_mode == 'resistance_motor':
@@ -166,14 +174,19 @@ class KneeControlNode(Node):
                 self.control._fault('simulated trial displacement limit exceeded')
                 return
             self.control.update_diagnostic(True, now)
-            self.control.update_knee(position - self.sim_motor_zero, velocity, now)
+            self.control.update_knee(position - self.sim_motor_zero, velocity,
+                                     time.monotonic(), sampled_at=now)
 
     def _on_diagnostic(self, msg):
-        status = next((item for item in msg.status
-                       if item.name == 'knee_kinematics'), None)
+        try:
+            self.last_diagnostic_stamp, sampled_at = self._source_time(
+                msg, self.last_diagnostic_stamp, .3)
+        except ValueError as error:
+            self.control._fault(str(error))
+            return
+        status = next((item for item in msg.status if item.name == 'knee_kinematics'), None)
         self.control.update_diagnostic(
-            status is not None and status.level == DiagnosticStatus.OK,
-            time.monotonic())
+            status is not None and status.level == DiagnosticStatus.OK, sampled_at)
 
     def _arm(self, request, response):
         del request

@@ -33,6 +33,7 @@ struct Dm4340MitSessionConfig final {
   JointPositionMap joint{};
   double position_min_rad{0.0};
   double position_max_rad{0.0};
+  double position_guard_margin_rad{0.02};  // Reject outward velocity/effort near hard bounds.
   double max_target_error_rad{0.0};
   double kp{0.0};
   double kd{0.0};
@@ -60,6 +61,26 @@ struct Dm4340MitSnapshot final {
   std::uint8_t raw_fault{0U};
   std::uint64_t sequence{0U};
   std::optional<mech_control_core::MonotonicTime> host_rx_time;
+};
+
+enum class DmFeedbackRejection : std::uint8_t {
+  Route, Decode, DeviceStatus, LatchedFault, Velocity, Torque, TimeOrder,
+  Expired, Position
+};
+[[nodiscard]] const char* dm_feedback_rejection_name(DmFeedbackRejection reason) noexcept;
+
+// Diagnostic only: never exported as valid control state. Fixed-size first failure.
+struct DmFeedbackDiagnostic final {
+  DmFeedbackRejection reason{DmFeedbackRejection::Decode};
+  mech_control_core::RawCanFrame frame{};
+  bool decoded{false};
+  double motor_position_rad{std::numeric_limits<double>::quiet_NaN()};
+  double joint_position_rad{std::numeric_limits<double>::quiet_NaN()};
+  double velocity_rad_s{std::numeric_limits<double>::quiet_NaN()};
+  double torque_nm{std::numeric_limits<double>::quiet_NaN()};
+  bool velocity_exceeded{false};
+  bool torque_exceeded{false};
+  std::int64_t age_ns{-1};
 };
 
 // Offline, single-device position session. No Transport and no enable command.
@@ -96,8 +117,13 @@ class Dm4340MitSession final {
       mech_control_core::MonotonicTime now) const noexcept;
   [[nodiscard]] bool fault_latched() const noexcept { return fault_latched_; }
 
+  [[nodiscard]] const std::optional<DmFeedbackDiagnostic>&
+  feedback_diagnostic() const noexcept { return feedback_diagnostic_; }
+
  private:
+  std::optional<DmFeedbackDiagnostic> feedback_diagnostic_;
   void clear_prepared() noexcept;
+  bool outward_allowed(double position, double command) const noexcept;
 
   Dm4340MitSessionConfig config_{};
   bool configured_{false};
@@ -111,7 +137,10 @@ class Dm4340MitSession final {
   std::optional<mech_control_core::MonotonicTime> last_deadline_;
   double last_prepared_joint_position_rad_{
       std::numeric_limits<double>::quiet_NaN()};
+  // Historical mode discriminator: true selects velocity/effort directional
+  // checks, false selects position-error checks. All modes now require enabled.
   bool last_prepared_requires_enabled_{false};
+  double last_prepared_direction_{0.0};
 };
 
 }  // namespace mech::mech_protocol_damiao

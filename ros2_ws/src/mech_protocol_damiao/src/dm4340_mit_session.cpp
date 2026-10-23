@@ -1,5 +1,6 @@
 #include "mech_protocol_damiao/dm4340_mit_session.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -12,8 +13,8 @@ using mech_control_core::AdapterResult;
 using mech_control_core::MonotonicTime;
 
 bool valid_config(const Dm4340MitSessionConfig& c) noexcept {
-  return c.profile ==
-             mech_control_core::ProtocolProfile::Dm4340MitStandard &&
+  return (c.profile == mech_control_core::ProtocolProfile::Dm4340MitStandard ||
+          c.profile == mech_control_core::ProtocolProfile::Dm4310MitStandard) &&
       c.logical_bus != 0U && c.command_can_id != 0U &&
       c.command_can_id <= mech_control_core::kMaxStandardCanId &&
       c.feedback_can_id <= mech_control_core::kMaxStandardCanId &&
@@ -28,6 +29,9 @@ bool valid_config(const Dm4340MitSessionConfig& c) noexcept {
       std::isfinite(c.position_min_rad) &&
       std::isfinite(c.position_max_rad) &&
       c.position_min_rad < c.position_max_rad &&
+      std::isfinite(c.position_guard_margin_rad) &&
+      c.position_guard_margin_rad > 0.0 &&
+      2.0*c.position_guard_margin_rad < c.position_max_rad-c.position_min_rad &&
       std::isfinite(c.max_target_error_rad) &&
       c.max_target_error_rad > 0.0 &&
       std::isfinite(c.kp) && c.kp >= 0.0 && c.kp <= 500.0 &&
@@ -39,6 +43,8 @@ bool valid_config(const Dm4340MitSessionConfig& c) noexcept {
       c.max_command_velocity_rad_s <= c.limits.velocity_rad_s &&
       std::isfinite(c.max_command_effort_nm) &&
       c.max_command_effort_nm >= 0.0 &&
+      (c.max_command_effort_nm == 0.0 ||
+       c.max_command_effort_nm * std::abs(c.joint.scale) >= c.limits.torque_nm / 4095.0) &&
       c.max_command_effort_nm * std::abs(c.joint.scale) <= c.limits.torque_nm &&
       std::isfinite(c.max_feedback_velocity_rad_s) &&
       c.max_feedback_velocity_rad_s >= 0.0 &&
@@ -70,6 +76,21 @@ void invalidate_values(Dm4340MitSnapshot& sample) noexcept {
 
 }  // namespace
 
+const char* dm_feedback_rejection_name(DmFeedbackRejection reason) noexcept {
+  switch (reason) {
+    case DmFeedbackRejection::Route: return "route";
+    case DmFeedbackRejection::Decode: return "decode";
+    case DmFeedbackRejection::DeviceStatus: return "device_status";
+    case DmFeedbackRejection::LatchedFault: return "latched_fault";
+    case DmFeedbackRejection::Velocity: return "velocity";
+    case DmFeedbackRejection::Torque: return "torque";
+    case DmFeedbackRejection::TimeOrder: return "time_order";
+    case DmFeedbackRejection::Expired: return "expired";
+    case DmFeedbackRejection::Position: return "position";
+  }
+  return "unknown";
+}
+
 AdapterResult Dm4340MitSession::configure(
     const Dm4340MitSessionConfig& config) noexcept {
   if (active_ || !valid_config(config)) {
@@ -80,6 +101,7 @@ AdapterResult Dm4340MitSession::configure(
   fault_latched_ = false;
   last_arrival_.reset();
   sample_ = {};
+  feedback_diagnostic_.reset();
   last_generation_ = 0U;
   clear_prepared();
   return AdapterResult::Ok;
@@ -94,6 +116,7 @@ AdapterResult Dm4340MitSession::activate(MonotonicTime epoch_start) noexcept {
   epoch_start_ = epoch_start;
   last_arrival_.reset();
   sample_ = {};
+  feedback_diagnostic_.reset();
   last_generation_ = 0U;
   clear_prepared();
   return AdapterResult::Ok;
@@ -104,6 +127,7 @@ void Dm4340MitSession::deactivate() noexcept {
   fault_latched_ = false;
   last_arrival_.reset();
   sample_ = {};
+  feedback_diagnostic_.reset();
   last_generation_ = 0U;
   clear_prepared();
 }
@@ -113,12 +137,22 @@ AdapterResult Dm4340MitSession::accept_feedback(
   if (!active_) {
     return AdapterResult::InvalidConfiguration;
   }
+  DmFeedbackDiagnostic diagnostic{};
+  diagnostic.frame = frame;
+  const auto reject = [this, &diagnostic](DmFeedbackRejection reason) {
+    if (!feedback_diagnostic_) {
+      diagnostic.reason = reason;
+      feedback_diagnostic_ = diagnostic;
+    }
+  };
   if (frame.logical_bus != config_.logical_bus ||
       frame.id.format != mech_control_core::CanFrameFormat::Standard ||
       frame.id.value != config_.feedback_can_id) {
+    reject(DmFeedbackRejection::Route);
     return AdapterResult::InvalidCommand;
   }
   const auto age = mech_control_core::elapsed_since(frame.host_arrival, now);
+  diagnostic.age_ns = age ? age->nanoseconds() : -1;
   const bool ordered = epoch_start_ <= frame.host_arrival && age &&
       (!last_arrival_ || *last_arrival_ <= frame.host_arrival);
   if (ordered) {
@@ -129,25 +163,38 @@ AdapterResult Dm4340MitSession::accept_feedback(
                            config_.feedback_can_id, config_.motor_id,
                            config_.limits, decoded)) {
     clear_prepared();
+    reject(DmFeedbackRejection::Decode);
     sample_.availability = DmFeedbackAvailability::Invalid;
     invalidate_values(sample_);
     return AdapterResult::InvalidCommand;
   }
+  const double joint_position = decoded.position_rad * config_.joint.scale +
+      config_.joint.offset_rad;
+  diagnostic.decoded = true;
+  diagnostic.motor_position_rad = decoded.position_rad;
+  diagnostic.joint_position_rad = joint_position;
+  diagnostic.velocity_rad_s = decoded.velocity_rad_s;
+  diagnostic.torque_nm = decoded.torque_nm;
+  diagnostic.velocity_exceeded = config_.max_feedback_velocity_rad_s > 0.0 &&
+      std::abs(decoded.velocity_rad_s) > config_.max_feedback_velocity_rad_s;
+  diagnostic.torque_exceeded = config_.max_feedback_torque_nm > 0.0 &&
+      std::abs(decoded.torque_nm) > config_.max_feedback_torque_nm;
   if (!feedback_status_ok(decoded.raw_fault)) {
     clear_prepared();
     fault_latched_ = true;
     sample_.availability = DmFeedbackAvailability::Fault;
+    reject(DmFeedbackRejection::DeviceStatus);
     sample_.raw_fault = decoded.raw_fault;
     invalidate_values(sample_);
     return AdapterResult::Fault;
   }
   if (fault_latched_) {
+    reject(DmFeedbackRejection::LatchedFault);
     return AdapterResult::Fault;
   }
-  if ((config_.max_feedback_velocity_rad_s > 0.0 &&
-       std::abs(decoded.velocity_rad_s) > config_.max_feedback_velocity_rad_s) ||
-      (config_.max_feedback_torque_nm > 0.0 &&
-       std::abs(decoded.torque_nm) > config_.max_feedback_torque_nm)) {
+  if (diagnostic.velocity_exceeded || diagnostic.torque_exceeded) {
+    reject(diagnostic.velocity_exceeded ? DmFeedbackRejection::Velocity
+                                        : DmFeedbackRejection::Torque);
     clear_prepared();
     fault_latched_ = true;
     sample_.availability = DmFeedbackAvailability::Fault;
@@ -155,16 +202,18 @@ AdapterResult Dm4340MitSession::accept_feedback(
     return AdapterResult::Fault;
   }
   if (!ordered || age->nanoseconds() >= config_.feedback_ttl_ns) {
+    reject(!ordered ? DmFeedbackRejection::TimeOrder : DmFeedbackRejection::Expired);
     clear_prepared();
     sample_.availability = DmFeedbackAvailability::Stale;
     invalidate_values(sample_);
     return AdapterResult::Stale;
   }
-  const double joint_position = decoded.position_rad * config_.joint.scale +
-      config_.joint.offset_rad;
+
   if (!std::isfinite(joint_position) ||
       joint_position < config_.position_min_rad ||
       joint_position > config_.position_max_rad) {
+    reject(DmFeedbackRejection::Position);
+    fault_latched_ = true;
     clear_prepared();
     sample_.availability = DmFeedbackAvailability::Invalid;
     invalidate_values(sample_);
@@ -216,7 +265,8 @@ AdapterResult Dm4340MitSession::prepare_position(
     return AdapterResult::Stale;
   }
   const auto ttl = mech_control_core::elapsed_since(now, command.deadline);
-  if (!std::isfinite(command.position) ||
+  if (!feedback_motor_enabled(state.raw_fault) ||
+      !std::isfinite(command.position) ||
       !std::isfinite(command.velocity) ||
       !std::isfinite(command.effort) || command.velocity != 0.0 ||
       command.effort != 0.0 || command.generation == 0U ||
@@ -261,6 +311,8 @@ AdapterResult Dm4340MitSession::prepare_position(
   if (!std::isfinite(quantized_joint) ||
       quantized_joint < config_.position_min_rad ||
       quantized_joint > config_.position_max_rad ||
+      !outward_allowed(state.joint_position_rad,
+                       quantized_joint - state.joint_position_rad) ||
       std::abs(quantized_joint - state.joint_position_rad) >
           config_.max_target_error_rad) {
     clear_prepared();
@@ -297,11 +349,13 @@ AdapterResult Dm4340MitSession::prepare_velocity(
     return AdapterResult::InvalidCommand;
   }
   const auto ttl = mech_control_core::elapsed_since(now, command.deadline);
-  if (!std::isfinite(command.position) || command.position != 0.0 ||
+  if (!feedback_motor_enabled(state.raw_fault) ||
+      !std::isfinite(command.position) || command.position != 0.0 ||
       !std::isfinite(command.velocity) || !std::isfinite(command.effort) ||
       command.effort != 0.0 || command.generation == 0U ||
       command.generation <= last_generation_ || !ttl ||
       ttl->nanoseconds() == 0 || ttl->nanoseconds() > config_.command_ttl_ns ||
+      (!outward_allowed(state.joint_position_rad, command.velocity)) ||
       std::abs(command.velocity) >
           config_.max_command_velocity_rad_s * std::abs(config_.joint.scale)) {
     clear_prepared();
@@ -334,6 +388,7 @@ AdapterResult Dm4340MitSession::prepare_velocity(
   last_prepared_ = output;
   last_deadline_ = command.deadline;
   last_prepared_requires_enabled_ = true;
+  last_prepared_direction_ = command.velocity;
   return AdapterResult::Ok;
 }
 
@@ -360,10 +415,12 @@ AdapterResult Dm4340MitSession::prepare_effort(
     return AdapterResult::InvalidCommand;
   }
   const auto ttl = mech_control_core::elapsed_since(now, command.deadline);
-  if (!std::isfinite(command.position) || command.position != 0.0 ||
+  if (!feedback_motor_enabled(state.raw_fault) ||
+      !std::isfinite(command.position) || command.position != 0.0 ||
       !std::isfinite(command.velocity) || command.velocity != 0.0 ||
       !std::isfinite(command.effort) ||
       std::abs(command.effort) > config_.max_command_effort_nm ||
+      !outward_allowed(state.joint_position_rad, command.effort) ||
       command.generation == 0U || command.generation <= last_generation_ ||
       !ttl || ttl->nanoseconds() == 0 ||
       ttl->nanoseconds() > config_.command_ttl_ns) {
@@ -377,6 +434,19 @@ AdapterResult Dm4340MitSession::prepare_effort(
     clear_prepared();
     return AdapterResult::InvalidCommand;
   }
+  // MIT truncation can encode a negative boundary one LSB beyond the limit.
+  // Bound the actual 12-bit field inward, in motor coordinates, after mapping.
+  const double motor_limit = config_.max_command_effort_nm * std::abs(config_.joint.scale);
+  const double range = config_.limits.torque_nm;
+  const auto lower = static_cast<unsigned>(std::ceil((range - motor_limit) * 4095.0 / (2.0 * range)));
+  const auto upper = static_cast<unsigned>(std::floor((range + motor_limit) * 4095.0 / (2.0 * range)));
+  if (lower > upper) {  // No representable value fits this requested limit.
+    clear_prepared();
+    return AdapterResult::InvalidConfiguration;
+  }
+  const auto code = std::clamp(static_cast<unsigned>(((packed[6] & 0x0FU) << 8U) | packed[7]), lower, upper);
+  packed[6] = static_cast<std::uint8_t>((packed[6] & 0xF0U) | (code >> 8U));
+  packed[7] = static_cast<std::uint8_t>(code & 0xFFU);
   std::array<std::uint8_t, mech_control_core::kMaxCanPayloadBytes> payload{};
   for (std::size_t i = 0U; i < packed.size(); ++i) payload[i] = packed[i];
   const auto frame = mech_control_core::RawCanFrame::create(
@@ -394,6 +464,7 @@ AdapterResult Dm4340MitSession::prepare_effort(
   last_prepared_ = output;
   last_deadline_ = command.deadline;
   last_prepared_requires_enabled_ = true;
+  last_prepared_direction_ = command.effort;
   return AdapterResult::Ok;
 }
 
@@ -408,13 +479,18 @@ bool Dm4340MitSession::pending_target_still_authorized(
     return false;
   }
   const auto state = snapshot(now);
+  if (!feedback_motor_enabled(state.raw_fault)) return false;
   if (!last_prepared_requires_enabled_ &&
       (!std::isfinite(last_prepared_joint_position_rad_) ||
+       !outward_allowed(state.joint_position_rad,
+                        last_prepared_joint_position_rad_ - state.joint_position_rad) ||
        std::abs(last_prepared_joint_position_rad_ -
                 state.joint_position_rad) > config_.max_target_error_rad)) {
     return false;
   }
-  if (last_prepared_requires_enabled_ && !feedback_motor_enabled(state.raw_fault))
+  if (last_prepared_requires_enabled_ &&
+      (!feedback_motor_enabled(state.raw_fault) ||
+       !outward_allowed(state.joint_position_rad, last_prepared_direction_)))
     return false;
   const auto& expected = *last_prepared_;
   if (!frame.is_valid() || frame.logical_bus != expected.logical_bus ||
@@ -430,7 +506,14 @@ bool Dm4340MitSession::pending_target_still_authorized(
   return frame.payload == expected.payload;
 }
 
+bool Dm4340MitSession::outward_allowed(double position, double command) const noexcept {
+  return std::isfinite(position) && std::isfinite(command) &&
+      !(command > 0.0 && position >= config_.position_max_rad-config_.position_guard_margin_rad) &&
+      !(command < 0.0 && position <= config_.position_min_rad+config_.position_guard_margin_rad);
+}
+
 void Dm4340MitSession::clear_prepared() noexcept {
+  last_prepared_direction_ = 0.0;
   last_prepared_.reset();
   last_deadline_.reset();
   last_prepared_requires_enabled_ = false;

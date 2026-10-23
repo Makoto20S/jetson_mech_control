@@ -58,18 +58,19 @@ class ResistanceLogic:
         if self.state == 'armed' and not healthy:
             self._fault('knee diagnostic unhealthy')
 
-    def update_knee(self, angle_rad, velocity_rad_s, now):
+    def update_knee(self, angle_rad, velocity_rad_s, now, sampled_at=None):
+        sample_time = now if sampled_at is None else sampled_at
         c = self.config
         if (not all(math.isfinite(value) for value in
-                    (angle_rad, velocity_rad_s, now)) or
+                    (angle_rad, velocity_rad_s, now, sample_time)) or sample_time > now or
                 not c.angle_min_rad <= angle_rad <= c.angle_max_rad or
                 abs(velocity_rad_s) > c.max_velocity_rad_s or
-                (self.sample is not None and now <= self.sample[2])):
+                (self.sample is not None and sample_time <= self.sample[2])):
             self.sample = None
             if self.state == 'armed':
                 self._fault('invalid or nonmonotonic knee sample')
             return
-        self.sample = (angle_rad, velocity_rad_s, now)
+        self.sample = (angle_rad, velocity_rad_s, sample_time)
 
     def _fresh(self, now):
         return (self.sample is not None and self.diagnostic_ok and

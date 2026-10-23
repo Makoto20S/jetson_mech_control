@@ -81,13 +81,14 @@ class MotorFollowLogic:
         mapped_angle = self.scale * self.motor[0] + self.offset
         return abs(mapped_angle - math.radians(self.knee.angle_deg)) <= self.max_mismatch_rad
 
-    def update_knee(self, angle_rad, velocity_rad_s, now):
+    def update_knee(self, angle_rad, velocity_rad_s, now, sampled_at=None):
+        sample_time = now if sampled_at is None else sampled_at
         if not all(math.isfinite(value) for value in
-                   (angle_rad, velocity_rad_s, now)):
+                   (angle_rad, velocity_rad_s, now, sample_time)) or sample_time > now:
             if self.state == 'armed':
                 self._fault('invalid knee measurement')
             return
-        self.knee = Measurement(now, math.degrees(angle_rad),
+        self.knee = Measurement(sample_time, math.degrees(angle_rad),
                                 math.degrees(velocity_rad_s), True)
         if self.state != 'armed':
             return

@@ -1,0 +1,10 @@
+knee_kinematics:
+  ros__parameters:
+    imu_1_topic: imu/imu1/data
+    imu_2_topic: imu/imu2/data
+    basis_mapping: hipnuc
+    flexion_sign: -1
+    static_seconds: 1.5
+    motion_seconds: 6.0
+    pair_timeout_ms: 300.0
+    max_pair_delay_ms: 60.0

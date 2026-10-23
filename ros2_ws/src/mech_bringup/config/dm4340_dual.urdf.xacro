@@ -1,0 +1,129 @@
+<?xml version="1.0"?>
+<!-- Dual shaft bench example, not a calibrated wearable model. Current feedback routes read back on 2026-10-21; verify after hardware changes. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="dm4340_dual">
+  <xacro:arg name="device_path" default="/dev/ttyACM1"/>
+  <xacro:arg name="motor_side_timeout_verified" default="false"/>
+  <xacro:arg name="board_version_verified" default="false"/>
+  <xacro:arg name="can_bitrate_verified" default="false"/>
+  <xacro:arg name="joint_mapping_verified" default="false"/>
+  <xacro:arg name="enable_on_activate" default="false"/>
+  <xacro:arg name="velocity_feedforward_nm" default="0"/>
+  <xacro:arg name="velocity_kd" default="3"/>
+  <xacro:arg name="effort_limit_nm" default="0.1"/>
+  <xacro:arg name="feedback_torque_limit_nm" default="5"/>
+  <xacro:arg name="command_mode" default="velocity"/>
+  <xacro:arg name="supervised_effort_bench" default="false"/>
+  <xacro:property name="dm_command_mode" value="$(arg command_mode)"/>
+  <xacro:property name="dm_velocity_kd" value="$(arg velocity_kd)"/>
+  <xacro:arg name="motor1_command_can_id" default="1"/>
+  <xacro:arg name="motor1_motor_id" default="1"/>
+  <xacro:arg name="motor1_feedback_can_id" default="0"/>
+  <xacro:arg name="motor1_firmware_id" default="5010107"/>
+  <xacro:arg name="motor1_joint_scale" default="1"/>
+  <xacro:arg name="motor1_joint_offset_rad" default="0"/>
+  <xacro:arg name="motor1_position_min_rad" default="-12.5"/>
+  <xacro:arg name="motor1_position_max_rad" default="12.5"/>
+  <xacro:arg name="motor1_position_kp" default="1"/>
+  <xacro:arg name="motor1_position_kd" default="0.2"/>
+  <xacro:arg name="motor1_max_target_error_rad" default="0.3"/>
+  <xacro:arg name="motor1_position_guard_margin_rad" default="0.02"/>
+  <xacro:arg name="motor2_command_can_id" default="2"/>
+  <xacro:arg name="motor2_motor_id" default="2"/>
+  <xacro:arg name="motor2_feedback_can_id" default="0"/>
+  <xacro:arg name="motor2_firmware_id" default="5010107"/>
+  <xacro:arg name="motor2_joint_scale" default="1"/>
+  <xacro:arg name="motor2_joint_offset_rad" default="0"/>
+  <xacro:arg name="motor2_position_min_rad" default="-12.5"/>
+  <xacro:arg name="motor2_position_max_rad" default="12.5"/>
+  <xacro:arg name="motor2_position_kp" default="1"/>
+  <xacro:arg name="motor2_position_kd" default="0.2"/>
+  <xacro:arg name="motor2_max_target_error_rad" default="0.3"/>
+  <xacro:arg name="motor2_position_guard_margin_rad" default="0.02"/>
+  <xacro:macro name="dm_axis" params="name command_id feedback_id motor_id firmware scale offset lower upper margin position_kp position_kd target_error">
+    <joint name="${name}">
+      <param name="command_can_id">${command_id}</param>
+      <param name="feedback_can_id">${feedback_id}</param>
+      <param name="motor_id">${motor_id}</param>
+      <param name="firmware_id">${firmware}</param>
+      <param name="firmware_min">${firmware}</param>
+      <param name="firmware_max">${firmware}</param>
+      <param name="firmware_evidence_declared">true</param>
+      <param name="limit_position_rad">12.5</param>
+      <param name="limit_velocity_rad_s">10</param>
+      <param name="limit_torque_nm">28</param>
+      <param name="limits_evidence_declared">true</param>
+      <param name="joint_scale">${scale}</param>
+      <param name="joint_offset_rad">${offset}</param>
+      <param name="joint_mapping_verified">$(arg joint_mapping_verified)</param>
+      <param name="position_min_rad">${lower}</param>
+      <param name="position_max_rad">${upper}</param>
+      <param name="position_guard_margin_rad">${margin}</param>
+      <param name="max_target_error_rad">${target_error}</param>
+      <param name="kp">${position_kp if dm_command_mode == 'position' else 0}</param>
+      <param name="kd">${0 if dm_command_mode == 'effort' else (position_kd if dm_command_mode == 'position' else dm_velocity_kd)}</param>
+      <param name="velocity_feedforward_nm">$(arg velocity_feedforward_nm)</param>
+      <param name="max_command_velocity_rad_s">${0 if dm_command_mode != 'velocity' else 0.3}</param>
+      <param name="max_feedback_velocity_rad_s">2</param>
+      <param name="max_feedback_torque_nm">$(arg feedback_torque_limit_nm)</param>
+      <xacro:if value="${dm_command_mode == 'effort'}">
+        <xacro:if value="$(arg supervised_effort_bench)">
+          <param name="max_command_effort_nm">$(arg effort_limit_nm)</param>
+        </xacro:if>
+        <xacro:unless value="$(arg supervised_effort_bench)">
+          <param name="max_command_effort_nm">$(arg effort_limit_nm)</param>
+        </xacro:unless>
+        <command_interface name="effort"/>
+      </xacro:if>
+      <xacro:if value="${dm_command_mode == 'velocity'}">
+        <command_interface name="velocity"/>
+      </xacro:if>
+      <xacro:if value="${dm_command_mode == 'position'}">
+        <command_interface name="position"/>
+      </xacro:if>
+      <command_interface name="command_generation"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+  <link name="world"/>
+  <link name="dm4340_motor1_link"/>
+  <joint name="dm4340_motor1_joint" type="revolute">
+    <parent link="world"/><child link="dm4340_motor1_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="$(arg motor1_position_min_rad)" upper="$(arg motor1_position_max_rad)" effort="28" velocity="10"/>
+  </joint>
+  <link name="dm4340_motor2_link"/>
+  <joint name="dm4340_motor2_joint" type="revolute">
+    <parent link="world"/><child link="dm4340_motor2_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="$(arg motor2_position_min_rad)" upper="$(arg motor2_position_max_rad)" effort="28" velocity="10"/>
+  </joint>
+  <ros2_control name="dm4340_system" type="system">
+    <hardware>
+      <plugin>mech_bringup/Dm4340System</plugin>
+      <xacro:if value="$(arg supervised_effort_bench)">
+        <param name="profile">dm4340_mit_supervised_effort_bench</param>
+      </xacro:if>
+      <xacro:unless value="$(arg supervised_effort_bench)">
+        <param name="profile">dm4340_mit_standard</param>
+      </xacro:unless>
+      <param name="device_path">$(arg device_path)</param>
+      <param name="logical_bus">1</param>
+      <param name="control_period_ns">2000000</param>
+      <param name="command_ttl_ns">4000000</param>
+      <param name="command_hard_ttl_ns">6000000</param>
+      <param name="feedback_ttl_ns">40000000</param>
+      <param name="query_period_ns">20000000</param>
+      <param name="motor_side_timeout_verified">$(arg motor_side_timeout_verified)</param>
+      <param name="enable_on_activate">$(arg enable_on_activate)</param>
+      <param name="board_version_major">4</param>
+      <param name="board_version_minor">8</param>
+      <param name="board_version_patch">8</param>
+      <param name="board_version_verified">$(arg board_version_verified)</param>
+      <param name="can_bitrate_verified">$(arg can_bitrate_verified)</param>
+    </hardware>
+    <xacro:dm_axis name="dm4340_motor1_joint" command_id="$(arg motor1_command_can_id)" feedback_id="$(arg motor1_feedback_can_id)" motor_id="$(arg motor1_motor_id)" firmware="$(arg motor1_firmware_id)" scale="$(arg motor1_joint_scale)" offset="$(arg motor1_joint_offset_rad)" lower="$(arg motor1_position_min_rad)" upper="$(arg motor1_position_max_rad)" margin="$(arg motor1_position_guard_margin_rad)" position_kp="$(arg motor1_position_kp)" position_kd="$(arg motor1_position_kd)" target_error="$(arg motor1_max_target_error_rad)"/>
+    <xacro:dm_axis name="dm4340_motor2_joint" command_id="$(arg motor2_command_can_id)" feedback_id="$(arg motor2_feedback_can_id)" motor_id="$(arg motor2_motor_id)" firmware="$(arg motor2_firmware_id)" scale="$(arg motor2_joint_scale)" offset="$(arg motor2_joint_offset_rad)" lower="$(arg motor2_position_min_rad)" upper="$(arg motor2_position_max_rad)" margin="$(arg motor2_position_guard_margin_rad)" position_kp="$(arg motor2_position_kp)" position_kd="$(arg motor2_position_kd)" target_error="$(arg motor2_max_target_error_rad)"/>
+  </ros2_control>
+</robot>
