@@ -7,15 +7,15 @@
 
 | 层 | 包或目录 | 职责与边界 |
 |---|---|---|
-| 通用传输/运行时 | `mech_control_core` | 原始帧、路由、快照、命令租约、BusRuntime、SocketCAN、USB-CDC 和 POSIX 串口；不认识电机品牌 |
-| 协议 | `mech_protocol_cubemars`、`mech_protocol_damiao` | 各自的 wire codec、映射和 session；AK3.0 力控/伺服与 DM4340 MIT 的 codec/session；只准备候选命令，不自行拥有串口 |
-| 传感器协议 | `mech_protocol_ctrboard` | 分片、CRC 和遥测载荷解析 |
-| 通用硬件接口 | `mech_hardware_ros2_control` | CompositeSystem 与 RuntimePort 契约 |
+| 应用策略 | `mech_assist_control` | 整机合同/策略/监督/路由与ROS包装分离；保留单关节入口，默认预览 |
 | 通用控制器 | `mech_controllers` | 位置、速度、力矩控制器；边界、斜率、上游目标有效期，不判断电机品牌 |
+| 通用硬件接口 | `mech_hardware_ros2_control` | CompositeSystem 与 RuntimePort 契约 |
 | 部署组合 | `mech_bringup` | Ak30System、Ak30ServoSystem、Dm4340System、品牌运行时及 URDF/YAML/launch；负责生命周期与物理设备组合 |
+| 协议 | `mech_protocol_cubemars`、`mech_protocol_damiao` | 各自的 wire codec、映射和 session；AK3.0 力控/伺服与 DM4340 MIT 的 codec/session；只准备候选命令，不自行拥有串口 |
+| 通用传输/运行时 | `mech_control_core` | 原始帧、路由、快照、命令租约、BusRuntime、SocketCAN、USB-CDC 和 POSIX 串口；不认识电机品牌 |
+| 传感器协议 | `mech_protocol_ctrboard` | 分片、CRC 和遥测载荷解析 |
 | 传感器 ROS 接入 | `mech_ctrboard_bridge` | 只接收桥、标准消息与诊断；不发布电机目标 |
 | 膝角/观察 | `mech_knee_kinematics` | 纯估计核心、ROS 标定节点、面板、影子策略和离线模型 |
-| 应用策略 | `mech_assist_control` | 整机合同/策略/监督/路由与ROS包装分离；保留单关节入口，默认预览 |
 | 模拟与故障注入 | `mech_simulation` | 虚拟时钟、FakeTransport 与确定性故障路径 |
 | 操作/验证工具 | `tools/bench`、`tools/validation` | 有界台架脚本与合成 ROS 图检查；不由默认构建自动执行实机操作 |
 
@@ -28,24 +28,51 @@
 策略不判断电机品牌；底层厂商适配保持并列，机械映射和支持接口必须显式配置。
 原有单关节/桌面入口保留用于历史复现，不充当整机调度器。
 
-## 两条独立数据流
+## 自上而下的控制层级
+
+上层策略位于最上层；传感器是闭环反馈支路，不是位于策略之上的调度层。
+依赖、控制命令下发和传感器数据流分别描述，避免按数据到达顺序误读层级。
 
 ```mermaid
-flowchart TD
-    MCU[STM32 CtrBoard] --> Bridge[传感器桥]
-    Bridge --> IMU[双 IMU 与压力字段]
-    IMU --> Knee[膝角估计与标定]
-    Knee --> Policy[速度跟随或阻力策略]
-    Policy --> Preview[默认预览或影子输出]
-    Policy -->|显式电机模式并完成映射| Controller[通用速度或力矩控制器]
-    Controller --> Plugin[所选品牌 SystemInterface]
-    Plugin --> Runtime[品牌 session 与 BusRuntime]
-    Runtime --> Transport[唯一 USB-CAN 串口拥有者]
-    Transport --> Motor[电机]
+flowchart TB
+    A["L1 上层策略 · 模式/参考/参数"] --> B["整机监督 · arm/数据质量/计划包络/故障锁存"]
+    B --> C["命令路由与ROS适配 · 关节映射/序号/有效期/消息收发"]
+    C --> D["L2 通用C++实时控制器 · 唯一实时控制律/瞬时命令限幅"]
+    D --> E["L3 硬件抽象与runtime · 生命周期/独立位置与反馈保护/租约"]
+    E --> F["L4 达妙 session/codec"]
+    E --> G["L4 CubeMars session/codec"]
+    F --> H["达妙独占通信链路"] --> M["达妙电机"]
+    G --> I["CubeMars独占通信链路"] --> N["CubeMars电机"]
 ```
 
-图表示代码可组合路径，不表示真实传感器到电机的完整闭环已验收。
+## 独立感知与反馈支路
+
+```mermaid
+flowchart LR
+    I["双IMU"] --> B["CtrBoard bridge"] --> E["姿态/膝角估计与标定"]
+    E --> O["统一关节观测/质量/源时间"]
+    M["电机编码器/设备状态"] --> R["hardware/runtime反馈"] --> O
+    F["足底传感器 · 待接入"] -.-> O
+    O --> P["上层策略与整机监督"]
+    R --> C["C++实时控制器的position/velocity状态接口"]
+    O --> V["只读可视化/诊断/记录"]
+```
+
 传感器独立验证与离体电机试验不能合并为穿戴通过。
+固定位置训练目前使用编码器；IMU到训练电机的联合闭环尚未验收。
+
+## 上层内部的单一职责
+
+| 模块 | 输入与输出 | 约束 |
+|---|---|---|
+| `robot/policies.py` | `RobotObservation` → `PolicyTarget(training_plan=ImpedancePlan)` | arm时捕获固定参考，持有不可变参考/K/D/cap；不计算该模式的PD |
+| `robot/supervisor.py` | 策略计划 → `CommandEnvelope` | 检查质量、位置/参数范围、时长及计划一致性；异常锁存，不把计划当作力矩向量限斜率 |
+| `robot/routing.py` | 有效信封 → 完整逐轴计划 | 全轴校验后才返回；拒绝过期/重放、超上限、未经支持的映射和标量出口绕过 |
+| `robot_node.py` | ROS消息/参数/服务 ↔ 纯逻辑模块 | 组合配置、源时间适配、序列化与发布；不另存参考或重算控制律 |
+
+`ImpedancePlan`与`CommandEnvelope`为不可变数据合同。正常指令保留信封原始产生时间，
+不会在ROS发布时重置年龄。所有轴校验通过才开始发布，但多话题仍非跨轴原子事务。
+旧Python阻尼/助力/保持算法仅为离线预览参考；统一motor出口只接受结构化C++固定位置阻抗。
 
 ## 电机代码的组织
 
@@ -70,7 +97,8 @@ flowchart TD
 |---|---|---|
 | 传感器接收 | `mech_ctrboard_bridge/ctrboard_usb_cdc.launch.py` | 打开指定传感器串口、转发遥测，无运动帧 |
 | 膝角估计 | `knee_kinematics_node` | 只读 IMU，未标定不输出有效膝角 |
-| 应用控制 | `knee_control_node` | 速度跟随预览；`control_strategy:=resistance` 选择阻力 |
+| 整机应用 | `exoskeleton_control_node` | 上层策略/计划/监督；默认preview，不启用硬件 |
+| 历史单膝工具 | `knee_control_node` | 速度跟随/阻力预览，不作为整机主入口 |
 | 电机组合 | `motor_backend_bringup.launch.py` | 必须选 backend/device，达妙硬件和控制器保持 inactive |
 | 合成图验证 | `tools/validation/check_*_ros_graph.py` | 合成输入，无实机电机启动 |
 
@@ -112,8 +140,8 @@ bash tools/validation/run_sensor_ros_checks.sh /tmp/mech-validation/install/setu
 压力话题字段存在不证明鞋垫已接入；完整传感器驱动电机闭环、关节映射计量、
 断联保护及穿戴负载均不能由离线测试推定通过。
 
-当前位置阻抗保留原生MIT模式：通用PositionCommandController发送限斜率位置目标，
-厂商适配层编码Kp/Kd，由电机内部计算弹簧与阻尼。试验性主机PD插件已移除。
+历史原生位置阻抗仍保留MIT模式：通用PositionCommandController发送限斜率位置目标，
+厂商适配层编码Kp/Kd，由电机内部计算弹簧与阻尼。历史试验性ImpedanceCommandController已移除；当前规范FixedPositionImpedanceController是后续独立实现，不复用该旧插件。
 
 ## 可选抗阻快环
 

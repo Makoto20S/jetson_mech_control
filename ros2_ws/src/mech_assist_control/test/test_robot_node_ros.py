@@ -85,14 +85,14 @@ class RobotRosTests(unittest.TestCase):
             self.assertTrue(app.controller_impedance)
             self.assertFalse(app.controller_resistance)
             self.assertEqual(app.supervisor.policy.name, 'impedance_training')
-            self.assertEqual(app.supervisor.policy.evaluate(app.supervisor.observation, .02).values, (0.0,))
             self.assertTrue(app._arm(Trigger.Request(), Trigger.Response()).success)
+            self.assertEqual(app.supervisor.policy.evaluate(app.supervisor.observation, .02).values, (0.0,))
             self.assertTrue(wait(lambda: len(outputs) >= 3))
             self.assertTrue(all(len(frame) == 8 and frame[0] == 1. and frame[3] == 1.
                                 and frame[4:] == [.5, 15., .5, .3] for frame in outputs))
             self.assertTrue(all(a[1] < b[1] and a[2] <= b[2] for a, b in zip(outputs, outputs[1:])))
             # Feedback motion changes neither the fixed reference nor gains.
-            self.assertEqual(app.training_reference, (.5,))
+            self.assertEqual(app.supervisor.policy.plan.reference, (.5,))
             self.assertEqual(app.count_publishers('/dm4310_motor1_effort_controller/target_effort'), 0)
             send[0] = False
             self.assertTrue(wait(lambda: app.supervisor.state == 'fault' and outputs[-1][3] == 0.0))

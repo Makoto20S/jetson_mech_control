@@ -1,6 +1,6 @@
-"""Pure policies; no ROS, device IDs or controller topics."""
+"""Upper fixed-plan strategy and offline reference policies; no ROS or device I/O."""
 import math
-from .contracts import CommandMode, PolicyTarget
+from .contracts import CommandMode, ImpedancePlan, PolicyTarget
 
 class TransparentPolicy:
     name, mode, requires_contact = 'transparent', CommandMode.EFFORT, False
@@ -36,13 +36,41 @@ class ResistancePermissionPolicy(TransparentPolicy):
     name = 'resistance_training'
 
 
-class ImpedanceTrainingPolicy(TransparentPolicy):
-    """Supervised permission for FixedPositionImpedanceController.
+class ImpedanceTrainingPolicy:
+    """Upper strategy owns the fixed plan; C++ alone computes PD effort.
 
-    PD effort and activation anchor belong to the C++ update loop. Zero local
-    values are placeholders, never a computed training torque or reference.
+    Capture is independent of ROS. An entire plan is immutable for this arm
+    epoch, so observation updates cannot silently move the restoring anchor.
     """
-    name = 'impedance_training'
+    name, mode, requires_contact = 'impedance_training', CommandMode.EFFORT, False
+    produces_training_plan = True
+
+    def __init__(self, stiffness=15.0, damping=0.5, torque_caps=None):
+        self.stiffness, self.damping = stiffness, damping
+        self.torque_caps = None if torque_caps is None else tuple(torque_caps)
+        # Validate configuration before accepting observations or creating ROS I/O.
+        caps = self.torque_caps if self.torque_caps is not None else (0.3,)
+        if (not math.isfinite(stiffness) or stiffness <= 0 or
+                not math.isfinite(damping) or damping < 0 or
+                not 1 <= len(caps) <= 6 or
+                any(not math.isfinite(cap) or cap <= 0 for cap in caps)):
+            raise ValueError('invalid impedance strategy parameters')
+        self.plan = None
+
+    def start(self, observation):
+        self.plan = None
+        if (observation.coordinates != 'motor_shaft' or observation.calibrated or
+                any(not math.isfinite(j.velocity) or abs(j.velocity) > .05
+                    for j in observation.joints)):
+            raise ValueError('fixed-position plan requires stationary shaft feedback')
+        self.plan = ImpedancePlan(tuple(j.name for j in observation.joints),
+            tuple(j.position for j in observation.joints), self.stiffness, self.damping,
+            self.torque_caps if self.torque_caps is not None else (0.3,)*len(observation.joints))
+
+    def evaluate(self, observation, dt):
+        if self.plan is None:
+            raise ValueError('fixed-position plan requires explicit arm')
+        return PolicyTarget(self.mode, (0.,)*len(self.plan.names), self.plan)
 
 
 class ResistanceTrainingPolicy(DampingPolicy):

@@ -11,7 +11,7 @@
 ## 目标与当前边界
 
 用户停止桌面动作试验，优先完成整机软件框架。本轮只开发软件并运行合成验证，
-不启动真实传感器桥、电机 manager 或修改设备参数，不提交或推送。
+软件与模拟验证不启动真实传感器桥、电机manager或修改设备参数；本轮经用户授权提交至PR #34。
 本设计沿用现有 ADR-001/002/003/005/015/018/021 的边界，不改变协议档案、
 资源申领、底层租约或设备启用条件。
 
@@ -22,39 +22,44 @@
 ## 分层与依赖
 
 ```mermaid
-flowchart TD
-    IMU[双 IMU / HI12 传感器适配] --> EST[姿态、标定与关节状态估计]
-    FOOT[鞋垫 / 接触适配：尚未接入] -.-> EST
-    EST --> OBS[RobotObservation 统一整机状态]
-    OBS --> ALG[Policy 算法接口]
-    ALG --> SUP[ExoskeletonSupervisor 状态与命令监督]
-    OBS --> SUP
-    SUP --> ENV[带序号、有效期、单位模式的 CommandEnvelope]
-    ENV --> PRE[预览、诊断与记录]
-    ENV --> ROUTE[CommandRouter 关节到控制器映射]
-    ROUTE --> CTRL[C++实时关节控制器：唯一控制律]
-    CTRL --> HW[ros2_control SystemInterface]
-    HW --> DM[达妙 session / runtime]
-    HW --> CM[CubeMars session / runtime]
-    DM --> BUS[每条物理总线唯一传输拥有者]
-    CM --> BUS
+flowchart TB
+    A["L1 上层策略 · 模式/参考/参数"] --> B["整机监督 · arm/数据质量/计划包络/故障锁存"]
+    B --> C["命令路由与ROS适配 · 关节映射/序号/有效期/消息收发"]
+    C --> D["L2 通用C++实时控制器 · 唯一实时控制律/瞬时命令限幅"]
+    D --> E["L3 硬件抽象与runtime · 生命周期/独立位置与反馈保护/租约"]
+    E --> F["L4 达妙 session/codec"]
+    E --> G["L4 CubeMars session/codec"]
+    F --> H["达妙独占通信链路"] --> M["达妙电机"]
+    G --> I["CubeMars独占通信链路"] --> N["CubeMars电机"]
 ```
 
-图中鞋垫为待实现输入；达妙和CubeMars并列，不能同时打开同一物理串口。
-当前两个厂商运行时尚不支持同一网关混合品牌；整机应用层不承担这一限制的绕过。
+上图表示控制依赖层级；上层策略在最上层。传感器/状态估计作为反馈支路：
+
+```mermaid
+flowchart LR
+    I["双IMU"] --> B["CtrBoard bridge"] --> E["姿态/膝角估计与标定"]
+    E --> O["统一关节观测/质量/源时间"]
+    M["电机编码器/设备状态"] --> R["hardware/runtime反馈"] --> O
+    F["足底传感器 · 待接入"] -.-> O
+    O --> P["上层策略与整机监督"]
+    R --> C["C++实时控制器的position/velocity状态接口"]
+    O --> V["只读可视化/诊断/记录"]
+```
+
+鞋垫尚未接入；达妙和CubeMars为并列厂商适配，当前不支持同一网关混合品牌。
 传感器协议不进入策略；策略不包含CAN ID、串口或厂商条件分支。
 
 | 层 | 当前代码 | 职责 |
 |---|---|---|
-| 传输与协议 | `mech_control_core`、各`mech_protocol_*` | 总线所有权、编解码、会话、底层时效 |
-| 设备组合 | `mech_bringup`、`mech_hardware_ros2_control` | 生命周期、反馈质量、机械映射与资源申领 |
-| 关节控制 | `mech_controllers` | 固定模式、限幅、斜率、目标有效期与硬件命令刷新 |
-| 感知与估计 | `mech_ctrboard_bridge`、`mech_knee_kinematics` | 接收、两段姿态、静态/功能轴标定、膝角与诊断 |
-| 整机合同 | `mech_assist_control/robot/contracts.py` | 不可变关节观测、接触观测、算法目标、命令信封 |
 | 高层算法 | `robot/policies.py`、`robot_node.py` | 选择模式、目标与参数；旧Python反馈算法仅离线参考 |
 | 整机监督 | `robot/supervisor.py` | 数据/标定有效性、显式arm、故障锁存、时长、输出包络 |
+| 整机合同 | `mech_assist_control/robot/contracts.py` | 不可变关节观测、接触观测、算法目标、命令信封 |
 | 控制器路由 | `robot/routing.py` | 按关节名/模式/控制器话题路由，校验映射、序号和有效期 |
 | ROS适配 | `robot_node.py` | 源时间检查、主机到达时间、服务、预览/诊断与可选兼容输出 |
+| 关节控制 | `mech_controllers` | 固定模式、限幅、斜率、目标有效期与硬件命令刷新 |
+| 设备组合 | `mech_bringup`、`mech_hardware_ros2_control` | 生命周期、反馈质量、机械映射与资源申领 |
+| 传输与协议 | `mech_control_core`、各`mech_protocol_*` | 总线所有权、编解码、会话、底层时效 |
+| 感知与估计 | `mech_ctrboard_bridge`、`mech_knee_kinematics` | 接收、两段姿态、静态/功能轴标定、膝角与诊断 |
 
 保留原有 `knee_control_node`、`desk_imu_follow_node` 作为已有单关节/台架入口；
 不再把台架脚本作为整机架构主入口。新入口为 `exoskeleton_control_node`。
@@ -67,12 +72,13 @@ flowchart TD
 包含全部配置关节；当前不是多路异步关节融合器，不把分散输入拼成假同步观测。
 
 ROS适配层校验源stamp严格递增、非未来且年龄不超过300ms；
-独立记录 `time.monotonic()` 到达时刻。诊断更新不会刷新关节数据年龄。
+将源年龄映射到本机单调时域，保留测量时刻；不以回调到达时间续期。诊断更新不会刷新关节数据年龄。
 `knee_kinematics` 的OK诊断表示该生产者已完成当前静态/功能轴标定且输入有效；
 增加其他估计器时，须在其合同中明确相同的诊断含义，再配置对应状态名。
 
 `CommandEnvelope` schema1包含本机命令序号、关联观测序号、产生/过期单调时间、
-策略名、模式、关节名、有序数值、valid与原因。
+策略名、模式、关节名、有序预览数值、valid与原因，以及可选不可变`ImpedancePlan`。
+固定位置训练的真实参考/增益/上限由策略计划给出，values仅为零占位，不是瞬时力矩。
 单调时间仅在当前主机/进程时域解释；诊断JSON不是跨主机统一时钟协议。
 
 ## 监督状态与失效行为
@@ -100,11 +106,16 @@ stateDiagram-v2
 
 算法实现 `Policy`：声明名称、命令模式、是否依赖接触输入，提供
 `start(observation)` 与 `evaluate(observation, dt) -> PolicyTarget`。
-算法只能给候选目标；监督器检查模式、维度、有限值后进行限幅/斜率处理。
+固定位置训练策略在`start`校验静止输出轴反馈，捕获参考并创建不可变`ImpedancePlan`；
+`evaluate`只返回相同计划，不计算PD。监督器校验关节集合、参考位置、命令上限和激活内计划不变，
+计划只通过`route_training`进入结构化C++入口，ROS节点不另存一套参考或参数。
+旧Python预览策略仍输出候选数值，由监督器检查模式/维度/有限值并作预览限幅/斜率处理；
+该参考实现不能通过统一motor出口执行。
 异常、NaN、改变模式或输出错误关节数量均锁存故障。
 
 | 当前策略 | 模式 | 行为与限制 |
 |---|---|---|
+| `impedance_training` | 结构化计划/effort后端 | 上层固定参考/K/D/cap，C++唯一实时PD；当前规范电机入口 |
 | `transparent` | effort | 输出零力矩；不等于真实设备零摩擦或制动 |
 | `resistance` | effort | `-B*omega`经限幅/斜率；若反向时旧输出会做正功则故障退出 |
 | `hold_velocity` | velocity | arm时捕获实测姿态，输出受限的角度误差速度；实验性参考策略 |
@@ -128,10 +139,10 @@ stateDiagram-v2
 - 力矩命令按虚功为 `tau_actuator = scale*tau_joint`。
 - 映射后超出独立电机命令上限时拒绝发送，不能通过默认减速比猜测scale。
 
-历史兼容出口使用 `std_msgs/Float64`，目前统一节点已禁止Python控制律经该出口驱动电机。信封的序号与绝对deadline在进程内路由时检查，
-**尚未随Float64传入C++控制器**；C++仍用既有接收时刻TTL和generation。
+历史标量兼容出口使用 `std_msgs/Float64`，目前统一节点已禁止Python控制律经该出口驱动电机。标量出口未携带源序号或deadline。规范固定位置入口使用版本化`training_command`，
+已携带原始源时间、递增序号及完整参数，C++检查源时效/序号/激活会话；见[指令合同](training_command_contract.md)。
 多话题也不是原子多关节事务。后续增强版本化ROS命令与C++入口时需正式接口评审，
-不能宣称目前已具有跨进程序号拒绝或整机原子提交。
+当前固定位置入口已具有跨进程序号拒绝，但尚无整机原子提交。
 
 ## 可运行入口
 
@@ -158,7 +169,7 @@ ROS回归只向 `/test/robot/` 目标输出，验证故障后一次清零并停�
 `tools/validation/check_exoskeleton_ros_graph.py` 用合成原始双IMU验证实际估计器的
 静态—功能轴—静态标定、整机arm、非零预览和非法IMU后的故障锁存；不打开设备。
 
-剩余实施按优先级：版本化C++上游目标入口及整机硬件状态监督；多关节估计器/机器人描述；
+剩余实施按优先级：其他模式迁移到结构化C++计划入口及整机硬件状态监督；多关节估计器/机器人描述；
 鞋垫真实接入与标定；步态识别/自适应策略；多关节协调与动力学验证；最后才是分级实机/穿戴验收。
 测量精度、实时性、人体安全及助力效果仍需各自证据。
 

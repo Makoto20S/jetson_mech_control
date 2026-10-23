@@ -6,7 +6,7 @@ watchdog, a motor enable operation, or a substitute for the C++ control layer.
 from dataclasses import dataclass
 from enum import Enum
 import math
-from typing import Protocol, Tuple
+from typing import Optional, Protocol, Tuple
 
 
 class CommandMode(str, Enum):
@@ -50,7 +50,7 @@ class ContactObservation:
 @dataclass(frozen=True)
 class RobotObservation:
     sequence: int
-    received_at: float  # Host monotonic arrival; never ROS/source time.
+    received_at: float  # Source sample time mapped into host monotonic domain.
     joints: Tuple[JointObservation, ...]
     healthy: bool
     health_received_at: float
@@ -61,9 +61,34 @@ class RobotObservation:
 
 
 @dataclass(frozen=True)
+class ImpedancePlan:
+    """Upper-layer fixed reference/parameters, never an instantaneous effort."""
+    names: Tuple[str, ...]
+    reference: Tuple[float, ...]
+    stiffness: float
+    damping: float
+    torque_caps: Tuple[float, ...]
+
+    def __post_init__(self):
+        if (not all(isinstance(v, tuple) for v in
+                    (self.names, self.reference, self.torque_caps)) or
+                not 1 <= len(self.names) <= 6 or
+                len(set(self.names)) != len(self.names) or
+                any(not isinstance(n, str) or not n for n in self.names) or
+                len(self.reference) != len(self.names) or
+                len(self.torque_caps) != len(self.names) or
+                not all(math.isfinite(v) for v in
+                        (*self.reference, self.stiffness, self.damping, *self.torque_caps)) or
+                self.stiffness <= 0 or self.damping < 0 or
+                any(v <= 0 for v in self.torque_caps)):
+            raise ValueError('invalid fixed-position impedance plan')
+
+
+@dataclass(frozen=True)
 class PolicyTarget:
     mode: CommandMode
     values: Tuple[float, ...]
+    training_plan: Optional[ImpedancePlan] = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +104,7 @@ class CommandEnvelope:
     values: Tuple[float, ...]
     valid: bool
     reason: str
+    training_plan: Optional[ImpedancePlan] = None
 
 
 class Policy(Protocol):

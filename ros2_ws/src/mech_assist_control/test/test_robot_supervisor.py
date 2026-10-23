@@ -80,6 +80,16 @@ def test_health_stale_with_fresh_joints_and_tick_stall():
     assert s.reason == 'supervisor tick gap'
 
 
+def test_newer_health_is_compared_to_execution_time_without_renewing_joint_age():
+    s = active()
+    sample = replace(observation(1.04, 2), health_received_at=1.06)
+    s.observe(sample, now=1.07)
+    assert s.tick(1.07).valid
+    assert s.observation.received_at == 1.04
+    s.observe(replace(sample, sequence=3, received_at=1.08, health_received_at=1.20), now=1.09)
+    assert s.state == 'fault'  # Truly future diagnostics still fail.
+
+
 def test_fault_on_direction_reversal_cannot_make_damping_assist():
     s = active()
     for i in range(1, 5):
@@ -243,7 +253,7 @@ def test_bad_assist_parameters_rejected(kwargs):
 def test_impedance_training_permission_still_checks_shaft_health_bounds_and_run_budget():
     policy = make_policy('impedance_training')
     s = supervisor(policy)
-    o = replace(observation(), calibrated=False, coordinates='motor_shaft')
+    o = replace(observation(velocities=(0., 0.)), calibrated=False, coordinates='motor_shaft')
     s.observe(o)
     assert s.arm(1.)
     e = s.tick(1.02)

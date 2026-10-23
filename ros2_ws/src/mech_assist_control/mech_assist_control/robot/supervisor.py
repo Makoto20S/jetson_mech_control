@@ -1,6 +1,6 @@
 """Whole-robot freshness, explicit arm and fault supervision."""
 import math
-from .contracts import CommandMode, CommandEnvelope
+from .contracts import CommandMode, CommandEnvelope, ImpedancePlan
 from .safety import PositionGuard
 
 class ExoskeletonSupervisor:
@@ -35,12 +35,14 @@ class ExoskeletonSupervisor:
         self.previous = (0.0,) * len(self.limits)
         self.started = self.last_tick = None
         self.command_work = 0.0
+        self.active_training_plan = None
 
     def fault(self, reason):
         self.state, self.reason = 'fault', reason
         self.previous = (0.0,) * len(self.limits)
+        self.active_training_plan = None
 
-    def observe(self, observation):
+    def observe(self, observation, now=None):
         if (type(observation.sequence) is not int or observation.sequence < 0 or
                 observation.sequence <= self.last_observation_sequence or
                 not math.isfinite(observation.received_at) or
@@ -51,7 +53,9 @@ class ExoskeletonSupervisor:
         self.last_observation_sequence = observation.sequence
         self.last_received_at = observation.received_at
         self.observation = observation
-        error = self._health_error(observation.received_at)
+        # Health and joint samples are independently timestamped. A newer
+        # diagnostic is not future data merely because the joint sample is old.
+        error = self._health_error(observation.received_at if now is None else now)
         if error and self.state == 'active':
             self.fault(error)
 
@@ -108,6 +112,7 @@ class ExoskeletonSupervisor:
         self.previous = (0.0,) * len(self.limits)
         self.started = self.last_tick = now
         self.command_work = 0.0
+        self.active_training_plan = None
         self.position_guard.arm(self.observation.joints)
         return True
 
@@ -116,6 +121,7 @@ class ExoskeletonSupervisor:
             self.state, self.reason = 'standby', 'explicitly disarmed'
             self.position_guard.reset()
         self.previous = (0.0,) * len(self.limits)
+        self.active_training_plan = None
 
     def reset(self):
         if self.state == 'active':
@@ -124,7 +130,23 @@ class ExoskeletonSupervisor:
         self.position_guard.reset()
         self.observation = None  # Old data cannot re-arm a reset supervisor.
         self.previous = (0.0,) * len(self.limits)
+        self.active_training_plan = None
         return True
+
+    def _check_training_plan(self, target):
+        plan = target.training_plan
+        expected = getattr(self.policy, 'produces_training_plan', False)
+        if not expected and plan is None:
+            return
+        if (not expected or not isinstance(plan, ImpedancePlan) or
+                target.mode != CommandMode.EFFORT or plan.names != self.names or
+                any(v != 0.0 for v in target.values) or
+                any(not limit.minimum <= ref <= limit.maximum or cap > limit.max_command
+                    for limit, ref, cap in zip(self.limits, plan.reference, plan.torque_caps))):
+            raise ValueError('incompatible or out-of-envelope training plan')
+        if self.active_training_plan is not None and plan != self.active_training_plan:
+            raise ValueError('fixed training plan changed while active')
+        self.active_training_plan = plan
 
     def tick(self, now):
         if self.state == 'active':
@@ -143,46 +165,52 @@ class ExoskeletonSupervisor:
                     if (target.mode != self.policy.mode or len(target.values) != len(self.limits) or
                             not all(math.isfinite(v) for v in target.values)):
                         raise ValueError('invalid policy result')
-                    values = []
-                    for value, old, limit, joint in zip(
-                            target.values, self.previous, self.limits, self.observation.joints):
-                        if (getattr(self.policy, 'release_on_reversal', False) and
-                                old * joint.velocity > 0):
-                            values.append(0.0)
-                            continue
-                        bounded = max(-limit.max_command, min(limit.max_command, value))
-                        if (getattr(self.policy, 'release_on_deceleration', False) and
-                                abs(bounded) < abs(old)):
-                            # Viscous resistance must unload as its target falls.
-                            # Applying the buildup slew here retains excessive
-                            # braking after a short stroke has already slowed.
-                            values.append(bounded)
-                            continue
-                        step = limit.max_slew*dt
-                        # Removing damping inside the deadband takes priority over slew.
-                        # Otherwise residual torque would push a stationary shaft.
-                        values.append(0.0 if (getattr(self.policy, 'dissipative', False) or
-                                             getattr(self.policy, 'motion_aligned', False))
-                                      and bounded == 0.0 else
-                                      old + max(-step, min(step, bounded-old)))
-                    values = list(self.position_guard.constrain(values, self.observation.joints))
-                    if getattr(self.policy, 'dissipative', False) and any(
-                            v*j.velocity > 1e-12 for v, j in zip(values, self.observation.joints)):
-                        raise ValueError('slew would turn damping into assistance')
-                    if getattr(self.policy, 'motion_aligned', False):
-                        # Reversal first withdraws the previous direction; restart
-                        # from zero on the next tick rather than oppose new motion.
-                        values = [0.0 if v*j.velocity < 0 else v
-                                  for v, j in zip(values, self.observation.joints)]
-                        # Endpoint-maximum commanded-power estimate. This is
-                        # not a measured mechanical-energy or passivity bound.
-                        work = dt*sum(max(abs(old), abs(v))*abs(j.velocity)
-                                      for old, v, j in zip(self.previous, values,
-                                                          self.observation.joints))
-                        if self.command_work+work > self.policy.work_budget:
-                            raise ValueError('assistance command-work budget exhausted')
-                        self.command_work += work
-                    self.previous = tuple(values)
+                    self._check_training_plan(target)
+                    if target.training_plan is not None:
+                        # A plan is not an effort vector. Only C++ applies its
+                        # spring/damping and instantaneous output constraints.
+                        self.previous = (0.0,) * len(self.limits)
+                    else:
+                        values = []
+                        for value, old, limit, joint in zip(
+                                target.values, self.previous, self.limits, self.observation.joints):
+                            if (getattr(self.policy, 'release_on_reversal', False) and
+                                    old * joint.velocity > 0):
+                                values.append(0.0)
+                                continue
+                            bounded = max(-limit.max_command, min(limit.max_command, value))
+                            if (getattr(self.policy, 'release_on_deceleration', False) and
+                                    abs(bounded) < abs(old)):
+                                # Viscous resistance must unload as its target falls.
+                                # Applying the buildup slew here retains excessive
+                                # braking after a short stroke has already slowed.
+                                values.append(bounded)
+                                continue
+                            step = limit.max_slew*dt
+                            # Removing damping inside the deadband takes priority over slew.
+                            # Otherwise residual torque would push a stationary shaft.
+                            values.append(0.0 if (getattr(self.policy, 'dissipative', False) or
+                                                 getattr(self.policy, 'motion_aligned', False))
+                                          and bounded == 0.0 else
+                                          old + max(-step, min(step, bounded-old)))
+                        values = list(self.position_guard.constrain(values, self.observation.joints))
+                        if getattr(self.policy, 'dissipative', False) and any(
+                                v*j.velocity > 1e-12 for v, j in zip(values, self.observation.joints)):
+                            raise ValueError('slew would turn damping into assistance')
+                        if getattr(self.policy, 'motion_aligned', False):
+                            # Reversal first withdraws the previous direction; restart
+                            # from zero on the next tick rather than oppose new motion.
+                            values = [0.0 if v*j.velocity < 0 else v
+                                      for v, j in zip(values, self.observation.joints)]
+                            # Endpoint-maximum commanded-power estimate. This is
+                            # not a measured mechanical-energy or passivity bound.
+                            work = dt*sum(max(abs(old), abs(v))*abs(j.velocity)
+                                          for old, v, j in zip(self.previous, values,
+                                                              self.observation.joints))
+                            if self.command_work+work > self.policy.work_budget:
+                                raise ValueError('assistance command-work budget exhausted')
+                            self.command_work += work
+                        self.previous = tuple(values)
                 except ValueError as error:
                     self.fault('policy rejected: '+str(error))
                 except Exception:
@@ -193,6 +221,7 @@ class ExoskeletonSupervisor:
         return CommandEnvelope(
             1, self.command_sequence, self.last_observation_sequence, now,
             now+self.command_ttl if valid else now, self.policy.name, self.policy.mode,
-            self.names, self.previous if valid else (0.0,)*len(self.limits), valid, self.reason)
+            self.names, self.previous if valid else (0.0,)*len(self.limits), valid, self.reason,
+            self.active_training_plan if valid else None)
 
 

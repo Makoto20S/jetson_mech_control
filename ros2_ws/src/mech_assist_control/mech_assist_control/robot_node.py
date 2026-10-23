@@ -14,7 +14,8 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 
 from .robot.contracts import JointLimit, JointObservation, RobotObservation
 from .robot.policies import (make_policy, DampingPolicy, MotionAssistPolicy,
-                             ResistanceTrainingPolicy, ResistancePermissionPolicy)
+                             ResistanceTrainingPolicy, ResistancePermissionPolicy,
+                             ImpedanceTrainingPolicy)
 from .robot.supervisor import ExoskeletonSupervisor
 from .robot.routing import CommandRouter, ControllerRoute
 
@@ -73,13 +74,20 @@ class ExoskeletonNode(Node):
         if self.controller_impedance and not self.encoder_only:
             raise ValueError('impedance_training requires motor_encoder feedback and C++ controller')
         self.controller_permission = self.controller_resistance or self.controller_impedance
-        self.training_reference = None
+        self.last_training_frames = ()
         self.impedance_stiffness = get('impedance_stiffness')
         self.impedance_damping = get('impedance_damping')
         if (not math.isfinite(self.impedance_stiffness) or self.impedance_stiffness <= 0 or
                 not math.isfinite(self.impedance_damping) or self.impedance_damping < 0):
             raise ValueError('invalid impedance plan gains')
         self.training_caps = tuple(limit.max_command for limit in limits)
+        if self.controller_impedance and get('output_mode') == 'motor':
+            actuator_caps = tuple(get('max_actuator_command'))
+            if (len(actuator_caps) != len(limits) or
+                    any(not math.isfinite(cap) or cap <= 0 for cap in actuator_caps)):
+                raise ValueError('complete positive actuator command limits required')
+            self.training_caps = tuple(min(limit.max_command, cap)
+                                       for limit, cap in zip(limits, actuator_caps))
         if self.encoder_only and get('policy') not in ('resistance', 'resistance_training', 'impedance_training', 'motion_assist'):
             raise ValueError('encoder-only entry supports resistance, resistance_training, impedance_training or motion_assist')
         self.enforce_excursion_limit = get('enforce_excursion_limit')
@@ -106,6 +114,9 @@ class ExoskeletonNode(Node):
             policy = MotionAssistPolicy(*(get(k) for k in (
                 'assist_gain', 'assist_deadband', 'assist_taper_speed',
                 'assist_cutoff_speed', 'assist_work_budget_j')))
+        if self.controller_impedance:
+            policy = ImpedanceTrainingPolicy(self.impedance_stiffness,
+                                            self.impedance_damping, self.training_caps)
         self.supervisor = ExoskeletonSupervisor(
             limits, policy, run_limit=get('run_limit_s'),
             sample_timeout=0.15 if self.encoder_only else 0.3,
@@ -152,8 +163,6 @@ class ExoskeletonNode(Node):
             self.router = CommandRouter(names, policy.mode, [
                 ControllerRoute(n, policy.mode, t, scale, cap)
                 for n, t, scale, cap in zip(names, topics, self.scales, max_output)])
-            self.training_caps = tuple(min(limit.max_command, cap)
-                                       for limit, cap in zip(limits, max_output))
             self.command_publishers = {t: self.create_publisher(Float64MultiArray, t, 1)
                                        for t in topics}
             if not self.encoder_only:
@@ -250,7 +259,8 @@ class ExoskeletonNode(Node):
         self.supervisor.observe(RobotObservation(
             self.source_sequence, arrival, joints, healthy, health_arrival,
             healthy and not self.encoder_only,
-            coordinates='motor_shaft' if self.encoder_only else 'calibrated_joint'))
+            coordinates='motor_shaft' if self.encoder_only else 'calibrated_joint'),
+            now=time.monotonic())
 
     def _motor(self, msg):
         try:
@@ -280,30 +290,22 @@ class ExoskeletonNode(Node):
         error = ('estimator health unavailable or stale'
                  if self.health is None or not self.health[0] or
                  not 0 <= now-self.health[1] <= 0.3 else self._motor_error(now))
-        if not error and self.controller_impedance and self.joints is not None:
-            if any(abs(j.velocity) > .05 for j in self.joints[0]):
-                error = 'fixed-position plan requires stationary feedback (<=0.05 rad/s)'
         response.success = not error and self.supervisor.arm(now)
-        if response.success and self.controller_impedance:
-            self.training_reference = tuple(j.position for j in self.joints[0])
         response.message = error or self.supervisor.reason or 'armed'
         return response
 
-    def _publish_training_plan(self, enabled):
-        if self.training_reference is None:
-            return
-        now = time.monotonic()
+    def _publish_training_plan(self, frames, enabled, issued_at):
         sequence = float(time.monotonic_ns() // 1000)
-        for (topic, publisher), reference, cap in zip(
-                self.command_publishers.items(), self.training_reference, self.training_caps):
-            # One coherent reference/parameter/permission frame, never Python PD.
-            publisher.publish(Float64MultiArray(data=[1., sequence, now, float(enabled),
-                reference, self.impedance_stiffness, self.impedance_damping, cap]))
+        for topic, parameters in frames:
+            # Serialization only: policy owns plan, router owns route validation.
+            self.command_publishers[topic].publish(Float64MultiArray(
+                data=[1., sequence, issued_at, float(enabled), *parameters]))
 
     def _neutral_once(self):
         if self.was_valid:
-            self._publish_training_plan(False)
+            self._publish_training_plan(self.last_training_frames, False, time.monotonic())
         self.was_valid = False
+        self.last_training_frames = ()
 
     def _disarm(self, request, response):
         self.supervisor.disarm()
@@ -337,7 +339,9 @@ class ExoskeletonNode(Node):
         envelope = self.supervisor.tick(now)
         if envelope.valid and self.router:
             try:
-                self._publish_training_plan(True)
+                frames = self.router.route_training(envelope, time.monotonic())
+                self.last_training_frames = frames
+                self._publish_training_plan(frames, True, envelope.issued_at)
                 self.was_valid = True
             except ValueError as error:
                 self.supervisor.fault(str(error))
@@ -359,9 +363,9 @@ class ExoskeletonNode(Node):
                                       if self.controller_resistance else '')
         payload['reference_capture'] = 'upper_arm' if self.controller_impedance else ''
         if self.controller_impedance:
-            payload['training_plan'] = dict(reference=self.training_reference,
-                stiffness=self.impedance_stiffness, damping=self.impedance_damping,
-                torque_caps=self.training_caps, command_schema=1)
+            # asdict(envelope) already contains the exact supervised plan, or
+            # None when invalid; no second ROS-owned reference or gain state.
+            payload['command_schema'] = 1
         # Monotonic fields are local-host diagnostic metadata, NOT ROS stamps.
         self.envelope.publish(String(data=json.dumps(payload, allow_nan=False)))
         status = DiagnosticStatus(name='exoskeleton_control', hardware_id='application_supervisor')
