@@ -8,6 +8,10 @@ ENV LANG=C.UTF-8 \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# rosdep invokes apt-get too. Bound transient DNS/download retries for both
+# direct toolchain installs and rosdep; exhausted retries still fail the image.
+RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80mech-network-retries
+
 # The ros-base image intentionally contains the runtime, not the complete
 # build/test toolchain. Keep this list aligned with `base_image_tools` in the
 # dependency manifest so a clean image can run the shared workspace script.
@@ -29,6 +33,9 @@ COPY ros2_ws/src/mech_protocol_cubemars/package.xml /opt/mech-dependencies/mech_
 COPY ros2_ws/src/mech_protocol_ctrboard/package.xml /opt/mech-dependencies/mech_protocol_ctrboard/package.xml
 COPY ros2_ws/src/mech_ctrboard_bridge/package.xml /opt/mech-dependencies/mech_ctrboard_bridge/package.xml
 COPY ros2_ws/src/mech_bringup/package.xml /opt/mech-dependencies/mech_bringup/package.xml
+COPY ros2_ws/src/mech_protocol_damiao/package.xml /opt/mech-dependencies/mech_protocol_damiao/package.xml
+COPY ros2_ws/src/mech_knee_kinematics/package.xml /opt/mech-dependencies/mech_knee_kinematics/package.xml
+COPY ros2_ws/src/mech_assist_control/package.xml /opt/mech-dependencies/mech_assist_control/package.xml
 RUN apt-get update \
     && rosdep update --rosdistro "${ROS_DISTRO}" \
     && rosdep install --from-paths /opt/mech-dependencies --ignore-src \

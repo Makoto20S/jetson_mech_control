@@ -15,4 +15,14 @@
          base_class_type="controller_interface::ControllerInterface">
     <description>Bounded effort commands with slew and target TTL.</description>
   </class>
+  <class name="mech_controllers/ResistanceTrainingController"
+         type="mech::mech_controllers::ResistanceTrainingController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Encoder damping computed each update under a leased enable permission.</description>
+  </class>
+  <class name="mech_controllers/FixedPositionImpedanceController"
+         type="mech::mech_controllers::FixedPositionImpedanceController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>Fixed encoder anchor PD impedance with bounded effort and leased enable.</description>
+  </class>
 </library>

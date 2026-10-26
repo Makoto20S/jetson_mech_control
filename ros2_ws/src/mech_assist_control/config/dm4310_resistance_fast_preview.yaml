@@ -1,0 +1,32 @@
+# C++ controller damping; upper layer publishes permission only, preview by default.
+exoskeleton_control:
+  ros__parameters:
+    input_source: motor_encoder
+    policy: resistance_training
+    resistance_execution: controller
+    output_mode: preview
+    allow_motor_output: false
+    joint_mapping_verified: false
+    feedback_topic: /joint_states
+    joint_names: [dm4310_motor1_joint, dm4310_motor2_joint]
+    actuator_joint_names: [dm4310_motor1_joint, dm4310_motor2_joint]
+    controller_topics: [/dm4310_motor1_effort_controller/enable, /dm4310_motor2_effort_controller/enable]
+    joint_scales: [1.0, 1.0]
+    joint_offsets: [0.0, 0.0]
+    training_damping: [8.0, 8.0]
+    # Smooth quantized velocity; retain raw-rest/reversal immediate unloading.
+    training_velocity_filter_tau_s: 0.025
+    training_start_velocity_rad_s: 0.06
+    velocity_deadband: 0.02
+    max_command: [8.0, 8.0]
+    max_actuator_command: [8.0, 8.0]
+    # Buildup only; decreasing resistance/rest/reversal unload immediately.
+    # This stronger candidate requires a new reviewed physical test envelope.
+    max_slew: [8.0, 8.0]
+    max_velocity: [1.0, 1.0]
+    position_min: [-12.5, -12.5]
+    position_max: [12.5, 12.5]
+    position_soft_margin_rad: 0.1
+    enforce_excursion_limit: false
+    max_excursion_rad: 0.2  # Ignored while enforce_excursion_limit is false.
+    run_limit_s: 5.0

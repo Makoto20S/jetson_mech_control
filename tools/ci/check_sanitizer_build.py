@@ -24,10 +24,21 @@ def check(root, output):
     if not manifests:
         raise ValueError('no workspace packages found')
     for manifest in manifests:
-        name = ElementTree.parse(manifest).getroot().findtext('name')
+        document = ElementTree.parse(manifest).getroot()
+        name = document.findtext('name')
         if not name or name in packages:
             raise ValueError('missing or duplicate package name')
         build = Path(output) / 'build' / name
+        build_type = document.findtext('export/build_type', default='ament_cmake')
+        if build_type == 'ament_python':
+            marker = Path(output) / 'install/share/ament_index/resource_index/packages' / name
+            if not build.is_dir() or not marker.is_file():
+                raise ValueError(f'{name}: missing Python package build/install evidence')
+            packages[name] = {'build_type': build_type, 'compilations': 0,
+                              'instrumentation': 'not applicable to Python source'}
+            continue
+        if build_type != 'ament_cmake':
+            raise ValueError(f'{name}: unsupported build type: {build_type}')
         if not (build / 'CTestTestfile.cmake').is_file():
             raise ValueError(f'{name}: missing test-enabled build')
         cache = {}
@@ -62,7 +73,10 @@ def main():
     except (OSError, ValueError, KeyError, ElementTree.ParseError) as error:
         print(f'ERROR: {error}')
         return 2
-    print(f'ASan/UBSan instrumentation verified for {len(report["packages"])} packages')
+    compiled = sum(package['compilations'] > 0 for package in report['packages'].values())
+    python = len(report['packages']) - compiled
+    print(f'ASan/UBSan instrumentation verified for {compiled} C++ packages; '
+          f'{python} Python packages recorded as not applicable')
     return 0
 
 

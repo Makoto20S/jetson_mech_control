@@ -415,6 +415,7 @@ FND-004 已把当前实现前必须冻结的七项决策转为独立记录：
 | [ADR-018](../adr/ADR-018-upstream-target-lifetime.md) | Accepted | `PositionCommandController` 上游目标暂定 100/106 ms，以支持 20–50 Hz producer；controller-to-hardware 租约保持 4/6 ms，标准控制器弱档不变；Jetson 无设备 timing 样本只描述对应运行，不构成硬实时上界 |
 | [ADR-019](../adr/ADR-019-hardware-position-envelope.md) | Proposed | 硬件层对 Position 子模式命令做失效关闭式包络：绝对区间（含端点）加上与最新可用反馈的最大偏差 `position_max_error_rad`；越界不裁剪、不发送并锁存，只有 `configure()`/`start()` 能清除。它兑现 §10 第 4 条的硬件层最终限幅，对任何控制器（含第三方）一律成立；`position_max_error_rad × Kp` 即命令力矩上限。实机证据尚缺 |
 | [ADR-020](../adr/ADR-020-declared-state-interfaces.md) | Proposed | 通用状态按配置声明子集；新伺服只导出位置，保留原始诊断；现有力控三状态和控制器 claim 契约不变。集成与实机验证分别取证 |
+| [ADR-021](../adr/ADR-021-damiao-mit-profile.md) | Proposed | DM4340 MIT 独立协议与速度/力矩部署边界 |
 
 状态含义和可执行检查见 [ADR 索引](../adr/README.md)。Accepted 只接受各文件中的架构/语义边界，不代表 ARM64、vcan、真实 CAN 或实机已验证；ADR-006 的 Proposed 状态明确阻止无证据的单总线激活。
 

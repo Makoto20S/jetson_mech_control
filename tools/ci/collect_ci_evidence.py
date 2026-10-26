@@ -53,6 +53,9 @@ def collect(container, output, run=docker, sanitizers=False):
             for directory in ("test_results", "Testing"):
                 sources.append((f"/workspace/build/{package}/{directory}",
                                 f"reports/{package}/{directory}", False))
+            if package in ('mech_knee_kinematics', 'mech_assist_control'):
+                sources.append((f"/workspace/build/{package}/pytest.xml",
+                                f"reports/{package}/pytest.xml", False))
         for source, destination, required in sources:
             target = output / destination
             target.parent.mkdir(parents=True, exist_ok=True)

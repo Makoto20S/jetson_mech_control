@@ -239,7 +239,7 @@ MECH_OUTPUT_ROOT=/tmp/jetson-mech-control-build \
   bash tools/ci/build_workspace.sh
 ```
 
-脚本解析依赖、构建八个包并运行测试，测试使用模拟设备和虚拟串口。依赖解析可能安装系统软件包；已配好依赖时可设置 `MECH_SKIP_ROSDEP=1`。普通 clone 不包含现场部署入口、标定或实验记录。持久部署使用 symlink-install 时，源码、build 和 install 必须一起保留，不能仅搬动 install。
+脚本解析依赖、构建十一个包并运行测试，测试使用模拟设备和虚拟串口。依赖解析可能安装系统软件包；已配好依赖时可设置 `MECH_SKIP_ROSDEP=1`。普通 clone 不包含现场部署入口、标定或实验记录。持久部署使用 symlink-install 时，源码、build 和 install 必须一起保留，不能仅搬动 install。
 
 文档与仓库检查可单独运行：
 
@@ -249,7 +249,7 @@ python3 tools/ci/check_adrs.py
 git diff --check
 ```
 
-CI 先检查文档链接、Python/Bash 语法和仓库约束，再在原生 x86_64、ARM64 上分别构建八个包并测试；独立 ASan/UBSan 任务检查内存和未定义行为。宿主使用 Ubuntu 24.04，构建环境仍是固定的 Ubuntu 22.04／ROS 2 Humble 容器。依赖缓存按架构分开，测试复用已构建产物，源码变化时拒绝直接复用旧构建。
+CI 先检查文档链接、Python/Bash 语法和仓库约束，再在原生 x86_64、ARM64 上分别构建十一个包并测试；独立 ASan/UBSan 任务检查内存和未定义行为。宿主使用 Ubuntu 24.04，构建环境仍是固定的 Ubuntu 22.04／ROS 2 Humble 容器。依赖缓存按架构分开，测试复用已构建产物，源码变化时拒绝直接复用旧构建。
 
 构建失败或测试失败都会尝试保存日志、XML 和状态报告，诊断产物保留 14 天，并列出实际跳过项。测试容器提供相应调度权限和共享内存；不会放宽生产保护时限来让测试通过。CI 使用模拟设备与虚拟串口，独立于现场 Jetson 的运行状态。复现步骤见 [ROS workspace](ros2_ws/README.md)，实际云端运行结果见 [GitHub Actions](https://github.com/Makoto20S/jetson_mech_control/actions/workflows/foundation.yml)。构建和自动化测试不能替代现场验收。
 
@@ -309,3 +309,15 @@ flowchart TD
 ## 许可与第三方资料
 
 本仓库采用[内部研究用途声明](LICENSE-or-INTERNAL-LICENSE.md)，并非开放源代码许可证。重新分发、公开发布、再许可或商业使用须取得项目负责人及相关机构的书面许可。第三方资料遵循各自许可，资产边界见 [`manifests/assets.yaml`](manifests/assets.yaml)。
+
+## 达妙与膝关节应用集成
+
+新增的 `mech_protocol_damiao` 提供 DM4340 MIT codec/session，
+`mech_bringup/Dm4340System` 提供互斥速度/力矩接口。速度已有空载 ROS 台架验证，
+独立力矩模式仍待实机验收。`mech_knee_kinematics` 提供双 IMU 标定/膝角、
+只读面板和影子策略；`mech_assist_control` 提供默认预览的速度跟随与阻力策略。
+这不代表完整传感器到电机或穿戴闭环已验收；鞋垫未接入时零字段不代表压力测量。
+
+详见 [代码结构与集成边界](docs/development/code_structure.md)、
+[达妙部署](ros2_ws/src/mech_bringup/README.md)、
+[速度复测记录](docs/validation/2026-10-20-dm4340-speed-retest.md)。

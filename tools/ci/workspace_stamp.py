@@ -31,8 +31,18 @@ def inputs(root):
 def stamp(root, output, verify=False):
     root, output = Path(root), Path(output)
     current = inputs(root)
-    for package in current["packages"]:
-        if not (output / "build" / package / "CTestTestfile.cmake").is_file():
+    for package, source in current["packages"].items():
+        document = ElementTree.parse(root / source / "package.xml").getroot()
+        build_type = document.findtext("export/build_type", default="ament_cmake")
+        if build_type == "ament_python":
+            marker = Path("share/ament_index/resource_index/packages") / package
+            installed = any((prefix / marker).is_file() for prefix in (
+                output / "install", output / "install" / package))
+            if not (output / "build" / package).is_dir() or not installed:
+                raise ValueError(f"missing Python build/install for {package}; build first")
+        elif build_type != "ament_cmake":
+            raise ValueError(f"unsupported build type for {package}: {build_type}")
+        elif not (output / "build" / package / "CTestTestfile.cmake").is_file():
             raise ValueError(f"missing test-enabled build for {package}; build first")
     if not (output / "install/setup.bash").is_file():
         raise ValueError("missing install/setup.bash; build first")

@@ -14,6 +14,7 @@
 
 #include "mech_bringup/ak30_force_runtime.hpp"
 #include "mech_bringup/pass_through_init.hpp"
+#include "mech_bringup/seven_channel_gateway.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "mech_bringup/posix_cdc_serial_port.hpp"
@@ -28,12 +29,7 @@ namespace {
 // unknown and must not be claimed (ADR-012 tri-state), receive queue 128,
 // board firmware 4.8.8 = the vendor's minimum, verified read-back material.
 mech::mech_control_core::UsbCdcOptions probe_options() noexcept {
-  mech::mech_control_core::UsbCdcOptions options{};
-  options.logical_bus = 1U;
-  options.nominal_bitrate_hz = 0U;
-  options.receive_queue_capacity = 128U;
-  options.verified_board_version = {4U, 8U, 8U};
-  return options;
+  return seven_channel_gateway_options(1U, 0U);
 }
 
 mech::mech_control_core::MonotonicTime steady_now() noexcept {

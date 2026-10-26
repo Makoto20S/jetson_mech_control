@@ -12,6 +12,9 @@ receive-only sensor bridge:
 - `mech_protocol_cubemars` — CubeMars AK3.0 force-control and servo-position codecs/sessions.
   The protocol package performs no device I/O; real device composition lives
   in `mech_bringup`. See [servo tools](../tools/servo/README.md).
+- `mech_protocol_damiao` — DM4340 MIT codec/session, composed by Dm4340System.
+- `mech_knee_kinematics` — Python dual-IMU calibration, estimation and sensor-only tools.
+- `mech_assist_control` — Python follow/resistance strategies, preview by default.
 - `mech_protocol_ctrboard` — STM32 telemetry reassembly, CRC validation, and
   sensor payload decoding without device I/O.
 - `mech_ctrboard_bridge` — SocketCAN/USB-CDC ROS 2 publication for CtrBoard IMU
@@ -61,7 +64,7 @@ lists the ARM64 labels; 22.04 host labels are being retired according to the
 [official announcement](https://github.com/actions/runner-images/issues/14254).
 This host update does not migrate the project to ROS Jazzy or change Jetson.
 
-Both architectures build all eight packages and execute the software test suite.
+Both architectures build all eleven packages and execute the software test suite.
 Host and image architecture guards reject mismatches; no QEMU emulation or
 Jetson/self-hosted runner is configured. Each architecture has a separate cache
 key and evidence artifact. A failure on one platform does not cancel the other
@@ -110,7 +113,7 @@ allow the controller to request FIFO scheduling while keeping the production
 6 ms hard deadline; shared-runner success is not a real-time guarantee.
 The 2 GiB shared-memory allocation covers the production bounded trace budget.
 
-The Docker dependency stage copies all eight package manifests and resolves rosdep
+The Docker dependency stage copies all eleven package manifests and resolves rosdep
 before copying source. Documentation/source edits therefore reuse dependency
 layers. CI imports a BuildKit cache via a SHA-pinned builder and cache actions;
 cache keys include the Dockerfile, dependency manifest, package manifests and
@@ -142,7 +145,7 @@ artifact retention is best effort in those cases, not a complete evidence guaran
 
 ### Address and undefined-behavior sanitizers
 
-The independent `ASan / UBSan build and tests` job builds all eight packages in
+The independent `ASan / UBSan build and tests` job builds all eleven packages in
 Debug mode and runs the same software test suite with AddressSanitizer and
 UndefinedBehaviorSanitizer. It uses the pinned `test-source` Docker target and
 its dependency layers, then compiles inside a separate container. It does not
@@ -183,3 +186,11 @@ build and install paths. Moving only the install directory can break links.
 A source clone is not a complete servo deployment: configuration, calibration
 and root-level operator entrypoints require separate installation. Unified
 installation remains a [planned task](../docs/planning/03_mvp_delivery_plan.md#93-后续待办完整框架安装与配置初始化).
+
+## 新增应用与达妙包
+
+当前共 11 个包。新增 `mech_protocol_damiao`（DM4340 MIT codec/session）、
+`mech_knee_kinematics`（Python 双 IMU 估计/标定/只读工具）和
+`mech_assist_control`（Python 默认预览的速度跟随/阻力策略）。
+两种 Python 包使用 ament_python，其余为 ament_cmake；默认构建和自动化测试不启用硬件。
+职责、依赖与运行边界见 [代码结构说明](../docs/development/code_structure.md)。

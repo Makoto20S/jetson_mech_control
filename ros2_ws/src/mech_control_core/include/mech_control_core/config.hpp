@@ -40,8 +40,12 @@ enum class ProtocolProfile : std::uint8_t {
   Ak30ForceControlExtended,
   // Control modes 0-6 plus 15 (disable) and 16 (feedback configuration).
   Ak30ServoExtended,
+  // DM4340 MIT uses 11-bit Classic CAN.
+  Dm4340MitStandard,
   Hi12J1939,
   Hi12Canopen,
+  // Ordinary DM4310, same MIT framing with a distinct configured model.
+  Dm4310MitStandard,
 };
 
 // Capability reporting contract
@@ -186,6 +190,10 @@ struct ProfileRequirements final {
     case ProtocolProfile::Ak30ServoExtended:
       return ProfileRequirements{CanFrameType::Classic,
                                  CanFrameFormat::Extended};
+    case ProtocolProfile::Dm4340MitStandard:
+    case ProtocolProfile::Dm4310MitStandard:
+      return ProfileRequirements{CanFrameType::Classic,
+                                 CanFrameFormat::Standard};
     case ProtocolProfile::Hi12J1939:
       return ProfileRequirements{CanFrameType::Classic,
                                  CanFrameFormat::Extended};

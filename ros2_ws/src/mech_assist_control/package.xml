@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mech_assist_control</name>
+  <version>0.1.0</version>
+  <description>Selectable knee velocity-follow and bounded resistance strategies, preview by default.</description>
+  <maintainer email="project-owners@example.invalid">Project Owners</maintainer>
+  <license>Internal Research Use - All Rights Reserved</license>
+  <buildtool_depend>python3-setuptools</buildtool_depend>
+  <exec_depend>mech_knee_kinematics</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

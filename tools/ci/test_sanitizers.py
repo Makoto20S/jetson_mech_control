@@ -39,6 +39,23 @@ class InstrumentationTests(unittest.TestCase):
         self.assertEqual(report['packages']['example']['compilations'], 1)
         self.assertTrue((self.output / 'sanitizer-build.json').is_file())
 
+    def test_python_package_is_reported_without_claiming_instrumentation(self):
+        source = self.root / 'ros2_ws/src/python_example'
+        source.mkdir()
+        (source / 'package.xml').write_text(
+            '<package><name>python_example</name><export>'
+            '<build_type>ament_python</build_type></export></package>')
+        (self.output / 'build/python_example').mkdir()
+        with self.assertRaisesRegex(ValueError, 'Python package build/install'):
+            check(self.root, self.output)
+        marker = (self.output / 'install/share/ament_index/resource_index/packages/'
+                  'python_example')
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+        report = check(self.root, self.output)
+        self.assertEqual(report['packages']['python_example']['compilations'], 0)
+        self.assertIn('not applicable', report['packages']['python_example']['instrumentation'])
+
     def test_missing_link_flags_rejected(self):
         path = self.build / 'CMakeCache.txt'
         path.write_text(path.read_text().replace('CMAKE_SHARED_LINKER_FLAGS:STRING=-fsanitize=address,undefined', 'CMAKE_SHARED_LINKER_FLAGS:STRING='))

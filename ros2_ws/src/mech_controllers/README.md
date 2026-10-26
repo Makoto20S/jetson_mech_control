@@ -66,7 +66,7 @@ Recovery requires reactivation and new targets; stale targets are not replayed.
 The motor1 example is `motor1_velocity_controllers.yaml`, paired with the
 velocity URDF and `motor1_velocity_bringup.launch.py` in `mech_bringup`. It loads
 the controller inactive, with ±0.5 rad/s bounds and 0.5 rad/s² acceleration.
-There is no runtime mode switch. Full impedance control remains future work.
+There is no runtime mode switch. Native motor impedance uses PositionCommandController with vendor-side gains; the experimental host impedance plugin has been removed.
 
 ## EffortCommandController (T9)
 
@@ -89,3 +89,25 @@ with 0.2 N*m/s slew. In AK3.0 Torque mode the effort feedback is an Iq-derived
 equivalent estimate; standard position/velocity fields are unsupported. The
 vendor runtime's raw ERPM guard is separate from this generic controller and
 must be checked alongside fresh feedback in the bench procedure.
+
+## 可选抗阻快环
+
+新增通用 `ResistanceTrainingController`：借用位置/速度状态，在500 Hz目标更新周期计算有界反向力矩；
+独立台架只发送50 Hz许可。原有Python应用抗阻路径仅保留离线预览；统一motor入口现要求结构化位置阻抗计划。
+参数、`resistance_training_fast`入口、许可TTL与下层保护边界见[抗阻快环说明](../../../docs/development/resistance_fast_loop.md)。
+软件及无设备回环已验证，新路径实机阻力与抖动尚未验收。
+
+## 固定位置阻抗（显式可选）
+
+新增 `mech_controllers/FixedPositionImpedanceController`：激活时固定编码器参考点，
+Jetson每次update计算K15/D0.5的PD力矩并饱和到±7N·m，内部MIT Kp/Kd=0。
+`dm4310_dual_bringup.launch.py fixed_position_impedance:=true`默认只做离线配置检查；
+真实分支仍默认inactive，没有自动使能。旧速度抗阻与原生位置模式保留。
+参数、STM32来源及验证边界见[固定位置阻抗说明](../../../docs/development/fixed_position_impedance.md)。
+
+## 规范分层入口（2026-10-23）
+
+上层选择模式、参考角度和K/D/力矩上限；C++唯一执行实时PD；hardware/runtime独立保护。
+固定位置控制器显式 `command_source=training_command` 接收原子8字段计划，旧enable台架入口保留且互斥。
+统一上层的其他Python反馈策略只允许离线预览，尚未迁移的模式不允许motor输出。
+完整字段、生命周期、默认参数和限制见[训练指令合同](../../../docs/development/training_command_contract.md)。

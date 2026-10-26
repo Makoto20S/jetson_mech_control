@@ -22,11 +22,10 @@ bool configure_raw_nonblocking(int fd) noexcept {
       cfsetospeed(&attrs, B4000000) != 0) {
     return false;
   }
-  attrs.c_cflag &= ~(CSIZE | PARENB);
-  attrs.c_cflag |= CS8 | CLOCAL | CREAD;
-  attrs.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG | IEXTEN);
-  attrs.c_iflag &= ~(INLCR | ICRNL | IGNCR | IXON | IXOFF | IXANY | ISTRIP);
-  attrs.c_oflag &= ~OPOST;
+  cfmakeraw(&attrs);
+  attrs.c_cflag &= ~CRTSCTS;
+  attrs.c_cflag |= CLOCAL | CREAD;
+  attrs.c_iflag &= ~(IXOFF | IXANY);
   attrs.c_cc[VMIN] = 0;
   attrs.c_cc[VTIME] = 0;
   return tcsetattr(fd, TCSANOW, &attrs) == 0;

@@ -21,7 +21,17 @@
 
 配套约束（同文件）：配置期固定 `ProtocolProfile`、无运行期自动探测（清单第 3 条）；canonical 语义只在物理映射有证据时导出（ADR-009）；命令接口形状是 canonical 契约（ADR-014，变更需先出 ADR）。
 
-## 2. 实际包结构 ↔ 各层职责 / The eight packages
+## 2. 实际包结构 ↔ 各层职责
+
+当前 11 包目录与完整数据流见 [代码结构与集成边界](code_structure.md)。
+新增达妙与膝关节应用如下，以下原表保留既有扩展层说明。
+
+| 包 | 职责 | 边界 |
+|---|---|---|
+| `mech_protocol_damiao` | DM4340 MIT wire/session | 与 CubeMars 并列，复用 core 和通用控制器 |
+| `mech_knee_kinematics` | 双 IMU 估计、标定、面板与影子验证 | 不拥有电机串口 |
+| `mech_assist_control` | 速度跟随/阻力策略与 ROS 包装 | 默认预览，电机输出需显式选择与映射 |
+
 
 | 包 | 职责 | 品牌相关？ | 换新品牌电机时要动吗 |
 |---|---|---|---|

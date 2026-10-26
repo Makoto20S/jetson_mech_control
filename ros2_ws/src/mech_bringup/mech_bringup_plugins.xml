@@ -13,4 +13,10 @@
     <description>Position-only AK3.0 servo composition through one USB-CDC
     transport, shared bus runtime, and independent servo sessions.</description>
   </class>
+  <class name="mech_bringup/Dm4340System"
+         type="mech::mech_bringup::Dm4340System"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>DM4340 MIT velocity/effort system using the shared USB-CAN
+    transport and ros2_control command lifecycle.</description>
+  </class>
 </library>

@@ -7,6 +7,20 @@ from summarize_test_reports import summarize
 
 
 class ReportTests(unittest.TestCase):
+    def test_python_package_report_at_build_root_is_included(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            package = root / 'python_example'
+            package.mkdir()
+            (package / 'pytest.xml').write_text(
+                '<testsuites><testsuite><testcase name="policy"/>'
+                '<testcase name="fault"><failure/></testcase>'
+                '</testsuite></testsuites>')
+            report = summarize(root, ('python_example',))
+            self.assertTrue(report['all_package_reports_available'])
+            self.assertEqual(report['testcases'], 2)
+            self.assertEqual(len(report['failures']), 1)
+
     def exercise(self, xml, packages=('example',)):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

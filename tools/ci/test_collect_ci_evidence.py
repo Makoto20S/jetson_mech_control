@@ -49,6 +49,13 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("reports/mech_bringup/test_results/evidence.txt", files)
         self.assertFalse(any(c[0] in ("rm", "exec") for c in calls))
 
+    def test_python_reports_are_requested(self):
+        _, _, calls, _ = self.exercise()
+        for package in ('mech_knee_kinematics', 'mech_assist_control'):
+            self.assertTrue(any(call[:2] == (
+                'cp', f'ci-fixture:/workspace/build/{package}/pytest.xml')
+                for call in calls))
+
     def test_normal_collection_does_not_request_sanitizer_proof(self):
         _, _, calls, _ = self.exercise()
         self.assertFalse(any('sanitizer-build.json' in ' '.join(call) for call in calls))

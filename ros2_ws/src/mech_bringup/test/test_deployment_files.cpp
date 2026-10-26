@@ -134,6 +134,12 @@ TEST_F(DeploymentFilesTest, UrdfParamsAreAllKnownToTheParser) {
       ASSERT_NE(value_end, std::string::npos);
       params[param_name] = urdf.substr(value_start, value_end - value_start);
     }
+    if (name == "motor1_velocity.urdf.xacro") {
+      EXPECT_EQ(params["device_path"], "$(arg device_path)");
+      EXPECT_NE(urdf.find("<xacro:arg name=\"device_path\" default=\"/dev/ttyACM0\"/>"),
+                std::string::npos);
+      params["device_path"] = "/dev/ttyACM0";
+    }
     const auto parsed = Ak30RuntimeParams::parse(params);
     ASSERT_TRUE(parsed.has_value());
     EXPECT_EQ(parsed->device_path, "/dev/ttyACM0");

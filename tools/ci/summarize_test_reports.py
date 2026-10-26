@@ -13,6 +13,7 @@ PACKAGES = (
     'mech_control_core', 'mech_simulation', 'mech_hardware_ros2_control',
     'mech_controllers', 'mech_protocol_cubemars', 'mech_protocol_ctrboard',
     'mech_ctrboard_bridge', 'mech_bringup',
+    'mech_protocol_damiao', 'mech_knee_kinematics', 'mech_assist_control',
 )
 
 
@@ -22,6 +23,11 @@ def summarize(root, packages=PACKAGES):
               'failures': [], 'not_run': [], 'parse_errors': [], 'missing_packages': []}
     for package in packages:
         paths = sorted((root / package / 'test_results').rglob('*.xml'))
+        # colcon's ament_python task writes pytest.xml at the package build
+        # root rather than the ament_cmake test_results directory.
+        python_report = root / package / 'pytest.xml'
+        if python_report.is_file():
+            paths.append(python_report)
         report['packages'][package] = {'xml_files': len(paths)}
         if not paths:
             report['missing_packages'].append(package)

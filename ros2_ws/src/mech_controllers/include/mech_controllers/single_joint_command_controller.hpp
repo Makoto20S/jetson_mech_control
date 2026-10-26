@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -73,6 +74,8 @@ class SingleJointCommandController : public controller_interface::ControllerInte
     std::uint64_t generation{0U};
     std::int64_t arrival_nanoseconds{0};
     std::uint64_t activation_epoch{0U};
+    // Optional atomic target parameters; scalar controllers leave these zero.
+    std::array<double, 7> parameters{};
   };
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(
@@ -101,9 +104,29 @@ class SingleJointCommandController : public controller_interface::ControllerInte
   [[nodiscard]] const std::string& joint_name() const noexcept { return joint_name_; }
   [[nodiscard]] virtual bool initial_command(double& value) const noexcept = 0;
   [[nodiscard]] virtual bool valid_limits(const BoundedTarget&) const noexcept { return true; }
+  [[nodiscard]] virtual bool valid_target(double) const noexcept { return true; }
+  [[nodiscard]] virtual bool needs_activation_time() const noexcept { return false; }
+  [[nodiscard]] virtual bool scalar_subscription() const noexcept { return true; }
+  [[nodiscard]] virtual bool valid_command(const TargetCommand& command) const noexcept {
+    return valid_target(command.value);
+  }
+  [[nodiscard]] bool set_command(TargetCommand command) noexcept;
+  [[nodiscard]] const std::array<double, 7>& command_parameters() const noexcept {
+    return command_parameters_;
+  }
+  [[nodiscard]] std::int64_t activation_time() const noexcept {
+    return activated_at_.load(std::memory_order_acquire);
+  }
+  // Derived local feedback controllers may turn a live upstream permission
+  // into a new command each cycle, retaining the shared authorization lease.
+  [[nodiscard]] virtual bool compute_command(double target, double,
+      std::int64_t, WatchdogStage, double& output) noexcept {
+    output = target;
+    return true;
+  }
 
  private:
-  [[nodiscard]] bool accept(double target, std::int64_t arrival_nanoseconds,
+  [[nodiscard]] bool accept(TargetCommand command, std::int64_t arrival_nanoseconds,
                             std::uint64_t activation_epoch) noexcept;
 
   const std::string motion_interface_;
@@ -122,6 +145,8 @@ class SingleJointCommandController : public controller_interface::ControllerInte
   std::atomic<std::uint64_t> activation_epoch_{0U};
   std::uint64_t applied_generation_{0U};
   double command_{0.0};
+  std::array<double, 7> command_parameters_{};
+  std::atomic<std::int64_t> activated_at_{0};
   // ADR-017: the value this controller publishes on its claimed
   // command_generation interface. Distinct from generation_/applied_generation_
   // above, which count INCOMING targets; this one counts outgoing commands.
