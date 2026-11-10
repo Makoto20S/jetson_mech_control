@@ -1,0 +1,286 @@
+<mujoco model="REF01_dynamics_CAD_candidate">
+  <compiler angle="radian" autolimits="true" meshdir="assets/ref01_cad_v1" inertiafromgeom="false" />
+  <option timestep="0.0005" gravity="0 9.8100000000000005 0" integrator="implicitfast" solver="Newton" iterations="100" tolerance="1e-12" jacobian="dense" />
+  <statistic center="-.025 .09 .065" extent=".45" />
+  <visual>
+    <global offwidth="2400" offheight="1800" azimuth="135" elevation="-25" />
+    <headlight ambient=".18 .18 .18" diffuse=".35 .35 .35" specular=".08 .08 .08" />
+    <quality shadowsize="4096" offsamples="8" />
+  </visual>
+  <default>
+    <joint type="hinge" damping="0.01" limited="false" />
+    <geom type="capsule" size="0.006" contype="0" conaffinity="0" density="1000" />
+    <site size="0.009" rgba="0.95 0.95 0.95 1" />
+  </default>
+  <worldbody>
+    <light pos="0 -1 1" dir="0 1 -1" castshadow="false" diffuse=".12 .12 .12" specular=".08 .08 .08" />
+    <light pos="1 1 .6" dir="-1 -1 -.5" diffuse=".12 .12 .12" castshadow="false" specular=".08 .08 .08" />
+    <body name="L0">
+      <geom name="base" type="box" size=".045 .025 .012" pos="0 -.025 0" rgba=".4 .42 .45 0" group="5" mass="0" />
+      <geom name="OD_reference" fromto="0 0 0 0 0 0.091300000000000006" size=".002" rgba=".6 .6 .6 0" group="5" mass="0" />
+      <site name="O" pos="0 0 0" rgba="0 0 0 0" group="5" />
+      <site name="D" pos="0 0 0.091300000000000006" rgba="0 0 0 0" group="5" />
+      <body name="L5" pos="0 0 0" quat="1 0 0 0">
+        <joint name="psi" axis="0 0 1" ref="0" damping="0.0" frictionloss="0.0" armature="0.0" />
+        <geom name="OH" fromto="0 0 0 0 0.059999999999999998 0" rgba=".15 .65 .4 0" mass="0" group="5" />
+        <body name="L6" pos="0 0.059999999999999998 0" quat="0.98480775301220802 0.17364817766693033 0 0">
+          <joint name="beta" axis="1 0 0" ref="0.3490658503988659" damping="0.0" frictionloss="0.0" armature="0.0" />
+          <geom name="HC" fromto="0 0 0 0 0.20000000000000001 0" rgba=".15 .65 .4 0" mass="0" group="5" />
+          <geom name="Q1_C_Q2" fromto="-0.02 0.20000000000000001 0 0.02 0.20000000000000001 0" rgba=".15 .65 .4 0" mass="0" group="5" />
+          <site name="H" pos="0 0 0" rgba="0 0 0 0" group="5" />
+          <site name="C" pos="0 0.20000000000000001 0" rgba="0 0 0 0" group="5" />
+          <site name="Q1" pos="-0.02 0.20000000000000001 0" rgba="0 0 0 0" group="5" />
+          <site name="Q2" pos="0.02 0.20000000000000001 0" rgba="0 0 0 0" group="5" />
+          <geom name="cad_086" type="mesh" mesh="cad_086" mass="0" rgba="0.82352941176470584 0.82352941176470584 0.82352941176470584 1" contype="0" conaffinity="0" group="0" />
+          <geom name="cad_092" type="mesh" mesh="cad_092" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+          <geom name="cad_093" type="mesh" mesh="cad_093" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+          <geom name="cad_099" type="mesh" mesh="cad_099" mass="0" rgba="0.53725490196078429 0.34901960784313724 0.33725490196078434 1" contype="0" conaffinity="0" group="0" />
+          <geom name="cad_108" type="mesh" mesh="cad_108" mass="0" rgba="0.53725490196078429 0.34901960784313724 0.33725490196078434 1" contype="0" conaffinity="0" group="0" />
+          <inertial mass="0.10337028672052376" pos="-2.1623033667850112e-06 0.11006104289534022 0.0015022010817585887" quat="0.010550381387387377 0.70701310889884617 0.7070426686525576 -0.010574403171736411" diaginertia="1.1810305193529713e-05 0.0004870089244107742 0.00049495314162169757" />
+        </body>
+        <geom name="cad_083" type="mesh" mesh="cad_083" mass="0" rgba="0.82352941176470584 0.82352941176470584 0.82352941176470584 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_084" type="mesh" mesh="cad_084" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_087" type="mesh" mesh="cad_087" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_088" type="mesh" mesh="cad_088" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_089" type="mesh" mesh="cad_089" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_090" type="mesh" mesh="cad_090" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_091" type="mesh" mesh="cad_091" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <inertial mass="0.043232145604473485" pos="-2.2528686955495391e-09 0.027367623002655425 -0.010839068785319837" quat="0.70239161682585305 0.081523228137555984 0.081523204922485382 -0.70239159088500092" diaginertia="6.5774193562596836e-06 3.1427050253100518e-05 3.6620467456031842e-05" />
+      </body>
+      <body name="L1" pos="0 0 0.091300000000000006" quat="0.99077428074011031 0 0 -0.13552241373262602">
+        <joint name="alpha1" axis="0 0 -1" ref="0.27188144346313825" damping="0.0" frictionloss="0.0" armature="0.0" />
+        <geom name="DP1" fromto="0 0 0 -0.059999999999999998 0 0" rgba=".95 .38 .08 0" mass="0" group="5" />
+        <site name="P1" pos="-0.059999999999999998 0 0" rgba="0 0 0 0" group="5" />
+        <body name="U1_ideal_yoke" pos="-0.059999999999999998 0 0" quat="0.99848053236455769 0 0 0.055105593989989307">
+          <joint name="u1_z" axis="0 0 1" ref="0.11026704270696605" damping="0.0" frictionloss="0.0" armature="0.0" />
+          <body name="L2" pos="0 0 0" quat="0.99881998911407666 -0.048565721925610587 0 0">
+            <joint name="u1_x" axis="1 0 0" ref="-0.097169667280491312" damping="0.0" frictionloss="0.0" armature="0.0" />
+            <geom name="P1Q1" fromto="0 0 0 0 0.23599999999999999 0" rgba=".95 .38 .08 0" mass="0" group="5" />
+            <site name="rod_end1" pos="0 0.23599999999999999 0" rgba="0 0 0 0" size=".005" group="5" />
+            <geom name="cad_105" type="mesh" mesh="cad_105" mass="0" rgba="1 1 1 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_109" type="mesh" mesh="cad_109" mass="0" rgba="0.6470588235294118 0.61960784313725492 0.58823529411764708 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_110" type="mesh" mesh="cad_110" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_111" type="mesh" mesh="cad_111" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_112" type="mesh" mesh="cad_112" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_113" type="mesh" mesh="cad_113" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+            <inertial mass="0.03897972653861239" pos="7.1856734186616462e-10 0.12117572394198634 -2.9651786789334904e-06" quat="0.70710678353571588 -1.1118832218111665e-05 1.3681034018906432e-05 0.70710677861761118" diaginertia="1.7861495857894533e-06 0.00035029721166802052 0.00035090513705360402" />
+          </body>
+          <geom name="cad_106" type="mesh" mesh="cad_106" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+          <inertial mass="0.004456743413350347" pos="1.5619762778432319e-12 3.0842502600061039e-13 -0.0030342244762720802" quat="0.50000000000179801 0.49999999999781503 -0.50000000000054434 0.49999999999984235" diaginertia="9.5817069932787002e-08 1.519480293959126e-07 1.5549303102397747e-07" />
+        </body>
+        <geom name="cad_036" type="mesh" mesh="cad_036" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_037" type="mesh" mesh="cad_037" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_039" type="mesh" mesh="cad_039" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_040" type="mesh" mesh="cad_040" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_042" type="mesh" mesh="cad_042" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_043" type="mesh" mesh="cad_043" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_044" type="mesh" mesh="cad_044" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_045" type="mesh" mesh="cad_045" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_046" type="mesh" mesh="cad_046" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_047" type="mesh" mesh="cad_047" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_048" type="mesh" mesh="cad_048" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_049" type="mesh" mesh="cad_049" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_050" type="mesh" mesh="cad_050" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_051" type="mesh" mesh="cad_051" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_052" type="mesh" mesh="cad_052" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_053" type="mesh" mesh="cad_053" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_054" type="mesh" mesh="cad_054" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_055" type="mesh" mesh="cad_055" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_056" type="mesh" mesh="cad_056" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_057" type="mesh" mesh="cad_057" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_058" type="mesh" mesh="cad_058" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_059" type="mesh" mesh="cad_059" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_081" type="mesh" mesh="cad_081" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <inertial mass="0.08218683509193647" pos="-0.012114381000535641 4.5495548639457672e-11 -0.0098333628041974291" quat="4.4510127751800912e-10 0.99385309734390026 -7.1257846546050501e-10 0.11070691441791618" diaginertia="1.4304733613100375e-05 5.2064689680654941e-05 6.1222796830340444e-05" />
+      </body>
+      <body name="L3" pos="0 0 0.091300000000000006" quat="0.99077428074011031 0 0 0.13552241373262602">
+        <joint name="alpha2" axis="0 0 1" ref="0.27188144346313825" damping="0.0" frictionloss="0.0" armature="0.0" />
+        <geom name="DP2" fromto="0 0 0 0.059999999999999998 0 0" rgba=".08 .4 .85 0" mass="0" group="5" />
+        <site name="P2" pos="0.059999999999999998 0 0" rgba="0 0 0 0" group="5" />
+        <body name="U2_ideal_yoke" pos="0.059999999999999998 0 0" quat="0.99848053236455769 0 0 -0.055105593989989307">
+          <joint name="u2_z" axis="0 0 1" ref="-0.11026704270696605" damping="0.0" frictionloss="0.0" armature="0.0" />
+          <body name="L4" pos="0 0 0" quat="0.99881998911407666 -0.048565721925610587 0 0">
+            <joint name="u2_x" axis="1 0 0" ref="-0.097169667280491312" damping="0.0" frictionloss="0.0" armature="0.0" />
+            <geom name="P2Q2" fromto="0 0 0 0 0.23599999999999999 0" rgba=".08 .4 .85 0" mass="0" group="5" />
+            <site name="rod_end2" pos="0 0.23599999999999999 0" rgba="0 0 0 0" size=".005" group="5" />
+            <geom name="cad_095" type="mesh" mesh="cad_095" mass="0" rgba="1 1 1 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_096" type="mesh" mesh="cad_096" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_098" type="mesh" mesh="cad_098" mass="0" rgba="0.6470588235294118 0.61960784313725492 0.58823529411764708 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_101" type="mesh" mesh="cad_101" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_102" type="mesh" mesh="cad_102" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+            <geom name="cad_103" type="mesh" mesh="cad_103" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+            <inertial mass="0.03897972653861239" pos="7.1828711410849418e-10 0.12117572394164181 -2.9651802520192301e-06" quat="0.70710678354079903 -1.1118843470049472e-05 1.3681026876960435e-05 0.70710677861252769" diaginertia="1.7861495857512567e-06 0.00035029721166980257 0.00035090513705534742" />
+          </body>
+          <geom name="cad_100" type="mesh" mesh="cad_100" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+          <inertial mass="0.004456743413350347" pos="-3.5326041615654537e-13 -7.2855526236997535e-14 -0.0030342244776294389" quat="0.5000000000029724 0.49999999999653588 -0.50000000000182399 0.49999999999866762" diaginertia="9.5817069932787081e-08 1.519480293959126e-07 1.5549303102397763e-07" />
+        </body>
+        <geom name="cad_007" type="mesh" mesh="cad_007" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_008" type="mesh" mesh="cad_008" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_009" type="mesh" mesh="cad_009" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_010" type="mesh" mesh="cad_010" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_011" type="mesh" mesh="cad_011" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_012" type="mesh" mesh="cad_012" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_013" type="mesh" mesh="cad_013" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_014" type="mesh" mesh="cad_014" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_015" type="mesh" mesh="cad_015" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_016" type="mesh" mesh="cad_016" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_017" type="mesh" mesh="cad_017" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_019" type="mesh" mesh="cad_019" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_020" type="mesh" mesh="cad_020" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_022" type="mesh" mesh="cad_022" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_023" type="mesh" mesh="cad_023" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_024" type="mesh" mesh="cad_024" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_025" type="mesh" mesh="cad_025" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_026" type="mesh" mesh="cad_026" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_027" type="mesh" mesh="cad_027" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_028" type="mesh" mesh="cad_028" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_029" type="mesh" mesh="cad_029" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_030" type="mesh" mesh="cad_030" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <geom name="cad_080" type="mesh" mesh="cad_080" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+        <inertial mass="0.08218683509193647" pos="0.012114380998956288 4.5303868759674162e-11 -0.035944526008045159" quat="0.99276529448541495 3.555078137996965e-10 -0.12007110420616392 6.9531157672751991e-10" diaginertia="1.4363239619744829e-05 5.2538209676882713e-05 6.1637810819328446e-05" />
+      </body>
+      <geom name="cad_001" type="mesh" mesh="cad_001" mass="0" rgba="0.792156862745098 0.81960784313725488 0.93333333333333335 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_002" type="mesh" mesh="cad_002" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_003" type="mesh" mesh="cad_003" mass="0" rgba="0.33333333333333331 0.33333333333333331 0.33333333333333331 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_004" type="mesh" mesh="cad_004" mass="0" rgba="0.792156862745098 0.81960784313725488 0.93333333333333335 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_006" type="mesh" mesh="cad_006" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_018" type="mesh" mesh="cad_018" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_021" type="mesh" mesh="cad_021" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_031" type="mesh" mesh="cad_031" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_032" type="mesh" mesh="cad_032" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_035" type="mesh" mesh="cad_035" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_038" type="mesh" mesh="cad_038" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_041" type="mesh" mesh="cad_041" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_060" type="mesh" mesh="cad_060" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_063" type="mesh" mesh="cad_063" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_064" type="mesh" mesh="cad_064" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_066" type="mesh" mesh="cad_066" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_067" type="mesh" mesh="cad_067" mass="0" rgba="0.89803921568627454 0.91764705882352937 0.92941176470588238 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_069" type="mesh" mesh="cad_069" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_070" type="mesh" mesh="cad_070" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_071" type="mesh" mesh="cad_071" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_074" type="mesh" mesh="cad_074" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_075" type="mesh" mesh="cad_075" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_076" type="mesh" mesh="cad_076" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_077" type="mesh" mesh="cad_077" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_078" type="mesh" mesh="cad_078" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+      <geom name="cad_079" type="mesh" mesh="cad_079" mass="0" rgba="0.77647058823529413 0.75686274509803919 0.73725490196078436 1" contype="0" conaffinity="0" group="0" />
+    </body>
+    <light name="publication_key" pos="-.35 -.6 .65" dir=".35 1 -.65" directional="true" diffuse=".30 .30 .30" ambient="0 0 0" specular=".08 .08 .08" castshadow="true" />
+    <geom name="lab_floor_visual" type="plane" pos="0 .38 0" quat=".7071067811865476 .7071067811865476 0 0" size="1.2 1.2 .01" material="lab_floor" contype="0" conaffinity="0" mass="0" group="0" />
+  </worldbody>
+  <equality>
+    <connect name="S1_closure" site1="rod_end1" site2="Q1" solref="0.002 1" solimp="0.98999999999999999 0.999 0.0001" />
+    <connect name="S2_closure" site1="rod_end2" site2="Q2" solref="0.002 1" solimp="0.98999999999999999 0.999 0.0001" />
+  </equality>
+  <actuator>
+    <motor name="alpha1_torque" joint="alpha1" gear="1" ctrllimited="true" ctrlrange="-2 2" forcelimited="true" forcerange="-2 2" />
+    <motor name="alpha2_torque" joint="alpha2" gear="1" ctrllimited="true" ctrlrange="-2 2" forcelimited="true" forcerange="-2 2" />
+  </actuator>
+  <keyframe>
+    <key name="cad_reference" qpos="7.5043360288974033e-12 0.0071295115988196517 0.79628828630329174 0.69547524353497914 -0.39068566014312717 0.79628828631830484 -0.69547524353498424 -0.39068566014312744" ctrl="0 0" />
+  </keyframe>
+  <asset>
+    <mesh name="cad_001" file="cad_001.stl" maxhullvert="64" />
+    <mesh name="cad_002" file="cad_002.stl" maxhullvert="64" />
+    <mesh name="cad_003" file="cad_003.stl" maxhullvert="64" />
+    <mesh name="cad_004" file="cad_004.stl" maxhullvert="64" />
+    <mesh name="cad_006" file="cad_006.stl" maxhullvert="64" />
+    <mesh name="cad_007" file="cad_007.stl" maxhullvert="64" />
+    <mesh name="cad_008" file="cad_008.stl" maxhullvert="64" />
+    <mesh name="cad_009" file="cad_009.stl" maxhullvert="64" />
+    <mesh name="cad_010" file="cad_010.stl" maxhullvert="64" />
+    <mesh name="cad_011" file="cad_011.stl" maxhullvert="64" />
+    <mesh name="cad_012" file="cad_012.stl" maxhullvert="64" />
+    <mesh name="cad_013" file="cad_013.stl" maxhullvert="64" />
+    <mesh name="cad_014" file="cad_014.stl" maxhullvert="64" />
+    <mesh name="cad_015" file="cad_015.stl" maxhullvert="64" />
+    <mesh name="cad_016" file="cad_016.stl" maxhullvert="64" />
+    <mesh name="cad_017" file="cad_017.stl" maxhullvert="64" />
+    <mesh name="cad_018" file="cad_018.stl" maxhullvert="64" />
+    <mesh name="cad_019" file="cad_019.stl" maxhullvert="64" />
+    <mesh name="cad_020" file="cad_020.stl" maxhullvert="64" />
+    <mesh name="cad_021" file="cad_021.stl" maxhullvert="64" />
+    <mesh name="cad_022" file="cad_022.stl" maxhullvert="64" />
+    <mesh name="cad_023" file="cad_023.stl" maxhullvert="64" />
+    <mesh name="cad_024" file="cad_024.stl" maxhullvert="64" />
+    <mesh name="cad_025" file="cad_025.stl" maxhullvert="64" />
+    <mesh name="cad_026" file="cad_026.stl" maxhullvert="64" />
+    <mesh name="cad_027" file="cad_027.stl" maxhullvert="64" />
+    <mesh name="cad_028" file="cad_028.stl" maxhullvert="64" />
+    <mesh name="cad_029" file="cad_029.stl" maxhullvert="64" />
+    <mesh name="cad_030" file="cad_030.stl" maxhullvert="64" />
+    <mesh name="cad_031" file="cad_031.stl" maxhullvert="64" />
+    <mesh name="cad_032" file="cad_032.stl" maxhullvert="64" />
+    <mesh name="cad_035" file="cad_035.stl" maxhullvert="64" />
+    <mesh name="cad_036" file="cad_036.stl" maxhullvert="64" />
+    <mesh name="cad_037" file="cad_037.stl" maxhullvert="64" />
+    <mesh name="cad_038" file="cad_038.stl" maxhullvert="64" />
+    <mesh name="cad_039" file="cad_039.stl" maxhullvert="64" />
+    <mesh name="cad_040" file="cad_040.stl" maxhullvert="64" />
+    <mesh name="cad_041" file="cad_041.stl" maxhullvert="64" />
+    <mesh name="cad_042" file="cad_042.stl" maxhullvert="64" />
+    <mesh name="cad_043" file="cad_043.stl" maxhullvert="64" />
+    <mesh name="cad_044" file="cad_044.stl" maxhullvert="64" />
+    <mesh name="cad_045" file="cad_045.stl" maxhullvert="64" />
+    <mesh name="cad_046" file="cad_046.stl" maxhullvert="64" />
+    <mesh name="cad_047" file="cad_047.stl" maxhullvert="64" />
+    <mesh name="cad_048" file="cad_048.stl" maxhullvert="64" />
+    <mesh name="cad_049" file="cad_049.stl" maxhullvert="64" />
+    <mesh name="cad_050" file="cad_050.stl" maxhullvert="64" />
+    <mesh name="cad_051" file="cad_051.stl" maxhullvert="64" />
+    <mesh name="cad_052" file="cad_052.stl" maxhullvert="64" />
+    <mesh name="cad_053" file="cad_053.stl" maxhullvert="64" />
+    <mesh name="cad_054" file="cad_054.stl" maxhullvert="64" />
+    <mesh name="cad_055" file="cad_055.stl" maxhullvert="64" />
+    <mesh name="cad_056" file="cad_056.stl" maxhullvert="64" />
+    <mesh name="cad_057" file="cad_057.stl" maxhullvert="64" />
+    <mesh name="cad_058" file="cad_058.stl" maxhullvert="64" />
+    <mesh name="cad_059" file="cad_059.stl" maxhullvert="64" />
+    <mesh name="cad_060" file="cad_060.stl" maxhullvert="64" />
+    <mesh name="cad_063" file="cad_063.stl" maxhullvert="64" />
+    <mesh name="cad_064" file="cad_064.stl" maxhullvert="64" />
+    <mesh name="cad_066" file="cad_066.stl" maxhullvert="64" />
+    <mesh name="cad_067" file="cad_067.stl" maxhullvert="64" />
+    <mesh name="cad_069" file="cad_069.stl" maxhullvert="64" />
+    <mesh name="cad_070" file="cad_070.stl" maxhullvert="64" />
+    <mesh name="cad_071" file="cad_071.stl" maxhullvert="64" />
+    <mesh name="cad_074" file="cad_074.stl" maxhullvert="64" />
+    <mesh name="cad_075" file="cad_075.stl" maxhullvert="64" />
+    <mesh name="cad_076" file="cad_076.stl" maxhullvert="64" />
+    <mesh name="cad_077" file="cad_077.stl" maxhullvert="64" />
+    <mesh name="cad_078" file="cad_078.stl" maxhullvert="64" />
+    <mesh name="cad_079" file="cad_079.stl" maxhullvert="64" />
+    <mesh name="cad_080" file="cad_080.stl" maxhullvert="64" />
+    <mesh name="cad_081" file="cad_081.stl" maxhullvert="64" />
+    <mesh name="cad_083" file="cad_083.stl" maxhullvert="64" />
+    <mesh name="cad_084" file="cad_084.stl" maxhullvert="64" />
+    <mesh name="cad_086" file="cad_086.stl" maxhullvert="64" />
+    <mesh name="cad_087" file="cad_087.stl" maxhullvert="64" />
+    <mesh name="cad_088" file="cad_088.stl" maxhullvert="64" />
+    <mesh name="cad_089" file="cad_089.stl" maxhullvert="64" />
+    <mesh name="cad_090" file="cad_090.stl" maxhullvert="64" />
+    <mesh name="cad_091" file="cad_091.stl" maxhullvert="64" />
+    <mesh name="cad_092" file="cad_092.stl" maxhullvert="64" />
+    <mesh name="cad_093" file="cad_093.stl" maxhullvert="64" />
+    <mesh name="cad_095" file="cad_095.stl" maxhullvert="64" />
+    <mesh name="cad_096" file="cad_096.stl" maxhullvert="64" />
+    <mesh name="cad_098" file="cad_098.stl" maxhullvert="64" />
+    <mesh name="cad_099" file="cad_099.stl" maxhullvert="64" />
+    <mesh name="cad_100" file="cad_100.stl" maxhullvert="64" />
+    <mesh name="cad_101" file="cad_101.stl" maxhullvert="64" />
+    <mesh name="cad_102" file="cad_102.stl" maxhullvert="64" />
+    <mesh name="cad_103" file="cad_103.stl" maxhullvert="64" />
+    <mesh name="cad_105" file="cad_105.stl" maxhullvert="64" />
+    <mesh name="cad_106" file="cad_106.stl" maxhullvert="64" />
+    <mesh name="cad_108" file="cad_108.stl" maxhullvert="64" />
+    <mesh name="cad_109" file="cad_109.stl" maxhullvert="64" />
+    <mesh name="cad_110" file="cad_110.stl" maxhullvert="64" />
+    <mesh name="cad_111" file="cad_111.stl" maxhullvert="64" />
+    <mesh name="cad_112" file="cad_112.stl" maxhullvert="64" />
+    <mesh name="cad_113" file="cad_113.stl" maxhullvert="64" />
+    <texture name="lab_sky" type="skybox" builtin="gradient" rgb1=".96 .97 .98" rgb2="1 1 1" width="512" height="3072" />
+    <texture name="lab_grid" type="2d" builtin="checker" rgb1=".88 .90 .92" rgb2=".91 .93 .95" width="512" height="512" />
+    <material name="lab_floor" texture="lab_grid" texrepeat="12 12" texuniform="true" reflectance="0" specular=".03" shininess=".1" emission=".35" />
+  </asset>
+</mujoco>
