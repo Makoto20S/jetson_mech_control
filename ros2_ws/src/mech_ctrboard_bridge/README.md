@@ -11,11 +11,11 @@ subscriptions and never writes an application CAN frame.
 | --- | --- | --- |
 | `transport` | `socketcan` | `socketcan` or `usb_cdc` |
 | `interface` | `can0` | Existing Linux SocketCAN interface |
-| `device_path` | `/dev/ttyACM0` | USB-CDC channel when `transport=usb_cdc` |
+| `device_path` | empty (required for USB) | USB-CDC channel when `transport=usb_cdc` |
 | `logical_bus` | `1` | Internal label attached to received raw frames |
-| `board_version_major` | `4` | Verified USB communication-board firmware major version |
-| `board_version_minor` | `8` | Verified USB communication-board firmware minor version |
-| `board_version_patch` | `8` | Verified USB communication-board firmware patch version |
+| `board_version_major` | `4` | Configured USB communication-board protocol major version |
+| `board_version_minor` | `8` | Configured USB communication-board protocol minor version |
+| `board_version_patch` | `8` | Configured USB communication-board protocol patch version |
 | `poll_period_ms` | `1` | Non-blocking receive polling period |
 | `sensor_timeout_ms` | `500` | Packet age that changes diagnostics to `ERROR` |
 | `imu_1_frame_id` | `imu_1_link` | Frame ID for the first IMU |
@@ -128,3 +128,15 @@ The tool starts this package's launch file, requires a live timestamp sample,
 records all eleven public topics for the requested duration, writes `ros2 bag
 info` output, and generates SHA-256 checksums for the bag database. The output
 directory must not already exist.
+
+
+## Parallel exoskeleton unified project (2026-11-05)
+
+The project default is the dedicated fifth USB channel (if08), with imu_1_link
+and imu_2_link frames. This checkout carries the bridge-private serial adapter
+used by the original project addon. A missing USB device_path is rejected.
+Use tools/project/start_imu.sh with the actual device and motor configuration;
+the launcher checks ownership and motor-port conflicts. Build and restore do
+not launch it. Historical 2026-11-05 live acceptance belongs to the older addon
+and servo release; this new combined source baseline needs its own validation.
+See docs/parallel_exo/restore.md for the supported project entry points.
