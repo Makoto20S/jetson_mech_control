@@ -26,9 +26,9 @@ if(BUILD_TESTING)
     APPEND_ENV "PYTHONPATH=${REF01_MODEL_DIR}" TIMEOUT 120)
   ament_add_pytest_test(state_core test/test_state_core.py
     APPEND_ENV "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts:${REF01_MODEL_DIR}" TIMEOUT 30)
-  # rclpy loads the instrumented message type support into system Python.
+  # ASan must intercept C++ exceptions before rclpy loads the DDS libraries.
   if(CMAKE_C_FLAGS MATCHES "-fsanitize=address" AND DEFINED ENV{MECH_ASAN_RUNTIME})
-    set(state_graph_env ENV "LD_PRELOAD=$ENV{MECH_ASAN_RUNTIME}")
+    set(state_graph_env ENV "LD_PRELOAD=$ENV{MECH_ASAN_RUNTIME}:libstdc++.so.6")
   endif()
   ament_add_pytest_test(state_graph test/test_state_graph.py
     ${state_graph_env}
