@@ -1,3 +1,17 @@
+# PH-EXO 并联外骨骼控制系统
+
+PH-EXO 是工程名，ROS 对外名称使用 `ph_exo`，统一状态话题为 `/ph_exo/state`。REF-01 是沿用的并联髋关节机构模型编号。
+
+本开发分支统一维护ROS、电机框架、CtrBoard IMU、REF01 MuJoCo模型与动力学接口。
+主入口：[文件架构与Git管理要求](docs/parallel_exo/project_management.md) · [新设备恢复](docs/parallel_exo/restore.md)。
+按用户需要整体提交和发起PR；不自动提交、推送、部署或启动硬件。
+日常开发：[本地编辑 → SSH同步到Orin → 构建和测试](docs/parallel_exo/local_orin.md)。
+电机接口：[104、105 的 MIT 纯力矩指令、反馈与失能](docs/parallel_exo/mit_communication.md) · [统一机器人状态](docs/parallel_exo/realtime_state.md)。
+性能验证（2026-11-06，仅Windows/Git保存）：[IMU 到 ROS 状态](docs/parallel_exo/imu_timing_20261106.md) · [MuJoCo 动力学接口](docs/parallel_exo/mujoco_timing_20261106.md)。
+下文保留原框架的模块与部署说明。PH-EXO 的开发副本、MIT 配置与实测范围以上方对应入口为准。
+
+---
+
 # Jetson Mechatronic Control Framework
 
 **面向 NVIDIA Jetson 的机电控制框架：C++17 核心、ROS 2 Humble、ros2_control，以及可追溯的电机实验工具。**
@@ -21,7 +35,7 @@
 | 传输与扩展 | Fake、SocketCAN/vcan、USB-CDC 后端；Classic CAN / CAN FD 帧模型 | 已有后端能力不等于所有通信板均通过验收；HI12、统一安装初始化与完整 MVP 仍待推进 |
 | STM32 传感器节点 | 通过 SocketCAN 或 USB-CDC 接收两路 IMU、左右足底 20 点压力和设备时间戳 | 保持只接收，不接管电机；检测链路超时、CRC 和字段有效性，旧 196 字节协议无法证明单路 IMU 后续是否冻结 |
 
-**当前可直接使用的已迁移部署是双路伺服。** 旧力控位置、速度和轨迹工具仍保留在 Jetson 上，但使用各自的旧发布版和配置，不自动读取双路伺服配置。软件具备力控能力，不表示旧工具已迁移到现在的接线和零点，具体区别见下文。
+**原框架已迁移的发布部署为双路伺服。** 旧力控位置、速度和轨迹工具仍保留在 Jetson 上，但使用各自的旧发布版和配置，不自动读取双路伺服配置。软件具备力控能力，不表示旧工具已迁移到现在的接线和零点，具体区别见下文。
 
 500 Hz 是现有控制组合的配置频率，不是经过认证的硬实时保证。双路实验通过也不等于原单 CAN 目标串错问题的根因已经关闭。当前任务与历史验收证据见[规划索引](docs/planning/README.md)。
 
@@ -321,3 +335,6 @@ flowchart TD
 详见 [代码结构与集成边界](docs/development/code_structure.md)、
 [达妙部署](ros2_ws/src/mech_bringup/README.md)、
 [速度复测记录](docs/validation/2026-10-20-dm4340-speed-retest.md)。
+
+
+EXO-STATE-001：[REF01实时状态接入](docs/parallel_exo/realtime_state.md)提供只读电机/IMU聚合、历史映射候选与明确质量标志；新增`state`构建组合。状态接入不等于ROS–MuJoCo控制闭环或硬件采样新鲜度验收。

@@ -20,6 +20,8 @@ RUN apt-get update \
         build-essential \
         git \
         python3-colcon-common-extensions \
+        libgl1 \
+        python3-pip \
         python3-rosdep \
         python3-vcstool \
     && rm -rf /var/lib/apt/lists/*
@@ -35,12 +37,17 @@ COPY ros2_ws/src/mech_ctrboard_bridge/package.xml /opt/mech-dependencies/mech_ct
 COPY ros2_ws/src/mech_bringup/package.xml /opt/mech-dependencies/mech_bringup/package.xml
 COPY ros2_ws/src/mech_protocol_damiao/package.xml /opt/mech-dependencies/mech_protocol_damiao/package.xml
 COPY ros2_ws/src/mech_knee_kinematics/package.xml /opt/mech-dependencies/mech_knee_kinematics/package.xml
+COPY ros2_ws/src/mech_exo_state/package.xml /opt/mech-dependencies/mech_exo_state/package.xml
 COPY ros2_ws/src/mech_assist_control/package.xml /opt/mech-dependencies/mech_assist_control/package.xml
 RUN apt-get update \
     && rosdep update --rosdistro "${ROS_DISTRO}" \
     && rosdep install --from-paths /opt/mech-dependencies --ignore-src \
         --rosdistro "${ROS_DISTRO}" -r -y \
     && rm -rf /var/lib/apt/lists/*
+
+COPY manifests/parallel_exo_python.lock.txt /opt/mech-dependencies/parallel_exo_python.lock.txt
+RUN python3 -m pip install --no-cache-dir --no-deps --target /opt/ph-exo-python -r /opt/mech-dependencies/parallel_exo_python.lock.txt
+ENV PYTHONPATH=/opt/ph-exo-python
 
 FROM dependencies AS test-source
 WORKDIR /workspace

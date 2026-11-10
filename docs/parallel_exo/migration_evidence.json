@@ -1,0 +1,96 @@
+{
+  "checked_at": "2026-11-05T13:27:25.352902+00:00",
+  "host": "nvidia-desktop",
+  "architecture": "aarch64",
+  "source_snapshot_sha256": "92bcfd663cdd046137a1ca75f0acd83fbdb426901adb6664111c902097a2301d",
+  "source_snapshot_files": 683,
+  "snapshot_kind": "uncommitted Git-eligible working tree copied to independent path",
+  "independent_environment": "/home/nvidia/parallel_exo_ros_framework/output/git_migration_20261105_2113/control_checkout/.local/venv",
+  "python_setup": "PASS, used external pip only as installer into isolated venv",
+  "kinematics": {
+    "status": "PASS",
+    "matlab_cases": 16736,
+    "max_error_rad": 1.5543122344752192e-15,
+    "invalid_cases_rejected": 10,
+    "batch_tests_passed": true,
+    "standard_library_only": true,
+    "example": {
+      "psi": 10.0,
+      "beta": 20.0,
+      "alpha1": 5.577659238362527,
+      "alpha2": 25.57765923836253,
+      "unit": "deg"
+    },
+    "baseline_sha256": "1c27b4f058a2ca4a1ab655da53aabd3e7fc11bcdb8ab52a7f429296ce7348e2d",
+    "api_sha256": "08380bec012544e5d7ba2290d6d0074d49a9ad8f7a3d818a191682138f3c13ea"
+  },
+  "dynamics": {
+    "status": "PASS",
+    "model": {
+      "model_path": "/home/nvidia/parallel_exo_ros_framework/output/git_migration_20261105_2113/control_checkout/mujoco/ref01/config/mujoco/ref01_dynamics_cad_v1.xml",
+      "model_sha256": "c1ce29ea3ee4596b6bae5278e232deb25d66e35dc077d936d7ca14f02f23aa5b",
+      "parameter_status": "CAD candidate with documented component-grouping approximations",
+      "coordinates": [
+        "psi",
+        "beta"
+      ],
+      "inputs": [
+        "tau_alpha1",
+        "tau_alpha2"
+      ],
+      "units": "rad, s, N m",
+      "gravity_m_s2": [
+        0.0,
+        9.81,
+        0.0
+      ]
+    },
+    "random_cases": 100,
+    "roundtrip_error_rad_s2": 1.149080830487037e-14,
+    "independent_KKT_error_rad_s2": 5.970224314921779e-14,
+    "power_mapping_error_W": 2.7755575615628914e-17,
+    "frozen_trajectory_samples": 75,
+    "trajectory_torque_error_Nm": 1.0830656510529835e-10,
+    "invalid_cases_rejected": 5,
+    "native_step_duration_s": 0.05000000000000004,
+    "native_max_closure_m": 5.006281004321217e-07,
+    "example": {
+      "q": [
+        0.17453292519943295,
+        0.3490658503988659
+      ],
+      "gravity_tau_Nm": [
+        -0.06998575346706991,
+        -0.02017805302711176
+      ],
+      "acceleration_with_compensation": [
+        -1.2245462940276582e-15,
+        5.012383313627446e-21
+      ]
+    }
+  },
+  "ros_build_packages": [
+    "mech_control_core",
+    "mech_protocol_ctrboard",
+    "mech_ctrboard_bridge"
+  ],
+  "ros_test_summary": "82 tests, 0 errors, 0 failures, 0 skipped",
+  "servo_imu_and_all_profiles": "not run",
+  "hardware_started": false,
+  "windows_restore": "not run",
+  "current_release": "/home/nvidia/parallel_exo_ros_framework/releases/ref01-cad-dynamics-20261103-v01",
+  "servo_release": "/home/nvidia/jetson_mech_control/releases/servo-two-bus-20261008-v1",
+  "servo_config": {
+    "source": "/home/nvidia/jetson_mech_control/config/servo_pair.json",
+    "sha256": "46aab41affc9f29000714b493a79a2ade93ec77360bf4e8d47bf98cc461d9f6c",
+    "top_level_keys": [
+      "schema_version",
+      "calibrated",
+      "identity",
+      "motors",
+      "calibration",
+      "buses"
+    ],
+    "bytes": 2351
+  }
+}

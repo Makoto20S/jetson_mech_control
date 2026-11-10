@@ -28,6 +28,8 @@ dist/**
 .cache/**
 .colcon
 .colcon/**
+.local
+*.local.json
 .pytest_cache
 .pytest_cache/**
 __pycache__
@@ -64,6 +66,7 @@ coverage/**
 *.sqlite*
 *.db
 *.csv
+!mujoco/ref01/fixtures/ref01_dynamics_cad_v1/trajectory_*.csv
 *.tsv
 *.parquet
 *.h5

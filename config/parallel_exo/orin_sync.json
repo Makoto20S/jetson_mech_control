@@ -1,0 +1,5 @@
+{
+  "ssh_host": "orin-nx",
+  "project_root": "/home/nvidia/parallel_exo_ros_framework",
+  "remote_root": "/home/nvidia/parallel_exo_ros_framework/dev/jetson_mech_control"
+}

@@ -25,6 +25,8 @@
     "build-essential",
     "git",
     "python3-colcon-common-extensions",
+    "libgl1",
+    "python3-pip",
     "python3-rosdep",
     "python3-vcstool"
   ],

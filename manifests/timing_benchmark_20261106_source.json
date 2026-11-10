@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "read_at": "2026-11-06T16:38:04.549206+08:00",
+  "source_project": "并联外骨骼-ROS框架",
+  "source_relative_path": "Mujoco-Win/tools/benchmark_ref01_orin.py",
+  "source_revision": "2026-11-03 benchmark; hash-pinned read on 2026-11-06",
+  "source_sha256": "197d590c49f11644003a8c5a8e1213d50f003d461cd23941b55d8fd9f52d50b4",
+  "source_unchanged_after_copy": true,
+  "derived_path": "tools/project/benchmark_mujoco_orin.py",
+  "derived_sha256": "d730eac47aa3b3535df802b95173d5474fd0c25b21d96aaa73074e92d7075f65",
+  "purpose": "Reproducible headless API and fixed-period timing for the current control checkout",
+  "changes": [
+    "repository-local model and output paths",
+    "hash API, kinematics and configuration inputs without release manifest dependency",
+    "cleanup only owned child processes",
+    "COMPLETED is collection status rather than deadline acceptance",
+    "extract and test periodic slot calculation"
+  ],
+  "evidence_scope": "Independent ideal closed-chain model API, no ROS communication, sensor acquisition, motor output or MPC solver",
+  "tests": {
+    "windows_portable": 10,
+    "orin_portable": 10
+  },
+  "report": "docs/parallel_exo/mujoco_timing_20261106.md",
+  "raw_evidence_manifest_sha256": "36266bfcf17e87331b7121775f537c51a03255f177da5ca0add44c31a28954c5"
+}
