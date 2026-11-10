@@ -26,7 +26,12 @@ if(BUILD_TESTING)
     APPEND_ENV "PYTHONPATH=${REF01_MODEL_DIR}" TIMEOUT 120)
   ament_add_pytest_test(state_core test/test_state_core.py
     APPEND_ENV "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts:${REF01_MODEL_DIR}" TIMEOUT 30)
+  # rclpy loads the instrumented message type support into system Python.
+  if(CMAKE_C_FLAGS MATCHES "-fsanitize=address" AND DEFINED ENV{MECH_ASAN_RUNTIME})
+    set(state_graph_env ENV "LD_PRELOAD=$ENV{MECH_ASAN_RUNTIME}")
+  endif()
   ament_add_pytest_test(state_graph test/test_state_graph.py
+    ${state_graph_env}
     APPEND_ENV "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts:${REF01_MODEL_DIR}" TIMEOUT 45)
   ament_add_pytest_test(timing_trace test/test_timing_trace.py
     APPEND_ENV "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts:${REF01_MODEL_DIR}" TIMEOUT 30)

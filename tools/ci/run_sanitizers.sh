@@ -22,7 +22,7 @@ source /opt/ros/humble/setup.bash
 set -u
 SYSTEM_PATH="/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# Only uninstrumented controller-manager children preload this runtime, not
+# Only test processes loading instrumented shared libraries preload this runtime, not
 # Python/colcon or every utility in the process tree.
 MECH_ASAN_RUNTIME="$(env PATH="${SYSTEM_PATH}" c++ -print-file-name=libasan.so)"
 if [[ ! -f "$MECH_ASAN_RUNTIME" ]]; then
@@ -41,6 +41,7 @@ env PATH="${SYSTEM_PATH}" colcon --log-base "${OUTPUT_ROOT}/log" build \
     -DPython3_EXECUTABLE=/usr/bin/python3 \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     -DBUILD_TESTING=ON \
+    -DCMAKE_C_FLAGS=-fsanitize=address,undefined\ -fno-omit-frame-pointer \
     -DCMAKE_CXX_FLAGS=-fsanitize=address,undefined\ -fno-omit-frame-pointer \
     -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined \
     -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined \
