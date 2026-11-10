@@ -18,6 +18,7 @@ namespace {
 const std::set<std::string>& known_keys() noexcept {
   static const std::set<std::string> keys{
       "device_path",
+      "command_trace_path",
       "logical_bus",
       "drive_id",
       "device_id",
@@ -119,6 +120,10 @@ std::optional<Ak30RuntimeParams> Ak30RuntimeParams::parse(
     return std::nullopt;
   }
   parsed.device_path = device_path->second;
+  if (const auto it = params.find("command_trace_path"); it != params.end()) {
+    if (it->second.empty()) return std::nullopt;
+    parsed.command_trace_path = it->second;
+  }
 
   if (const auto it = params.find("logical_bus"); it != params.end()) {
     std::uint64_t value = 0U;

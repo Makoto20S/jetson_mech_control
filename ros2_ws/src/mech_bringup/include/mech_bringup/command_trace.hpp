@@ -125,8 +125,9 @@ class CommandTrace final : public mech_control_core::CdcWriteTraceSink {
 // production USB encoder/transport. Never substitute a reconstructed command.
 class CommandTraceTransport final : public mech_control_core::Transport {
  public:
-  CommandTraceTransport(mech_control_core::Transport& inner, CommandTrace& trace)
-      : inner_(inner), trace_(trace) {}
+  CommandTraceTransport(mech_control_core::Transport& inner, CommandTrace& trace,
+                        bool trace_receive = false)
+      : inner_(inner), trace_(trace), trace_receive_(trace_receive) {}
   mech_control_core::TransportKind kind() const noexcept override { return inner_.kind(); }
   const mech_control_core::TransportCapabilities& capabilities() const noexcept override {
     return inner_.capabilities();
@@ -136,7 +137,10 @@ class CommandTraceTransport final : public mech_control_core::Transport {
   void close() noexcept override { inner_.close(); }
   mech_control_core::TransportStats stats() const noexcept override { return inner_.stats(); }
   mech_control_core::TransportResult try_receive(mech_control_core::RawCanFrame& f) noexcept override {
-    return inner_.try_receive(f);
+    const auto result = inner_.try_receive(f);
+    if (trace_receive_ && result == mech_control_core::TransportResult::Ok)
+      trace_.frame("transport_receive", f);
+    return result;
   }
   mech_control_core::TransportResult try_send(const mech_control_core::RawCanFrame& f) noexcept override {
     trace_.frame("transport_send", f);
@@ -147,5 +151,6 @@ class CommandTraceTransport final : public mech_control_core::Transport {
  private:
   mech_control_core::Transport& inner_;
   CommandTrace& trace_;
+  bool trace_receive_{false};
 };
 }  // namespace mech::mech_bringup

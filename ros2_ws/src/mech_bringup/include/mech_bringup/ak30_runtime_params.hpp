@@ -23,6 +23,8 @@ namespace mech::mech_bringup {
 struct Ak30RuntimeParams final {
   Ak30RuntimeConfig config{};
   std::string device_path;
+  // Optional bounded raw TX/RX capture; output is written on lifecycle exit.
+  std::string command_trace_path;
   // ADR-016 Decision 5, opt-in half: emit one structured line per NEW feedback
   // frame carrying sequence, host arrival time, age, quality and fault code.
   // Off by default so a deployment that says nothing logs nothing.

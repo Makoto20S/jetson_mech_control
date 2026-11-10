@@ -15,6 +15,19 @@ using mech::mech_protocol_cubemars::ForceControlSubMode;
 
 using Params = std::map<std::string, std::string>;
 
+TEST(Ak30RuntimeParams, OptionalRawTraceMustHaveANonemptyPath) {
+  Params params{{"device_path", "/dev/fake"}, {"sub_mode", "torque"},
+                {"torque_max_abs_erpm", "100"}};
+  ASSERT_TRUE(Ak30RuntimeParams::parse(params));
+  EXPECT_TRUE(Ak30RuntimeParams::parse(params)->command_trace_path.empty());
+  params["command_trace_path"] = "";
+  EXPECT_FALSE(Ak30RuntimeParams::parse(params));
+  params["command_trace_path"] = "/tmp/mit-bus2.jsonl";
+  ASSERT_TRUE(Ak30RuntimeParams::parse(params));
+  EXPECT_EQ(Ak30RuntimeParams::parse(params)->command_trace_path,
+            "/tmp/mit-bus2.jsonl");
+}
+
 TEST(Ak30RuntimeParams, ParsesFullParameterSet) {
   Params params;
   params["device_path"] = "/dev/ttyACM0";

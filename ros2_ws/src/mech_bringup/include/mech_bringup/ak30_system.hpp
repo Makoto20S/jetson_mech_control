@@ -1,11 +1,14 @@
 #pragma once
 
+#include <array>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
 
 #include "mech_bringup/ak30_force_runtime.hpp"
+#include "mech_bringup/command_trace.hpp"
 #include "mech_bringup/ak30_runtime_params.hpp"
 #include "mech_control_core/status.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
@@ -51,7 +54,7 @@ namespace mech::mech_bringup {
 // switch, and watchdog machinery from CompositeSystem; this is a composition
 // point, not a brand branch. The brand stays confined to mech_bringup and
 // mech_protocol_cubemars (AdapterContract item 1).
-class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
+class Ak30System : public mech_hardware_ros2_control::CompositeSystem {
  public:
   // Builds a serial port for a device path. Injectable so offline tests can
   // substitute mech_simulation::FakeSerial and assert the 0x12 init frame
@@ -82,6 +85,7 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
 
   hardware_interface::CallbackReturn on_init(
       const hardware_interface::HardwareInfo& info) override;
+  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
   hardware_interface::CallbackReturn on_configure(
       const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::CallbackReturn on_cleanup(
@@ -89,6 +93,8 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
   hardware_interface::CallbackReturn on_deactivate(
       const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::CallbackReturn on_error(
+      const rclcpp_lifecycle::State& previous_state) override;
+  hardware_interface::CallbackReturn on_shutdown(
       const rclcpp_lifecycle::State& previous_state) override;
   hardware_interface::return_type read(const rclcpp::Time& time,
                                        const rclcpp::Duration& period) override;
@@ -109,16 +115,35 @@ class Ak30System final : public mech_hardware_ros2_control::CompositeSystem {
   // Tests only; call before on_init.
   void set_telemetry_sink_for_testing(TelemetrySink sink) noexcept;
 
+ protected:
+  // Read-only/recorder seams for BUILD_TESTING timing composition.
+  CommandTrace* timing_trace() noexcept { return command_trace_.get(); }
+  const mech_control_core::StatusSnapshot* timing_status() const noexcept {
+    return runtime_view_ ? &runtime_view_->last_status() : nullptr;
+  }
+
  private:
   class TelemetryWorker;
   void enqueue_summary(FeedbackTelemetryReason reason) noexcept;
+  void flush_trace() noexcept;
 
+  // Optional read-only group, explicitly declared in the torque URDF.
+  inline static constexpr std::array<const char*, 9> raw_names_{{
+      "mit_drive_id", "mit_rx_sequence", "mit_rx_us", "mit_valid",
+      "mit_position_deg", "mit_erpm", "mit_iq_a", "mit_temperature_c", "mit_fault_code"}};
+  std::array<double, raw_names_.size()> raw_values_{};
+  std::string raw_joint_;
+  unsigned raw_drive_id_{};
   SerialPortFactory serial_factory_;
   std::string device_path_;
+  // Trace outlives its serial write sink and transport wrapper.
+  std::string command_trace_path_;
+  std::unique_ptr<CommandTrace> command_trace_;
   // Declaration order matters: transport_ must be destroyed before serial_
   // (it borrows the port), and both before the base's runtime_.
   std::shared_ptr<mech::mech_control_core::CdcSerialPort> serial_;
   std::unique_ptr<mech::mech_control_core::UsbCdcTransport> transport_;
+  std::unique_ptr<CommandTraceTransport> traced_transport_;
   // Non-owning; the base owns the runtime. Used only to read counters and the
   // status snapshot for diagnostics, never to drive the device.
   Ak30ForceControlRuntime* runtime_view_{nullptr};

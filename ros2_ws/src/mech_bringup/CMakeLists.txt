@@ -16,6 +16,9 @@ find_package(mech_controllers REQUIRED)
 find_package(mech_protocol_cubemars REQUIRED)
 find_package(mech_protocol_damiao REQUIRED)
 find_package(hardware_interface REQUIRED)
+find_package(controller_interface REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(trajectory_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(realtime_tools REQUIRED)
 
@@ -34,6 +37,7 @@ add_library(${PROJECT_NAME} SHARED
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
+  src/mit_pair_effort_controller.cpp
   src/dm4340_runtime.cpp
   src/dm4340_system.cpp
 )
@@ -51,11 +55,15 @@ ament_target_dependencies(
   mech_protocol_cubemars
   mech_protocol_damiao
   hardware_interface
+  controller_interface
+  std_srvs
+  trajectory_msgs
   pluginlib
   realtime_tools)
 
 pluginlib_export_plugin_description_file(
   hardware_interface mech_bringup_plugins.xml)
+pluginlib_export_plugin_description_file(controller_interface mit_pair_controller.xml)
 
 add_executable(servo_feedback_reader src/servo_feedback_reader_main.cpp)
 target_link_libraries(servo_feedback_reader ${PROJECT_NAME})
@@ -106,6 +114,9 @@ ament_export_dependencies(
   mech_controllers mech_protocol_cubemars mech_protocol_damiao realtime_tools)
 
 if(BUILD_TESTING)
+  add_executable(test_mit_pair_guard test/test_mit_pair_guard.cpp)
+  target_include_directories(test_mit_pair_guard PRIVATE include)
+  add_test(NAME mit_pair_guard COMMAND test_mit_pair_guard)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_test REQUIRED)
   find_package(ament_cmake_lint_cmake REQUIRED)
@@ -181,6 +192,16 @@ if(BUILD_TESTING)
   # context and a ControllerManager node, which the offline unit tests do not.
   find_package(controller_manager REQUIRED)
   find_package(controller_interface REQUIRED)
+  add_library(${PROJECT_NAME}_mit_timing_plugins SHARED test/mit_timing_plugins.cpp)
+  target_link_libraries(${PROJECT_NAME}_mit_timing_plugins ${PROJECT_NAME})
+  ament_target_dependencies(${PROJECT_NAME}_mit_timing_plugins
+    controller_interface pluginlib rclcpp std_msgs)
+  pluginlib_export_plugin_description_file(
+    hardware_interface test/mit_timing_hardware.xml)
+  pluginlib_export_plugin_description_file(
+    controller_interface test/mit_timing_controller.xml)
+  install(TARGETS ${PROJECT_NAME}_mit_timing_plugins LIBRARY DESTINATION lib)
+
   # Do not link either project plugin here: that would register factories before
   # the class loaders and hide the production hardware-first loading order.
   ament_add_gtest(${PROJECT_NAME}_plugin_loading_test

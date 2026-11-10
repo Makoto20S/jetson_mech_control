@@ -171,6 +171,12 @@ class Ak30ForceControlRuntime final
     return motor_command_frames_;
   }
   [[nodiscard]] bool expired() const noexcept { return expired_; }
+  // One wire sample and its transport receipt identity. All values below
+  // are from the same accepted CAN frame, even if read() subsequently faults.
+  const auto& raw_feedback() const noexcept { return raw_feedback_; }
+  const auto& raw_feedback_status() const noexcept { return raw_erpm_status_; }
+  bool raw_feedback_available() const noexcept { return raw_erpm_available_; }
+
   // ADR-016 Decision 5: the quality evidence must survive the ROS boundary.
   // The exported state interfaces are three bare doubles with nowhere to put
   // quality, sequence or arrival time, so they are kept here for tests and
@@ -230,6 +236,7 @@ class Ak30ForceControlRuntime final
   FeedbackTelemetryCapture* telemetry_{nullptr};
   mech::mech_control_core::StatusSnapshot observed_status_{};
   bool has_observed_status_{false};
+  mech::mech_protocol_cubemars::ForceControlFeedback raw_feedback_{};
   double raw_erpm_{0.0};
   mech::mech_control_core::StatusSnapshot raw_erpm_status_{};
   bool raw_erpm_available_{false};
