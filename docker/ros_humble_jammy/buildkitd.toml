@@ -1,0 +1,6 @@
+# CI build containers only: do not inherit a runner/container loopback resolver.
+# Keep this shared by the native amd64, arm64 and sanitizer builders.
+# Public resolvers are a candidate remedy; a cold build must verify reachability.
+[dns]
+  nameservers = ["1.1.1.1", "8.8.8.8"]
+  options = ["timeout:2", "attempts:2"]

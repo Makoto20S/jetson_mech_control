@@ -78,8 +78,12 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Verify native runner platform
         run: python3 tools/ci/check_ci_platform.py --expected "$CI_ARCH" --output "$CI_EVIDENCE/runner-platform.json"
+      - name: Record runner DNS
+        run: bash tools/ci/build_network_diagnostics.sh runner 2>&1 | tee "$CI_EVIDENCE/network-host.log"
       - name: Set up Docker builder
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          buildkitd-config: docker/ros_humble_jammy/buildkitd.toml
       - name: Restore build cache
         if: ${{ !inputs.cold_cache }}
         continue-on-error: true
@@ -182,8 +186,12 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Verify native runner platform
         run: python3 tools/ci/check_ci_platform.py --expected "$CI_ARCH" --output "$CI_EVIDENCE/runner-platform.json"
+      - name: Record runner DNS
+        run: bash tools/ci/build_network_diagnostics.sh runner 2>&1 | tee "$CI_EVIDENCE/network-host.log"
       - name: Set up Docker builder
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          buildkitd-config: docker/ros_humble_jammy/buildkitd.toml
       - name: Restore dependency layers from build cache
         if: ${{ !inputs.cold_cache }}
         continue-on-error: true
