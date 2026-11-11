@@ -19,17 +19,17 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'device_path',
-            default_value='/dev/ttyACM0',
+            default_value='/dev/serial/by-id/usb-Livelybot_Livelybot_Communication_Board_2024051701-if08',
             description='Livelybot USB-CDC channel carrying STM32 telemetry',
         ),
         DeclareLaunchArgument(
             'imu_1_frame_id',
-            default_value='thigh_imu_link',
+            default_value='imu_1_link',
             description='ROS frame for the first IMU',
         ),
         DeclareLaunchArgument(
             'imu_2_frame_id',
-            default_value='shank_imu_link',
+            default_value='imu_2_link',
             description='ROS frame for the second IMU',
         ),
         Node(

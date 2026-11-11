@@ -1,0 +1,6 @@
+<library path="mech_bringup">
+  <class name="mech_bringup/MitPairEffortController" type="mech::mech_bringup::MitPairEffortController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>PH-EXO paired MIT effort targets in 104,105 order.</description>
+  </class>
+</library>

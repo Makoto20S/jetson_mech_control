@@ -28,6 +28,7 @@ EXPECTED_PACKAGES = {
     "mech_protocol_ctrboard": {"mech_control_core"},
     "mech_protocol_damiao": {"mech_control_core", "mech_simulation"},
     "mech_knee_kinematics": set(),
+    "mech_exo_state": set(),
     "mech_assist_control": {"mech_knee_kinematics"},
     "mech_ctrboard_bridge": {
         "mech_control_core",
@@ -278,8 +279,10 @@ def main() -> int:
                 fail(f"{expected_name}: unsupported build type: {build_type}")
             if not (package_dir / "CMakeLists.txt").is_file():
                 fail(f"{expected_name}: CMakeLists.txt is missing")
-            if not (package_dir / "test/test_package_marker.cpp").is_file():
-                fail(f"{expected_name}: skeleton test is missing")
+            required_test = ("test/test_state_core.py" if expected_name == "mech_exo_state"
+                             else "test/test_package_marker.cpp")
+            if not (package_dir / required_test).is_file():
+                fail(f"{expected_name}: required test is missing: {required_test}")
 
         expected_from = "FROM ros:humble-ros-base-jammy@" + base_image["digest"]
         if expected_from not in dockerfile:

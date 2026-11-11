@@ -28,10 +28,16 @@ ament_target_dependencies(${PROJECT_NAME}_imu_safety
   mech_protocol_ctrboard
   sensor_msgs)
 
+add_library(${PROJECT_NAME}_serial STATIC src/posix_cdc_serial_port.cpp)
+target_include_directories(${PROJECT_NAME}_serial
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+ament_target_dependencies(${PROJECT_NAME}_serial mech_control_core)
+
 add_executable(ctrboard_bridge_node src/bridge_node.cpp)
 target_include_directories(ctrboard_bridge_node
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(ctrboard_bridge_node ${PROJECT_NAME}_imu_safety)
+target_link_libraries(ctrboard_bridge_node
+  ${PROJECT_NAME}_imu_safety ${PROJECT_NAME}_serial)
 ament_target_dependencies(ctrboard_bridge_node
   diagnostic_msgs
   geometry_msgs
@@ -58,6 +64,11 @@ if(BUILD_TESTING)
   ament_add_gtest(${PROJECT_NAME}_imu_safety_test test/test_imu_safety.cpp)
   target_link_libraries(${PROJECT_NAME}_imu_safety_test
     ${PROJECT_NAME}_imu_safety)
+  ament_add_gtest(${PROJECT_NAME}_serial_test test/test_posix_cdc_serial_port.cpp)
+  target_link_libraries(${PROJECT_NAME}_serial_test ${PROJECT_NAME}_serial)
+  ament_add_gtest(${PROJECT_NAME}_timing_trace_test test/test_timing_trace.cpp)
+  target_include_directories(${PROJECT_NAME}_timing_trace_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   ament_lint_cmake()
   ament_xmllint()
 endif()

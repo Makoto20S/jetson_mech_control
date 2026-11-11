@@ -1,0 +1,2 @@
+<?xml version="1.0"?>
+<library path="mech_bringup_mit_timing_plugins"><class name="mech_bringup/MitZeroTimingController" type="mech::mech_bringup::test::MitZeroTimingController" base_class_type="controller_interface::ControllerInterface"><description>Explicit zero-only host timing test plugin.</description></class></library>

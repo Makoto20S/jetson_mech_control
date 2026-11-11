@@ -1,0 +1,7 @@
+{
+  "purpose": "IMU port conflict check example only; not a motor control configuration",
+  "buses": [
+    {"device_path": "/dev/serial/by-id/usb-Livelybot_Livelybot_Communication_Board_2024051701-if00"},
+    {"device_path": "/dev/serial/by-id/usb-Livelybot_Livelybot_Communication_Board_2024051701-if02"}
+  ]
+}

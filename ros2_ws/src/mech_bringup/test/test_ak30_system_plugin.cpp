@@ -24,7 +24,11 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -154,7 +158,7 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
 // so the frame travels the real UsbCdcCodec decode path. Both CRCs are
 // recomputed exactly like the board does, mirroring the transport test's
 // hand-built packet (test_transport_backends.cpp).
-[[nodiscard]] std::vector<std::uint8_t> feedback_wire_bytes() {
+[[nodiscard]] std::vector<std::uint8_t> feedback_wire_bytes(bool stationary = false, std::uint8_t fault = 0U) {
   constexpr std::uint32_t kFeedbackId =
       mech::mech_protocol_cubemars::feedback_can_id(kDriveId);
   // 7-byte CDC header + 3-byte ID prefix + 14-byte record.
@@ -181,8 +185,10 @@ constexpr std::array<std::uint8_t, 13U> kPassThroughInitGolden{
       static_cast<std::uint8_t>((kFeedbackId >> 24U) & 0xFFU);
   packet[offset + 4U] = 0x0CU;
   packet[offset + 5U] = 8U;
-  const std::array<std::uint8_t, 8U> payload{0x03, 0x84, 0x03, 0xE8,
+  std::array<std::uint8_t, 8U> payload{0x03, 0x84, 0x03, 0xE8,
                                             0x00, 0xC8, 0x28, 0x00};
+  if (stationary) { payload[2] = 0; payload[3] = 0; }
+  payload[7] = fault;
   std::copy(payload.begin(), payload.end(), packet.begin() + offset + 6U);
 
   std::uint8_t crc8 = 0xFFU;
@@ -236,6 +242,103 @@ class Ak30SystemPluginTest : public ::testing::Test {
   int serial_requests_{0};
   Ak30System system_;
 };
+
+TEST_F(Ak30SystemPluginTest, TorqueRawFeedbackSharesFrameIdentityAndPreservesFault) {
+  use_fake_serial();
+  auto params = params_with_sub_mode("torque");
+  params["kp"] = params["kd"] = "0";
+  params["logical_bus"] = "2";
+  auto info = hardware_info(params, {"effort"});
+  for (auto name : {"mit_drive_id", "mit_rx_sequence", "mit_rx_us", "mit_valid",
+                    "mit_position_deg", "mit_erpm", "mit_iq_a", "mit_temperature_c", "mit_fault_code"})
+    info.joints.front().state_interfaces.push_back(interface(name));
+  ASSERT_EQ(system_.on_init(info), hardware_interface::CallbackReturn::SUCCESS);
+  auto states = system_.export_state_interfaces();
+  auto get = [&states](const std::string& name) {
+    for (const auto& state : states)
+      if (state.get_interface_name() == name) return state.get_value();
+    throw std::runtime_error("Missing state interface: " + name);
+  };
+  ASSERT_TRUE(std::isnan(get("mit_position_deg")));
+  ASSERT_EQ(system_.on_configure(lifecycle_state()), hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()), hardware_interface::CallbackReturn::SUCCESS);
+  serial_->clear_tx();
+  const rclcpp::Time time(0);
+  const auto period = rclcpp::Duration::from_nanoseconds(2000000);
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes(true)));
+  ASSERT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_EQ(get("mit_drive_id"), 104.);
+  EXPECT_EQ(get("mit_position_deg"), 90.);
+  EXPECT_EQ(get("mit_erpm"), 0.);
+  EXPECT_EQ(get("mit_iq_a"), 2.);
+  EXPECT_EQ(get("mit_temperature_c"), 40.);
+  EXPECT_EQ(get("mit_fault_code"), 0.);
+  EXPECT_EQ(get("mit_valid"), 1.);
+  const auto seq = get("mit_rx_sequence");
+  const auto rx = get("mit_rx_us");
+  EXPECT_GT(seq, 0.);
+  EXPECT_GT(rx, 0.);
+  ASSERT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_EQ(get("mit_rx_sequence"), seq);
+  EXPECT_EQ(get("mit_rx_us"), rx);
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes(true, 3U)));
+  EXPECT_EQ(system_.read(time, period), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(get("mit_fault_code"), 3.);
+  EXPECT_EQ(get("mit_valid"), 0.);
+  EXPECT_GT(get("mit_rx_sequence"), seq);
+  EXPECT_TRUE(serial_->take_tx().empty());
+}
+
+TEST_F(Ak30SystemPluginTest, SecondBusZeroTorqueUsesProductionTransportAndTrace) {
+  use_fake_serial();
+  auto params = params_with_sub_mode("torque");
+  params["logical_bus"] = "2";
+  params["kp"] = "0";
+  params["kd"] = "0";
+  const auto path = std::filesystem::temp_directory_path() /
+      ("ak30-bus2-" + std::to_string(CommandTrace::now()) + ".jsonl");
+  params["command_trace_path"] = path.string();
+  ASSERT_EQ(system_.on_init(hardware_info(params, {"effort"})),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  serial_->clear_tx();
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  const rclcpp::Time time(0);
+  const auto period = rclcpp::Duration::from_nanoseconds(2000000);
+  ASSERT_TRUE(serial_->inject_rx(feedback_wire_bytes(true)));
+  ASSERT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_TRUE(serial_->take_tx().empty());  // No claim, no MIT commands.
+  const std::vector<std::string> claim{
+      "motor1_joint/effort", "motor1_joint/command_generation"};
+  ASSERT_EQ(system_.prepare_command_mode_switch(claim, {}),
+            hardware_interface::return_type::OK);
+  ASSERT_EQ(system_.perform_command_mode_switch(claim, {}),
+            hardware_interface::return_type::OK);
+  auto commands = system_.export_command_interfaces();
+  for (auto& command : commands)
+    command.set_value(command.get_interface_name() == "effort" ? 0.0 : 1.0);
+  ASSERT_EQ(system_.write(time, period), hardware_interface::return_type::OK);
+  ASSERT_EQ(system_.read(time, period), hardware_interface::return_type::OK);
+  EXPECT_FALSE(serial_->take_tx().empty());
+  ASSERT_EQ(system_.on_deactivate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_cleanup(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  std::ifstream file(path);
+  const std::string trace((std::istreambuf_iterator<char>(file)), {});
+  EXPECT_NE(trace.find("transport_receive"), std::string::npos);
+  EXPECT_NE(trace.find("transport_result"), std::string::npos);
+  EXPECT_NE(trace.find("\"deadline\":2"), std::string::npos);
+  EXPECT_NE(trace.find("\"id\":2152"), std::string::npos);  // mode 8, ID104
+  // Independent midpoint golden: AK3.0 KP KD POS VEL TRQ, not AK2.0 order.
+  EXPECT_NE(trace.find("\"hex\":\"0000007fff7ff7ff\""), std::string::npos);
+  EXPECT_NE(trace.find("\"dropped\":0"), std::string::npos);
+  // The plugin owns its trace until destruction; remove after its final dump.
+  // Cleanup also releases the physical port before any independent disable.
+  EXPECT_FALSE(serial_->is_open());
+}
 
 // Task12: the manager continues cycling INACTIVE hardware after configure and
 // after deactivate. Use Humble's real System wrapper: an erroneous read/write

@@ -1,0 +1,66 @@
+REF01 正逆动力学调用接口
+2026-11-03
+
+入口：项目根目录 ref01_dynamics_api.py，类 REF01Dynamics。
+默认读取 config/mujoco/ref01_dynamics_cad_v1.xml 及其CAD网格，沿用当前CAD参数、+y重力。
+构造一次后重复调用；不启动Viewer、ROS、SSH或电机，不改写模型文件。
+环境：output/mujoco-windows-venv/Scripts/python.exe（已安装NumPy、MuJoCo）。
+其他工程使用时将本项目根目录加入Python模块搜索路径；迁移Linux时保留tools、config、模型与网格目录。
+
+一、三个不同问题
+逆运动学 inverse_kinematics(psi,beta)：姿态 -> 两输入轴角度。
+逆动力学 inverse_dynamics(q,dq,ddq)：姿态、速度、期望加速度 -> 两输入轴力矩。
+正动力学 forward_dynamics(q,dq,tau)：姿态、速度、两输入轴力矩 -> 输出加速度。
+其中逆运动学接口位于ref01_kinematics.py；动力学接口使用MuJoCo的质量矩阵、偏置力、被动力和几何雅可比。
+
+二、直接调用
+
+import numpy as np
+from ref01_dynamics_api import REF01Dynamics
+
+robot = REF01Dynamics()
+q = np.deg2rad([10, 20])
+dq = [0.0, 0.0]
+tau = robot.inverse_dynamics(q, dq, [0.0, 0.0])
+ddq = robot.forward_dynamics(q, dq, tau)
+
+q顺序始终为[psi,beta]，单位rad；dq为rad/s，ddq为rad/s²。
+tau顺序为[tau_alpha1,tau_alpha2]，单位N·m，定义在机构输入轴，不是减速器前电机轴。
+不要把角度写入力矩参数；输入度数时先用np.deg2rad转换。
+范围：psi±45°，beta0～45°，沿用已验证装配分支。非法形状、非有限值和越界姿态报错。
+
+三、闭链动力学处理
+MuJoCo内部8个铰链坐标，以6个闭链约束消去被动自由度。
+全坐标速度v=N*dq；全坐标加速度a=N*ddq+gamma。
+gamma由J*gamma=-Jdot*v和两个独立坐标gamma=0求得。
+M2=N.T*M8*N；bias2=N.T*(M8*gamma+qfrc_bias-qfrc_passive)；A=N[active,:]。
+计算关系：M2*ddq+bias2=A.T*tau+external_torque。
+没有直接截取mj_inverse的两个分量作为电机力矩。
+
+robot.dynamics_terms(q,dq)返回M、bias、A；M为psi/beta坐标下的2×2等效惯性矩阵。
+robot.gravity_compensation(q)直接返回两轴静态重力补偿力矩。
+正逆动力学均可传入external_torque=[Qpsi,Qbeta]，符号为外界对机构作用的广义力矩。
+这里的external_torque与psi/beta功率共轭，不是世界坐标系XYZ力矩。
+
+四、推进原生仿真
+
+robot.reset(q, dq)
+state = robot.step(tau, steps=20)
+
+模型默认每步0.5ms；20步为10ms。返回time_s、q、dq、ddq、tau_applied、max_closure_m、warnings。
+连续调用step会保留完整8坐标状态及闭链弹性数值偏差，不能每步reset。
+正逆动力学计算使用独立数据，不改变step的仿真状态；每个并发线程使用独立实例。
+
+forward_dynamics/inverse_dynamics为理想闭链投影计算，不裁剪力矩。
+step为MuJoCo原生柔性约束积分，执行器使用XML中的±2N·m仿真限幅。
+因此step的瞬时加速度与理想投影结果可能存在闭链柔性造成的差异；tau_applied给出实际仿真执行力矩。
+当前干摩擦为0；若后续启用frictionloss，理想投影接口会报错，需补充干摩擦处理。
+当前惯性来自CAD候选版，轴承归属、转子折算惯量、摩擦和人体载荷按原参数说明保留。
+
+五、示例和验证
+运行 tools/example_ref01_dynamics_api.py 查看一次逆动力学、正动力学与原生积分调用。
+运行 tools/verify_ref01_dynamics_api.py 验证100个状态的互逆关系、独立14维KKT求解、功率映射、
+3种周期共75个冻结轨迹样本、边界与非法输入，以及原生MuJoCo步进。
+验证记录：output/ref01_dynamics_api/verification.json。
+
+MuJoCo API依据：https://mujoco.readthedocs.io/en/3.17.0/APIreference/APIfunctions.html

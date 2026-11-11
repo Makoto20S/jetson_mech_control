@@ -603,6 +603,7 @@ bool Ak30ForceControlRuntime::read(CanonicalState* states,
       }
       mech::mech_protocol_cubemars::ForceControlFeedback feedback{};
       mech::mech_protocol_cubemars::decode_feedback(payload, feedback);
+      raw_feedback_ = feedback;
       raw_erpm_ = feedback.electrical_speed_erpm;
       raw_erpm_status_ = status;
       raw_erpm_available_ = true;

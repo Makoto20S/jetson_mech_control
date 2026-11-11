@@ -113,3 +113,11 @@ Thumbs.db
 !interfaces/golden_frames/**
 !tests/fixtures/
 !tests/fixtures/**
+
+# Unified parallel-exoskeleton project: rebuild these per machine.
+/.local/
+/mujoco/ref01/output/
+/mujoco/ref01/tmp/
+/config/parallel_exo/*.local.json
+!/mujoco/ref01/fixtures/
+!/mujoco/ref01/fixtures/**

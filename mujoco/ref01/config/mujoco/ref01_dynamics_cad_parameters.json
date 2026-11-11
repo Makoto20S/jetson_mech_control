@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "bodies": {
+    "L1": {
+      "mass_kg": 0.08218683509193647,
+      "com_body_m": [
+        -0.012114381000535641,
+        4.549554863945767e-11,
+        -0.00983336280419743
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          1.6576658408432438e-05,
+          4.6441081986475374e-14,
+          -1.0071378698895218e-05
+        ],
+        [
+          4.6441082357349026e-14,
+          5.206468968065495e-05,
+          2.0263564087142554e-14
+        ],
+        [
+          -1.0071378698895218e-05,
+          2.0263564087142554e-14,
+          5.895087203500839e-05
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        1.4304733613100375e-05,
+        5.206468968065494e-05,
+        6.122279683034044e-05
+      ],
+      "principal_axes_quat_wxyz": [
+        4.451012775180091e-10,
+        0.9938530973439003,
+        -7.12578465460505e-10,
+        0.11070691441791618
+      ],
+      "component_count": 23,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "L2": {
+      "mass_kg": 0.03897972653861239,
+      "com_body_m": [
+        7.185673418661646e-10,
+        0.12117572394198634,
+        -2.9651786789334904e-06
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          0.00035029721166802844,
+          -2.4017594392860002e-12,
+          2.2029022689551373e-12
+        ],
+        [
+          -2.4017594380154508e-12,
+          1.7861500152291059e-06,
+          1.2244408364933218e-08
+        ],
+        [
+          2.202902271034928e-12,
+          1.2244408364934108e-08,
+          0.0003509051366241564
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        1.7861495857894533e-06,
+        0.0003502972116680205,
+        0.000350905137053604
+      ],
+      "principal_axes_quat_wxyz": [
+        0.7071067835357159,
+        -1.1118832218111665e-05,
+        1.3681034018906432e-05,
+        0.7071067786176112
+      ],
+      "component_count": 6,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "L3": {
+      "mass_kg": 0.08218683509193647,
+      "com_body_m": [
+        0.012114380998956288,
+        4.530386875967416e-11,
+        -0.03594452600804516
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          1.7050178401373577e-05,
+          -4.612462687221109e-14,
+          -1.0945512264156947e-05
+        ],
+        [
+          -4.612462681865485e-14,
+          5.253820967688269e-05,
+          -1.9501190843752872e-14
+        ],
+        [
+          -1.0945512264156947e-05,
+          -1.95011902878875e-14,
+          5.89508720376997e-05
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        1.4363239619744829e-05,
+        5.253820967688271e-05,
+        6.163781081932845e-05
+      ],
+      "principal_axes_quat_wxyz": [
+        0.992765294485415,
+        3.555078137996965e-10,
+        -0.12007110420616392,
+        6.953115767275199e-10
+      ],
+      "component_count": 23,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "L4": {
+      "mass_kg": 0.03897972653861239,
+      "com_body_m": [
+        7.182871141084942e-10,
+        0.1211757239416418,
+        -2.96518025201923e-06
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          0.00035029721166981054,
+          -2.406770167294052e-12,
+          2.2028866325702707e-12
+        ],
+        [
+          -2.406770168141085e-12,
+          1.7861500151910207e-06,
+          1.2244410394168144e-08
+        ],
+        [
+          2.202886632959679e-12,
+          1.224441039416632e-08,
+          0.0003509051366258997
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        1.7861495857512567e-06,
+        0.0003502972116698026,
+        0.0003509051370553474
+      ],
+      "principal_axes_quat_wxyz": [
+        0.707106783540799,
+        -1.1118843470049472e-05,
+        1.3681026876960435e-05,
+        0.7071067786125277
+      ],
+      "component_count": 6,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "L5": {
+      "mass_kg": 0.043232145604473485,
+      "com_body_m": [
+        -2.252868695549539e-09,
+        0.027367623002655425,
+        -0.010839068785319837
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          3.1427050253100484e-05,
+          1.0067993867580652e-12,
+          8.547188434848581e-14
+        ],
+        [
+          1.0067993867580652e-12,
+          8.153524592916536e-06,
+          -6.698275727242526e-06
+        ],
+        [
+          8.547188434848581e-14,
+          -6.698275727242526e-06,
+          3.5044362219375024e-05
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        6.577419356259684e-06,
+        3.142705025310052e-05,
+        3.662046745603184e-05
+      ],
+      "principal_axes_quat_wxyz": [
+        0.702391616825853,
+        0.08152322813755598,
+        0.08152320492248538,
+        -0.7023915908850009
+      ],
+      "component_count": 7,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "L6": {
+      "mass_kg": 0.10337028672052376,
+      "com_body_m": [
+        -2.1623033667850112e-06,
+        0.11006104289534022,
+        0.0015022010817585887
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          0.0004870089235690733,
+          2.0102976890903136e-08,
+          -3.357687938756106e-10
+        ],
+        [
+          2.0102976890903136e-08,
+          1.2241421092778287e-05,
+          1.4425820146785095e-05
+        ],
+        [
+          -3.357687938756106e-10,
+          1.4425820146785095e-05,
+          0.0004945220265641499
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        1.1810305193529713e-05,
+        0.0004870089244107742,
+        0.0004949531416216976
+      ],
+      "principal_axes_quat_wxyz": [
+        0.010550381387387377,
+        0.7070131088988462,
+        0.7070426686525576,
+        -0.010574403171736411
+      ],
+      "component_count": 5,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "U1_ideal_yoke": {
+      "mass_kg": 0.004456743413350347,
+      "com_body_m": [
+        1.5619762778432319e-12,
+        3.084250260006104e-13,
+        -0.0030342244762720802
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          1.519480293959126e-07,
+          1.6605562344169508e-20,
+          4.342511394018418e-20
+        ],
+        [
+          1.660695290918297e-20,
+          1.554930310239776e-07,
+          -1.9570563612036923e-19
+        ],
+        [
+          4.34251139401842e-20,
+          -1.957056361203693e-19,
+          9.581706993278705e-08
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        9.5817069932787e-08,
+        1.519480293959126e-07,
+        1.5549303102397747e-07
+      ],
+      "principal_axes_quat_wxyz": [
+        0.500000000001798,
+        0.499999999997815,
+        -0.5000000000005443,
+        0.49999999999984235
+      ],
+      "component_count": 1,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    },
+    "U2_ideal_yoke": {
+      "mass_kg": 0.004456743413350347,
+      "com_body_m": [
+        -3.5326041615654537e-13,
+        -7.285552623699753e-14,
+        -0.003034224477629439
+      ],
+      "inertia_com_body_kg_m2": [
+        [
+          1.519480293959126e-07,
+          3.4006240500652015e-20,
+          5.520049227187539e-20
+        ],
+        [
+          3.40062124153984e-20,
+          1.5549303102397763e-07,
+          -1.9574388880277599e-19
+        ],
+        [
+          5.520049227187542e-20,
+          -1.9574388880277594e-19,
+          9.581706993278708e-08
+        ]
+      ],
+      "principal_inertia_kg_m2": [
+        9.581706993278708e-08,
+        1.519480293959126e-07,
+        1.5549303102397763e-07
+      ],
+      "principal_axes_quat_wxyz": [
+        0.5000000000029724,
+        0.4999999999965359,
+        -0.500000000001824,
+        0.4999999999986676
+      ],
+      "component_count": 1,
+      "status": "CAD_candidate",
+      "source": "Native SolidWorks 2024 mass properties; existing rigid grouping with listed approximations"
+    }
+  },
+  "gravity": {
+    "vector_base_m_s2": [
+      0,
+      9.81,
+      0
+    ],
+    "status": "user_axis_convention",
+    "source": "2026-11-03: user specified xz ground and y gravity; +y is downward in MATLAB view"
+  },
+  "joints": {
+    "psi": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "beta": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "alpha1": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "u1_z": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "u1_x": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "alpha2": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "u2_z": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    },
+    "u2_x": {
+      "damping_Nm_s_rad": 0.0,
+      "frictionloss_Nm": 0.0,
+      "armature_kg_m2": 0.0,
+      "status": "idealized"
+    }
+  },
+  "actuator": {
+    "coordinates": "alpha1, alpha2 mechanism input shafts",
+    "gear": 1,
+    "torque_limit_Nm": 2.0,
+    "status": "simulation_only",
+    "source": "test bound; NOT motor rating"
+  },
+  "simulation": {
+    "timestep_s": 0.0005,
+    "closure_solref": [
+      0.002,
+      1
+    ],
+    "closure_solimp": [
+      0.99,
+      0.999,
+      0.0001
+    ]
+  },
+  "missing_materials": [
+    "bearing-ring and fastener ownership refinement",
+    "motor rotor/reflected inertia and transmission",
+    "CAD material audit for unnamed materials and nominal aluminum bearings",
+    "friction and load attachments"
+  ],
+  "model_status": "CAD_candidate_with_grouping_approximations",
+  "source_report": "output/ref01_inertia_20261103/body_inertias.json"
+}

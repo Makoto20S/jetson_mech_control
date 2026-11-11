@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "project": "parallel_exo",
+  "source_branch": "ph-exo/development",
+  "ros_distribution": "humble",
+  "ros_os": "Ubuntu 22.04",
+  "python": "3.10",
+  "profiles": {
+    "imu": {
+      "packages_up_to": [
+        "mech_ctrboard_bridge"
+      ],
+      "hardware_auto_start": false
+    },
+    "servo_imu": {
+      "packages_up_to": [
+        "mech_bringup",
+        "mech_ctrboard_bridge",
+        "mech_exo_state"
+      ],
+      "hardware_auto_start": false
+    },
+    "all": {
+      "all_packages": true,
+      "hardware_auto_start": false
+    },
+    "state": {
+      "packages_up_to": [
+        "mech_exo_state"
+      ],
+      "hardware_auto_start": false
+    }
+  },
+  "git_policy": {
+    "automatic_commit": false,
+    "automatic_push": false,
+    "pr_on_user_request": true
+  }
+}

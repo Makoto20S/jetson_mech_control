@@ -1,0 +1,1217 @@
+{
+  "schema_version": 1,
+  "read_at": "2026-11-05T21:10:58.797681+08:00",
+  "base_commit": "35c8babfbf0cbcc131bba9229d4148b0fbbeaf8c",
+  "purpose": "Unified source management and device migration",
+  "source_roots": {
+    "Mujoco-Win": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\并联外骨骼-ROS框架\\Mujoco-Win",
+    "ctrboard_imu_20261104_v01": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\并联外骨骼-ROS框架\\Mujoco-Linux\\staging\\ctrboard_imu_20261104_v01",
+    "Orin configuration snapshot": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\并联外骨骼-ROS框架\\Mujoco-Linux\\output\\unified_project_20261105"
+  },
+  "source_scope": "Control-only runtime: ROS/IMU, REF01 dynamics and kinematics API, necessary model/meshes and frozen numerical fixtures",
+  "excluded": [
+    "installed virtual environments",
+    "cache and generated build output",
+    "historical ZIP bundles and installation logs",
+    "long raw captures",
+    "shared SSH and other project implementation",
+    "CAD assembly/part source projects",
+    "MATLAB projects",
+    "model authoring/viewer/report/package tools",
+    "historical source reference copies"
+  ],
+  "evidence_scope": "Source import only; see migration_validation.md for separately executed checks",
+  "files": [
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_001.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_001.stl",
+      "source_sha256": "33d6a2b77e3e12bf49a208ae15ca895d586ea47371053b9a572f3589bacc7e9e",
+      "bytes": 131484,
+      "derivation": "byte-identical import",
+      "imported_sha256": "33d6a2b77e3e12bf49a208ae15ca895d586ea47371053b9a572f3589bacc7e9e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_002.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_002.stl",
+      "source_sha256": "94838f7e4af7aa7d07b3153565751920848153654e1ce93851c87be36e7361b7",
+      "bytes": 112784,
+      "derivation": "byte-identical import",
+      "imported_sha256": "94838f7e4af7aa7d07b3153565751920848153654e1ce93851c87be36e7361b7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_003.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_003.stl",
+      "source_sha256": "ce28d0e0e4ba93412744e5ceb4fb8fa9799242850113db8920f89481c7187be5",
+      "bytes": 151284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "ce28d0e0e4ba93412744e5ceb4fb8fa9799242850113db8920f89481c7187be5"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_004.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_004.stl",
+      "source_sha256": "5032418176f67779a2574a652d3d3c0c51ebe5cb44dc97da71db04dee14867f9",
+      "bytes": 88684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "5032418176f67779a2574a652d3d3c0c51ebe5cb44dc97da71db04dee14867f9"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_006.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_006.stl",
+      "source_sha256": "b348059b247d2126b0ba33635e27e6c5b3ef22ae6c6164bb002066465cae3b61",
+      "bytes": 258084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "b348059b247d2126b0ba33635e27e6c5b3ef22ae6c6164bb002066465cae3b61"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_007.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_007.stl",
+      "source_sha256": "52c240019171ea760ee04053741bd59efcab053c2f40a9d05c6646a3ea0e75f7",
+      "bytes": 138384,
+      "derivation": "byte-identical import",
+      "imported_sha256": "52c240019171ea760ee04053741bd59efcab053c2f40a9d05c6646a3ea0e75f7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_008.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_008.stl",
+      "source_sha256": "891216d49d57a65b755395b0ef8cd6ad1f72c7c5e76c78e1d8183ee1f307c656",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "891216d49d57a65b755395b0ef8cd6ad1f72c7c5e76c78e1d8183ee1f307c656"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_009.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_009.stl",
+      "source_sha256": "fd3516aa62cd144c7bed1442b53510d0d0c97281749e4616c5c24fcc39cb6e1c",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "fd3516aa62cd144c7bed1442b53510d0d0c97281749e4616c5c24fcc39cb6e1c"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_010.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_010.stl",
+      "source_sha256": "402406a1bf9fc20969bf3cbbd0ff091b7c74d842c7110a7503b06c2ed6673165",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "402406a1bf9fc20969bf3cbbd0ff091b7c74d842c7110a7503b06c2ed6673165"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_011.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_011.stl",
+      "source_sha256": "16a96e0e9542b64c02fe48b6c308b2559a8578ab21f27689deca52c53ce6599c",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "16a96e0e9542b64c02fe48b6c308b2559a8578ab21f27689deca52c53ce6599c"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_012.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_012.stl",
+      "source_sha256": "32b2f871db7dd71ff34fcdff395ac14451ec07fa261a5cc9c84b4a2307d97c69",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "32b2f871db7dd71ff34fcdff395ac14451ec07fa261a5cc9c84b4a2307d97c69"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_013.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_013.stl",
+      "source_sha256": "d523ffbc4c1ba2fe22fca97b808b89356067b47bbbe7dad49f06d63623bbf3a1",
+      "bytes": 274284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "d523ffbc4c1ba2fe22fca97b808b89356067b47bbbe7dad49f06d63623bbf3a1"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_014.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_014.stl",
+      "source_sha256": "2b7597d2a3833f5838bf541f465a7a701c6b859f61c805dea90d5678aad6e435",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "2b7597d2a3833f5838bf541f465a7a701c6b859f61c805dea90d5678aad6e435"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_015.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_015.stl",
+      "source_sha256": "1e9656444e6ec040f35ae8468eb636f746d80f2c2eb7a638b8ba9f1d1bce40d3",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1e9656444e6ec040f35ae8468eb636f746d80f2c2eb7a638b8ba9f1d1bce40d3"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_016.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_016.stl",
+      "source_sha256": "a2db7eb12fed79fc7605b4c03b8b916163565729d408b28af1e151e27e05e230",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "a2db7eb12fed79fc7605b4c03b8b916163565729d408b28af1e151e27e05e230"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_017.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_017.stl",
+      "source_sha256": "7a6b882bb17c41e0eff9fb372516d8075bbec1ac7609bde951349aea1cb9a562",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "7a6b882bb17c41e0eff9fb372516d8075bbec1ac7609bde951349aea1cb9a562"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_018.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_018.stl",
+      "source_sha256": "83159c7cb8cfd4262a36cb0ff58652d428dd35d0573d6b255f576dd3d3d864b6",
+      "bytes": 136684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "83159c7cb8cfd4262a36cb0ff58652d428dd35d0573d6b255f576dd3d3d864b6"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_019.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_019.stl",
+      "source_sha256": "b5f508899b39f49ff902be8b5f0de6d614d68bdc37b86524aff99d825d3e3ebc",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "b5f508899b39f49ff902be8b5f0de6d614d68bdc37b86524aff99d825d3e3ebc"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_020.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_020.stl",
+      "source_sha256": "2ff2b87ea803c8d873edb6a8207ea95cb18f3f9fe3238b26cd674c53eda17674",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "2ff2b87ea803c8d873edb6a8207ea95cb18f3f9fe3238b26cd674c53eda17674"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_021.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_021.stl",
+      "source_sha256": "c749e1abbfa57056a38ce03d231148f533f55b10f47832e651c9dff0ece8178e",
+      "bytes": 256484,
+      "derivation": "byte-identical import",
+      "imported_sha256": "c749e1abbfa57056a38ce03d231148f533f55b10f47832e651c9dff0ece8178e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_022.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_022.stl",
+      "source_sha256": "fbb01bd4c7041690e8982370d71c8a9625a98481b8e392de1e4f20b73df27296",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "fbb01bd4c7041690e8982370d71c8a9625a98481b8e392de1e4f20b73df27296"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_023.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_023.stl",
+      "source_sha256": "e78d5fca9b85a1f551da7cd2686d43a17dc03116b3bffb12cac7067d7d51eb3d",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "e78d5fca9b85a1f551da7cd2686d43a17dc03116b3bffb12cac7067d7d51eb3d"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_024.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_024.stl",
+      "source_sha256": "26d391e03ab89c84b8562a9e952e65057335f5da7d9581b1fff2b2dbb58efc6f",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "26d391e03ab89c84b8562a9e952e65057335f5da7d9581b1fff2b2dbb58efc6f"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_025.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_025.stl",
+      "source_sha256": "cebe08f886c95628390efdd120f098f7eae24982e17300bbbcb4bed14a302d97",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "cebe08f886c95628390efdd120f098f7eae24982e17300bbbcb4bed14a302d97"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_026.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_026.stl",
+      "source_sha256": "5c8b3d8fb29c473927e56dcac73761c5843c9114e0f46948da18391525f4a3a9",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "5c8b3d8fb29c473927e56dcac73761c5843c9114e0f46948da18391525f4a3a9"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_027.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_027.stl",
+      "source_sha256": "fbaec45f706d877a316f531b998ce64aa31460e838c786e39a7a6bf20a2e226b",
+      "bytes": 31584,
+      "derivation": "byte-identical import",
+      "imported_sha256": "fbaec45f706d877a316f531b998ce64aa31460e838c786e39a7a6bf20a2e226b"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_028.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_028.stl",
+      "source_sha256": "09ea318b61b8225c940e39ce447c1df9f0a64d06847cde3aa3600e3a100cbf9e",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "09ea318b61b8225c940e39ce447c1df9f0a64d06847cde3aa3600e3a100cbf9e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_029.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_029.stl",
+      "source_sha256": "e966e405b29ad8c9529b82735bae07a0c7633f5fa1575d5d7a168c022e0d6ee7",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "e966e405b29ad8c9529b82735bae07a0c7633f5fa1575d5d7a168c022e0d6ee7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_030.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_030.stl",
+      "source_sha256": "1f32044adc29188bec06b722df76ff26e2aa9676848b0cc6a8fd5c9f9fe908f7",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1f32044adc29188bec06b722df76ff26e2aa9676848b0cc6a8fd5c9f9fe908f7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_031.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_031.stl",
+      "source_sha256": "8f2588e4b397857730d1ae6553354be13313bee72d929f6fa2de556877031886",
+      "bytes": 359184,
+      "derivation": "byte-identical import",
+      "imported_sha256": "8f2588e4b397857730d1ae6553354be13313bee72d929f6fa2de556877031886"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_032.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_032.stl",
+      "source_sha256": "bce2fef2a4898f6d20f1ec3bc77950db6855c631df8728e0068fef9bd909c0e5",
+      "bytes": 34084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "bce2fef2a4898f6d20f1ec3bc77950db6855c631df8728e0068fef9bd909c0e5"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_035.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_035.stl",
+      "source_sha256": "9cbf48f399376c7a7e068bc32939595d528022ecfe2aed24e5cd70b3002f01de",
+      "bytes": 258084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "9cbf48f399376c7a7e068bc32939595d528022ecfe2aed24e5cd70b3002f01de"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_036.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_036.stl",
+      "source_sha256": "acd2e3999aaf690fd1f7de9b6aed8a319e26e8e2345b9b85a1fc23b476d2b95e",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "acd2e3999aaf690fd1f7de9b6aed8a319e26e8e2345b9b85a1fc23b476d2b95e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_037.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_037.stl",
+      "source_sha256": "d8afbd9bb1986fa9a163383d076ce602f287d68150edef31753ec69c07786f22",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "d8afbd9bb1986fa9a163383d076ce602f287d68150edef31753ec69c07786f22"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_038.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_038.stl",
+      "source_sha256": "e9a71832ee417e6e5f6133a26a9b12b3421dc6e24a88c3c54f0ab4286905853f",
+      "bytes": 256484,
+      "derivation": "byte-identical import",
+      "imported_sha256": "e9a71832ee417e6e5f6133a26a9b12b3421dc6e24a88c3c54f0ab4286905853f"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_039.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_039.stl",
+      "source_sha256": "b14a0d6e1441423fd1c9d5eea407203a896a0daafccc927df69338f229a0c84f",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "b14a0d6e1441423fd1c9d5eea407203a896a0daafccc927df69338f229a0c84f"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_040.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_040.stl",
+      "source_sha256": "8c504d0e7a20c71a56502520952eab26921e51f939a36317e52536c55ad2fa55",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "8c504d0e7a20c71a56502520952eab26921e51f939a36317e52536c55ad2fa55"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_041.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_041.stl",
+      "source_sha256": "dc82eadef54dff1342a1ee827685096552bac74ae5fa1c5d64c571f067217060",
+      "bytes": 136684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "dc82eadef54dff1342a1ee827685096552bac74ae5fa1c5d64c571f067217060"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_042.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_042.stl",
+      "source_sha256": "395008aa365d254fedef5d71eabda4ccbfc982f7dcf758ad6c3d84fd30adb0be",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "395008aa365d254fedef5d71eabda4ccbfc982f7dcf758ad6c3d84fd30adb0be"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_043.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_043.stl",
+      "source_sha256": "5d4a9d2272286875c2bf83a754b338e8000a928522a676ba682a779acf1919a7",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "5d4a9d2272286875c2bf83a754b338e8000a928522a676ba682a779acf1919a7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_044.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_044.stl",
+      "source_sha256": "c2a475e9a2749c8080aa61fa8d4fe949c5ee90dc5e0c2c94597bdc6d7b80f008",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "c2a475e9a2749c8080aa61fa8d4fe949c5ee90dc5e0c2c94597bdc6d7b80f008"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_045.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_045.stl",
+      "source_sha256": "02d99ac1eade7aa1e8cd6e61bef7359ffdef55e3684fc9d3450ecfa880b8c1a1",
+      "bytes": 274284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "02d99ac1eade7aa1e8cd6e61bef7359ffdef55e3684fc9d3450ecfa880b8c1a1"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_046.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_046.stl",
+      "source_sha256": "f4af30824ad3dc2ab3c84a4328bf62faa5624d9f1f555f7c4f8c9f13a782d3a1",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "f4af30824ad3dc2ab3c84a4328bf62faa5624d9f1f555f7c4f8c9f13a782d3a1"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_047.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_047.stl",
+      "source_sha256": "fa3982cdf0eab9315012d9a2969a4c4413b6c277ba5b41ce9cf252b2dade6c39",
+      "bytes": 138384,
+      "derivation": "byte-identical import",
+      "imported_sha256": "fa3982cdf0eab9315012d9a2969a4c4413b6c277ba5b41ce9cf252b2dade6c39"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_048.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_048.stl",
+      "source_sha256": "b2bff6ce9085260da6a40cbaa6cedc6ec425b08d007c2985f54a2fa2b05eff6b",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "b2bff6ce9085260da6a40cbaa6cedc6ec425b08d007c2985f54a2fa2b05eff6b"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_049.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_049.stl",
+      "source_sha256": "9b37daa7f8586b43177ec783866c8342528f696c17bd2351b0e201c14fd83c2a",
+      "bytes": 28284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "9b37daa7f8586b43177ec783866c8342528f696c17bd2351b0e201c14fd83c2a"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_050.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_050.stl",
+      "source_sha256": "540caa8ab632f480d4291ebaf0b4cc1d1824c809064f9257db2925cd49597248",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "540caa8ab632f480d4291ebaf0b4cc1d1824c809064f9257db2925cd49597248"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_051.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_051.stl",
+      "source_sha256": "9f8558c629b3ccb623ab2c70f57970a93041d7f87927032d2dd3d0511660e8d1",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "9f8558c629b3ccb623ab2c70f57970a93041d7f87927032d2dd3d0511660e8d1"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_052.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_052.stl",
+      "source_sha256": "34f18228935e30e6b4e0d94c5a3da84bff97b5fdcbb3191455872c754d72c000",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "34f18228935e30e6b4e0d94c5a3da84bff97b5fdcbb3191455872c754d72c000"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_053.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_053.stl",
+      "source_sha256": "74db14e6ff9e4daa00b6ad9c6af903f71df789f6c65e788c961fd1342deea179",
+      "bytes": 31584,
+      "derivation": "byte-identical import",
+      "imported_sha256": "74db14e6ff9e4daa00b6ad9c6af903f71df789f6c65e788c961fd1342deea179"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_054.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_054.stl",
+      "source_sha256": "60d31ad91c1829d0fbdcb3819ae81cfed65e524ab2716e021bc679cc736beeef",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "60d31ad91c1829d0fbdcb3819ae81cfed65e524ab2716e021bc679cc736beeef"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_055.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_055.stl",
+      "source_sha256": "9874907f14c9424441a089cc09b41183a7843ddf0ac5a4c943adaa59b1b53187",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "9874907f14c9424441a089cc09b41183a7843ddf0ac5a4c943adaa59b1b53187"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_056.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_056.stl",
+      "source_sha256": "772207a68d6b43a2ddaef83b43c55fc23941b4ff71604a6386aae4861d69455e",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "772207a68d6b43a2ddaef83b43c55fc23941b4ff71604a6386aae4861d69455e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_057.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_057.stl",
+      "source_sha256": "cd0edeb410a5ef49852bb61988325f9206a213c9c2965aeddd74f3d388c6d048",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "cd0edeb410a5ef49852bb61988325f9206a213c9c2965aeddd74f3d388c6d048"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_058.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_058.stl",
+      "source_sha256": "89eccc279dad6a1445d8d2474e5baf13bc654438be223c643f58d0c74e1a3d8a",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "89eccc279dad6a1445d8d2474e5baf13bc654438be223c643f58d0c74e1a3d8a"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_059.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_059.stl",
+      "source_sha256": "564068ab3197576b164eabc50ade16c4b811275c52aa343452ead3a67e50b4a2",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "564068ab3197576b164eabc50ade16c4b811275c52aa343452ead3a67e50b4a2"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_060.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_060.stl",
+      "source_sha256": "057e6d7d31797453cd161adf79d1e6289684c75b46a77eb863b753209a8177f1",
+      "bytes": 230984,
+      "derivation": "byte-identical import",
+      "imported_sha256": "057e6d7d31797453cd161adf79d1e6289684c75b46a77eb863b753209a8177f1"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_063.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_063.stl",
+      "source_sha256": "e44ac712e668c36b9a365575f522ce7733bfba3e7d6ca8d0c2b00a3e52c12a49",
+      "bytes": 359184,
+      "derivation": "byte-identical import",
+      "imported_sha256": "e44ac712e668c36b9a365575f522ce7733bfba3e7d6ca8d0c2b00a3e52c12a49"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_064.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_064.stl",
+      "source_sha256": "7eaa3cffda7a1c140f80f58790402c56a4105b136bd8527adce13a5e6867d743",
+      "bytes": 230984,
+      "derivation": "byte-identical import",
+      "imported_sha256": "7eaa3cffda7a1c140f80f58790402c56a4105b136bd8527adce13a5e6867d743"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_066.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_066.stl",
+      "source_sha256": "d3a7cf947212716c728f8686609edb53b646bb4a533bfc893314c8fe52e61d3f",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "d3a7cf947212716c728f8686609edb53b646bb4a533bfc893314c8fe52e61d3f"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_067.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_067.stl",
+      "source_sha256": "a69f36627d3cb45426e82ceabdc9fb9df4005baefc04f4cf2a1689ccd6f316a5",
+      "bytes": 34084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "a69f36627d3cb45426e82ceabdc9fb9df4005baefc04f4cf2a1689ccd6f316a5"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_069.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_069.stl",
+      "source_sha256": "3eebe4c3bab1fea45cfec62af40564e0df6a0df0dc821eb231f98a1b5a420f18",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "3eebe4c3bab1fea45cfec62af40564e0df6a0df0dc821eb231f98a1b5a420f18"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_070.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_070.stl",
+      "source_sha256": "f744a2ab38c40b38102ad630c7a0c8a0c5664f2ea3139db572abbf654e844b82",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "f744a2ab38c40b38102ad630c7a0c8a0c5664f2ea3139db572abbf654e844b82"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_071.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_071.stl",
+      "source_sha256": "f2c93339a0d19cae9d129485fe0f16f57074be579ca6ffcf5b340fb7535f19ab",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "f2c93339a0d19cae9d129485fe0f16f57074be579ca6ffcf5b340fb7535f19ab"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_074.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_074.stl",
+      "source_sha256": "aaca5aa0f4986423ddbdf6098b79c4d5598820b24f632fe482d0a46abccf7bdd",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "aaca5aa0f4986423ddbdf6098b79c4d5598820b24f632fe482d0a46abccf7bdd"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_075.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_075.stl",
+      "source_sha256": "48c888ff52b8ca840d7e9594af20d5c221f96cca49bce077d286d3af7df17c89",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "48c888ff52b8ca840d7e9594af20d5c221f96cca49bce077d286d3af7df17c89"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_076.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_076.stl",
+      "source_sha256": "388a1639ffaad8b702c1fb10a5cac2896686a8b28bccff02e40a7e8d6c31cc7e",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "388a1639ffaad8b702c1fb10a5cac2896686a8b28bccff02e40a7e8d6c31cc7e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_077.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_077.stl",
+      "source_sha256": "9e1701df40fe24458be1dd33d7699039a320251460c544bf86fcd11276108256",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "9e1701df40fe24458be1dd33d7699039a320251460c544bf86fcd11276108256"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_078.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_078.stl",
+      "source_sha256": "afe102eed25bd0cab7e953f2ce42c7a3876589888e7c4ab9f65231f864e120d2",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "afe102eed25bd0cab7e953f2ce42c7a3876589888e7c4ab9f65231f864e120d2"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_079.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_079.stl",
+      "source_sha256": "5c1653f40f3ef3e0f6d8908960a3b3980d14b923fd600dde4a9780880f8cd4ce",
+      "bytes": 32684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "5c1653f40f3ef3e0f6d8908960a3b3980d14b923fd600dde4a9780880f8cd4ce"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_080.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_080.stl",
+      "source_sha256": "55f6741de861345f14b118ceed1ab420c8baa1e1b9fd598c098d554fcb174518",
+      "bytes": 346884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "55f6741de861345f14b118ceed1ab420c8baa1e1b9fd598c098d554fcb174518"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_081.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_081.stl",
+      "source_sha256": "3f904baa97232f064eb51ad89b45fce29c4c5ea0a9b3d516984db54825d8a6ef",
+      "bytes": 346884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "3f904baa97232f064eb51ad89b45fce29c4c5ea0a9b3d516984db54825d8a6ef"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_083.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_083.stl",
+      "source_sha256": "1455f459cca15f67f5ea8737407fd32fc11647c455510c6a1f5fe104c25ee78e",
+      "bytes": 60084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1455f459cca15f67f5ea8737407fd32fc11647c455510c6a1f5fe104c25ee78e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_084.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_084.stl",
+      "source_sha256": "6419287b17710d4cfeb8e22d2344423d1d2694a5fa06bdaa525f73303767a50d",
+      "bytes": 413884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "6419287b17710d4cfeb8e22d2344423d1d2694a5fa06bdaa525f73303767a50d"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_086.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_086.stl",
+      "source_sha256": "23dba00b7ce5bdab363e6b5acb5850ec3f2052b9e5f98ad34926ed2a5abdaf25",
+      "bytes": 54084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "23dba00b7ce5bdab363e6b5acb5850ec3f2052b9e5f98ad34926ed2a5abdaf25"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_087.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_087.stl",
+      "source_sha256": "48ee7f51400cc7a7a543827be067b4c244b477d07aad399bbaee636a734a5948",
+      "bytes": 413884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "48ee7f51400cc7a7a543827be067b4c244b477d07aad399bbaee636a734a5948"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_088.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_088.stl",
+      "source_sha256": "3e43a6021fb603ffb4bd8bfcecbe0a0bd86f064fc7cdde0a7a2eebd229551883",
+      "bytes": 346884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "3e43a6021fb603ffb4bd8bfcecbe0a0bd86f064fc7cdde0a7a2eebd229551883"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_089.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_089.stl",
+      "source_sha256": "324ada40638f6dd6fecdc6de68ca3856881fbeb661dbe90371724889d7b46f7c",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "324ada40638f6dd6fecdc6de68ca3856881fbeb661dbe90371724889d7b46f7c"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_090.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_090.stl",
+      "source_sha256": "2737c66096b6b35af92cea12a3f4a45d44439c70a6a55221117e4507c1fde641",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "2737c66096b6b35af92cea12a3f4a45d44439c70a6a55221117e4507c1fde641"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_091.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_091.stl",
+      "source_sha256": "913553d948c64d2000c721f94be4e86e6b486774b6d9306d600247b619dfe721",
+      "bytes": 346884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "913553d948c64d2000c721f94be4e86e6b486774b6d9306d600247b619dfe721"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_092.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_092.stl",
+      "source_sha256": "cea591cb023d9a1f1b6a0ad63fa225a5f6bbc7deb7d3f2b8b332bc76ee2df1df",
+      "bytes": 346884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "cea591cb023d9a1f1b6a0ad63fa225a5f6bbc7deb7d3f2b8b332bc76ee2df1df"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_093.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_093.stl",
+      "source_sha256": "a745eb6435f0958ed68084abdf9e3f5dd4e9dcf082f527763fc7e42bc9169cc8",
+      "bytes": 346884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "a745eb6435f0958ed68084abdf9e3f5dd4e9dcf082f527763fc7e42bc9169cc8"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_095.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_095.stl",
+      "source_sha256": "0ca8d3c172fa17507208fa17310dafd872084af59d41f719753375ba94ec2589",
+      "bytes": 12084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "0ca8d3c172fa17507208fa17310dafd872084af59d41f719753375ba94ec2589"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_096.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_096.stl",
+      "source_sha256": "6501f7aef37a09515f54105833aa9dccd5ed39ae67309079afeb3d68a2f474b5",
+      "bytes": 36484,
+      "derivation": "byte-identical import",
+      "imported_sha256": "6501f7aef37a09515f54105833aa9dccd5ed39ae67309079afeb3d68a2f474b5"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_098.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_098.stl",
+      "source_sha256": "fc9005fdfca6f79cfa3f60e457c75d440fe171391e8aecd82a6cbb8cf66bd589",
+      "bytes": 158184,
+      "derivation": "byte-identical import",
+      "imported_sha256": "fc9005fdfca6f79cfa3f60e457c75d440fe171391e8aecd82a6cbb8cf66bd589"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_099.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_099.stl",
+      "source_sha256": "0d2fb092042fcecadbfe41cee90544dc4e2030389c44487610eb3c05c61a980c",
+      "bytes": 149084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "0d2fb092042fcecadbfe41cee90544dc4e2030389c44487610eb3c05c61a980c"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_100.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_100.stl",
+      "source_sha256": "6cb359203e795018a90fd96c3dc3067e4c0e0e34f8b23a157c4987e992baf94b",
+      "bytes": 61884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "6cb359203e795018a90fd96c3dc3067e4c0e0e34f8b23a157c4987e992baf94b"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_101.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_101.stl",
+      "source_sha256": "e14b63b50eb7e5fe39aa8b06608d44bef9c91226ba528fe65415504b82a15ad0",
+      "bytes": 63284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "e14b63b50eb7e5fe39aa8b06608d44bef9c91226ba528fe65415504b82a15ad0"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_102.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_102.stl",
+      "source_sha256": "54d9838840a0fd62d4e28510a8ed67c995760a2e905fdc93559bd5e75e401699",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "54d9838840a0fd62d4e28510a8ed67c995760a2e905fdc93559bd5e75e401699"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_103.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_103.stl",
+      "source_sha256": "13ead38bb93bfe37ed25842b05b0706a8eeaa580e0bead827206460b0760c0cf",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "13ead38bb93bfe37ed25842b05b0706a8eeaa580e0bead827206460b0760c0cf"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_105.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_105.stl",
+      "source_sha256": "8d2a672f05e7f62df592023907e3ee77d1d6522f02cc2417cf67ede2c69ce884",
+      "bytes": 12084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "8d2a672f05e7f62df592023907e3ee77d1d6522f02cc2417cf67ede2c69ce884"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_106.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_106.stl",
+      "source_sha256": "b7301992c84603b743d8d5ee1c89fbbc8d6eb350ac048d9e593541d90dd987e2",
+      "bytes": 61884,
+      "derivation": "byte-identical import",
+      "imported_sha256": "b7301992c84603b743d8d5ee1c89fbbc8d6eb350ac048d9e593541d90dd987e2"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_108.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_108.stl",
+      "source_sha256": "98a2486cc2ff5b61d45ac9d51b9513a49781b79897bcf8ad899fb8373763f025",
+      "bytes": 149084,
+      "derivation": "byte-identical import",
+      "imported_sha256": "98a2486cc2ff5b61d45ac9d51b9513a49781b79897bcf8ad899fb8373763f025"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_109.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_109.stl",
+      "source_sha256": "8ddbb1dacd7d5d38aff65292725db9535665e58d697153e051d8bcf2727e96c2",
+      "bytes": 158184,
+      "derivation": "byte-identical import",
+      "imported_sha256": "8ddbb1dacd7d5d38aff65292725db9535665e58d697153e051d8bcf2727e96c2"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_110.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_110.stl",
+      "source_sha256": "dfa0a0dd2220313057531b0bce13492e7a6e873760385be11ff9fb2d9e760cd5",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "dfa0a0dd2220313057531b0bce13492e7a6e873760385be11ff9fb2d9e760cd5"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_111.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_111.stl",
+      "source_sha256": "342df9ff979a9b3965aaf85cdb524175a3829ed62e2d39ce673f8343ffa914ca",
+      "bytes": 36484,
+      "derivation": "byte-identical import",
+      "imported_sha256": "342df9ff979a9b3965aaf85cdb524175a3829ed62e2d39ce673f8343ffa914ca"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_112.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_112.stl",
+      "source_sha256": "c6331ea85d85c04b8520162525b5f0c23e4ca32d6777ee4c08badd5627bd56da",
+      "bytes": 63284,
+      "derivation": "byte-identical import",
+      "imported_sha256": "c6331ea85d85c04b8520162525b5f0c23e4ca32d6777ee4c08badd5627bd56da"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/assets/ref01_cad_v1/cad_113.stl",
+      "destination": "mujoco/ref01/config/mujoco/assets/ref01_cad_v1/cad_113.stl",
+      "source_sha256": "c81ef5b69508fa5c8812df7ca4494373fd7413767498fff6f01fa0f79bc1ee93",
+      "bytes": 361684,
+      "derivation": "byte-identical import",
+      "imported_sha256": "c81ef5b69508fa5c8812df7ca4494373fd7413767498fff6f01fa0f79bc1ee93"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/ref01_dynamics_cad_parameters.json",
+      "destination": "mujoco/ref01/config/mujoco/ref01_dynamics_cad_parameters.json",
+      "source_sha256": "6fd6b9f30a78a89f59a375c6d9d805a117a6df33a32e659fc456cd617332046e",
+      "bytes": 11005,
+      "derivation": "byte-identical import",
+      "imported_sha256": "6fd6b9f30a78a89f59a375c6d9d805a117a6df33a32e659fc456cd617332046e"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "config/mujoco/ref01_dynamics_cad_v1.xml",
+      "destination": "mujoco/ref01/config/mujoco/ref01_dynamics_cad_v1.xml",
+      "source_sha256": "c1ce29ea3ee4596b6bae5278e232deb25d66e35dc077d936d7ca14f02f23aa5b",
+      "bytes": 32394,
+      "derivation": "byte-identical import",
+      "imported_sha256": "c1ce29ea3ee4596b6bae5278e232deb25d66e35dc077d936d7ca14f02f23aa5b"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "tools/example_ref01_dynamics_api.py",
+      "destination": "mujoco/ref01/tools/example_ref01_dynamics_api.py",
+      "source_sha256": "ea6ff791300e653ec12b930fae744acc4160e3d3ad745962a262be5eea764dd9",
+      "bytes": 818,
+      "derivation": "byte-identical import",
+      "imported_sha256": "ea6ff791300e653ec12b930fae744acc4160e3d3ad745962a262be5eea764dd9"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "tools/ref01_v1.py",
+      "destination": "mujoco/ref01/tools/ref01_v1.py",
+      "source_sha256": "3f395f2ff9dad7b9536aa22af7e82df825fb6d7d75d2e8cdba50f540a885697b",
+      "bytes": 9897,
+      "derivation": "byte-identical import",
+      "imported_sha256": "3f395f2ff9dad7b9536aa22af7e82df825fb6d7d75d2e8cdba50f540a885697b"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "tools/verify_ref01_dynamics_api.py",
+      "destination": "mujoco/ref01/tools/verify_ref01_dynamics_api.py",
+      "source_sha256": "14d9032356e720e6fc39eb7650dcf9d0e9c0efb4b2caed563fd8ae4b154882b3",
+      "bytes": 3549,
+      "derivation": "Baseline input paths changed from generated output to versioned fixtures; checks unchanged",
+      "imported_sha256": "f061a9d51822bd37d197d4b00bc4e51abb9a37c8915d555d472f7604dd5569f7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "tools/verify_ref01_kinematics_api.py",
+      "destination": "mujoco/ref01/tools/verify_ref01_kinematics_api.py",
+      "source_sha256": "0aa4bee4dd83506064a8e22efec3d7462659f8010e7229804c4fdc00dc8392f7",
+      "bytes": 2411,
+      "derivation": "Baseline input paths changed from generated output to versioned fixtures; checks unchanged",
+      "imported_sha256": "1a388cbf2a12ddd5a040ac4f144222d0e99ea689c8c0f1987aebe4d8b1d64ea2"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "docs/REF01正逆动力学接口.txt",
+      "destination": "mujoco/ref01/docs/REF01正逆动力学接口.txt",
+      "source_sha256": "3a6a02c7c5514164dd6ba1b3dcb720ca1ea88d33cb77b2aaed86626d8dc8ac92",
+      "bytes": 3813,
+      "derivation": "byte-identical import",
+      "imported_sha256": "3a6a02c7c5514164dd6ba1b3dcb720ca1ea88d33cb77b2aaed86626d8dc8ac92"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "docs/REF01逆运动学接口.txt",
+      "destination": "mujoco/ref01/docs/REF01逆运动学接口.txt",
+      "source_sha256": "630092dd46938da637128a673d23fe5cd1a11782898dcce900b40714eb9b86dd",
+      "bytes": 2425,
+      "derivation": "byte-identical import",
+      "imported_sha256": "630092dd46938da637128a673d23fe5cd1a11782898dcce900b40714eb9b86dd"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "ref01_dynamics_api.py",
+      "destination": "mujoco/ref01/ref01_dynamics_api.py",
+      "source_sha256": "55c6c97a50f4dfba990e6104d245fd8e0b7ef07c02beb5bbd4e2c91460f87fdd",
+      "bytes": 8042,
+      "derivation": "byte-identical import",
+      "imported_sha256": "55c6c97a50f4dfba990e6104d245fd8e0b7ef07c02beb5bbd4e2c91460f87fdd"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "ref01_kinematics.py",
+      "destination": "mujoco/ref01/ref01_kinematics.py",
+      "source_sha256": "08380bec012544e5d7ba2290d6d0074d49a9ad8f7a3d818a191682138f3c13ea",
+      "bytes": 3694,
+      "derivation": "byte-identical import",
+      "imported_sha256": "08380bec012544e5d7ba2290d6d0074d49a9ad8f7a3d818a191682138f3c13ea"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "output/ref01_kinematics_validation_20261103/matlab_baseline.json",
+      "destination": "mujoco/ref01/fixtures/ref01_kinematics_validation_20261103/matlab_baseline.json",
+      "source_sha256": "1c27b4f058a2ca4a1ab655da53aabd3e7fc11bcdb8ab52a7f429296ce7348e2d",
+      "bytes": 14496712,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1c27b4f058a2ca4a1ab655da53aabd3e7fc11bcdb8ab52a7f429296ce7348e2d"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "output/ref01_dynamics_cad_v1/trajectory_12s.csv",
+      "destination": "mujoco/ref01/fixtures/ref01_dynamics_cad_v1/trajectory_12s.csv",
+      "source_sha256": "51ef0e7abedd81babfdf9f8fe5b1c7de1c109636330a0c8c58dacfbedcb8cd7c",
+      "bytes": 86722,
+      "derivation": "byte-identical import",
+      "imported_sha256": "51ef0e7abedd81babfdf9f8fe5b1c7de1c109636330a0c8c58dacfbedcb8cd7c"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "output/ref01_dynamics_cad_v1/trajectory_6s.csv",
+      "destination": "mujoco/ref01/fixtures/ref01_dynamics_cad_v1/trajectory_6s.csv",
+      "source_sha256": "558490d76e3b1015b371bcea0e8b5601949db4fdf2a9faf522fe45bbd26ed7d7",
+      "bytes": 86722,
+      "derivation": "byte-identical import",
+      "imported_sha256": "558490d76e3b1015b371bcea0e8b5601949db4fdf2a9faf522fe45bbd26ed7d7"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "output/ref01_dynamics_cad_v1/trajectory_3s.csv",
+      "destination": "mujoco/ref01/fixtures/ref01_dynamics_cad_v1/trajectory_3s.csv",
+      "source_sha256": "099c9905e7c607cf0b89e04167f4b9f855f1c2c2b7d56b34510fe12d5ef7470f",
+      "bytes": 86722,
+      "derivation": "byte-identical import",
+      "imported_sha256": "099c9905e7c607cf0b89e04167f4b9f855f1c2c2b7d56b34510fe12d5ef7470f"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "config/parallel_exo/README.md",
+      "destination": "config/parallel_exo/README.md",
+      "source_sha256": "5bf7f2b577be86353fcd10639a51e5fce2e57c81c81e5fc4bed61dbcc1f4bbd7",
+      "bytes": 1170,
+      "derivation": "byte-identical import",
+      "imported_sha256": "5bf7f2b577be86353fcd10639a51e5fce2e57c81c81e5fc4bed61dbcc1f4bbd7"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "config/parallel_exo/servo_pair.example.json",
+      "destination": "config/parallel_exo/servo_pair.example.json",
+      "source_sha256": "d9ca54cbbb25d14c8eb1ca9dfe5356b3e2b427e0ed48b86d06f9d9831070a4a7",
+      "bytes": 312,
+      "derivation": "byte-identical import",
+      "imported_sha256": "d9ca54cbbb25d14c8eb1ca9dfe5356b3e2b427e0ed48b86d06f9d9831070a4a7"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "docs/parallel_exo/project_management.md",
+      "destination": "docs/parallel_exo/project_management.md",
+      "source_sha256": "b0ba031c5106bbb442759773f2ee8f1f8608936b3a6a103bb87ac57f4d843810",
+      "bytes": 3757,
+      "derivation": "byte-identical import",
+      "imported_sha256": "b0ba031c5106bbb442759773f2ee8f1f8608936b3a6a103bb87ac57f4d843810"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "docs/parallel_exo/restore.md",
+      "destination": "docs/parallel_exo/restore.md",
+      "source_sha256": "4f6509897cf9f5fc7938e609a2de96c4f3a36405572db46d2aa1684de48c3319",
+      "bytes": 3594,
+      "derivation": "byte-identical import",
+      "imported_sha256": "4f6509897cf9f5fc7938e609a2de96c4f3a36405572db46d2aa1684de48c3319"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "manifests/parallel_exo_profiles.json",
+      "destination": "manifests/parallel_exo_profiles.json",
+      "source_sha256": "f2b77c586a089015cb096696dadc69d9c4fa95a85d8cd06b153df221769d1e00",
+      "bytes": 555,
+      "derivation": "byte-identical import",
+      "imported_sha256": "f2b77c586a089015cb096696dadc69d9c4fa95a85d8cd06b153df221769d1e00"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "tools/project/restore.py",
+      "destination": "tools/project/restore.py",
+      "source_sha256": "1869f3668c3a0d19222b3ddd2efbd48d7515fbd0536c836063f5629e7413c154",
+      "bytes": 2847,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1869f3668c3a0d19222b3ddd2efbd48d7515fbd0536c836063f5629e7413c154"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "tools/project/ros_workspace.sh",
+      "destination": "tools/project/ros_workspace.sh",
+      "source_sha256": "42a3e0ff913af95c015db8d7d287a15f21e2f628387f7b812f53f86d7f445d74",
+      "bytes": 1885,
+      "derivation": "byte-identical import",
+      "imported_sha256": "42a3e0ff913af95c015db8d7d287a15f21e2f628387f7b812f53f86d7f445d74"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "tools/project/start_imu.sh",
+      "destination": "tools/project/start_imu.sh",
+      "source_sha256": "a43fb71e12c0e1a1f6d614bbdaa100207d9295d74ac5351c3dd249b7cd8e76f3",
+      "bytes": 846,
+      "derivation": "byte-identical import",
+      "imported_sha256": "a43fb71e12c0e1a1f6d614bbdaa100207d9295d74ac5351c3dd249b7cd8e76f3"
+    },
+    {
+      "source_project": "Mujoco-Win",
+      "source_relative": "reports/mujoco_install_20261102/requirements.lock.txt",
+      "destination": "manifests/parallel_exo_python.lock.txt",
+      "source_sha256": "1e5a4fff11148fb3463eec6a6f592ae2328400ebdf5da2437525a65767a7c9d6",
+      "bytes": 188,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1e5a4fff11148fb3463eec6a6f592ae2328400ebdf5da2437525a65767a7c9d6"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/CMakeLists.txt",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/CMakeLists.txt",
+      "source_sha256": "fbcbd7766caa79de8a625039c05c4c8f30b463ca8dcbbf6206d7589570c10118",
+      "bytes": 2626,
+      "derivation": "byte-identical import",
+      "imported_sha256": "fbcbd7766caa79de8a625039c05c4c8f30b463ca8dcbbf6206d7589570c10118"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/src/bridge_node.cpp",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/src/bridge_node.cpp",
+      "source_sha256": "9ab3f6f41021369e29230c2cc558fc268eff746b5a6d3d5ced3df6057c1a80c7",
+      "bytes": 16775,
+      "derivation": "byte-identical import",
+      "imported_sha256": "9ab3f6f41021369e29230c2cc558fc268eff746b5a6d3d5ced3df6057c1a80c7"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/config/ctrboard_usb_cdc.yaml",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/config/ctrboard_usb_cdc.yaml",
+      "source_sha256": "c398ea99a23f112405eb81befbbe317c90d6cfef361235ad32c9e282e3893461",
+      "bytes": 364,
+      "derivation": "byte-identical import",
+      "imported_sha256": "c398ea99a23f112405eb81befbbe317c90d6cfef361235ad32c9e282e3893461"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/launch/ctrboard_usb_cdc.launch.py",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/launch/ctrboard_usb_cdc.launch.py",
+      "source_sha256": "44533b88326926e7b29b56834212310aa9583568cbf438a5063728607bd61a5d",
+      "bytes": 1677,
+      "derivation": "byte-identical import",
+      "imported_sha256": "44533b88326926e7b29b56834212310aa9583568cbf438a5063728607bd61a5d"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/include/mech_ctrboard_bridge/posix_cdc_serial_port.hpp",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/include/mech_ctrboard_bridge/posix_cdc_serial_port.hpp",
+      "source_sha256": "dbfc5ef63a4681c086b5291db9fea7832938288b5686e417fed460adf0a44ba9",
+      "bytes": 1883,
+      "derivation": "byte-identical import",
+      "imported_sha256": "dbfc5ef63a4681c086b5291db9fea7832938288b5686e417fed460adf0a44ba9"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/src/posix_cdc_serial_port.cpp",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/src/posix_cdc_serial_port.cpp",
+      "source_sha256": "bbb4a3fbddc73af302c968f9e48d45ef0aa2d0979876fe7c668532ffb46484cf",
+      "bytes": 4279,
+      "derivation": "byte-identical import",
+      "imported_sha256": "bbb4a3fbddc73af302c968f9e48d45ef0aa2d0979876fe7c668532ffb46484cf"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "ros2_ws/src/mech_ctrboard_bridge/test/test_posix_cdc_serial_port.cpp",
+      "destination": "ros2_ws/src/mech_ctrboard_bridge/test/test_posix_cdc_serial_port.cpp",
+      "source_sha256": "7973897a94ed071ad3fc9c186b282cfce2d107c4f642a5129990205d94ee9e3d",
+      "bytes": 3110,
+      "derivation": "byte-identical import",
+      "imported_sha256": "7973897a94ed071ad3fc9c186b282cfce2d107c4f642a5129990205d94ee9e3d"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "tools/verify_stream.py",
+      "destination": "tools/project/verify_imu_stream.py",
+      "source_sha256": "1c2b774ebc2722d8d1aef097fabfb6c197c1f9a754f24a508774dd30e891b555",
+      "bytes": 10152,
+      "derivation": "byte-identical import",
+      "imported_sha256": "1c2b774ebc2722d8d1aef097fabfb6c197c1f9a754f24a508774dd30e891b555"
+    },
+    {
+      "source_project": "ctrboard_imu_20261104_v01",
+      "source_relative": "tools/check_device.py",
+      "destination": "tools/project/check_imu_device.py",
+      "source_sha256": "e28e8bcd21568501f6b4fe26f7542bd9dbf4a38d8ff134a88844c1f47be7fec4",
+      "bytes": 1534,
+      "derivation": "Motor configuration is an explicit argument instead of an old deployment absolute path",
+      "imported_sha256": "23fa7cded914a21ee92583f658ddcdbd49f73e6508ba954e5df2543aa660182d"
+    },
+    {
+      "source_project": "unified_project_20261105",
+      "source_relative": "docs/parallel_exo/migration_validation.md",
+      "destination": "docs/parallel_exo/migration_validation.md",
+      "derivation": "New migration validation report",
+      "source_sha256": "a2e7c3d590b2862c730d365d5cf7b0da5601bd6299f3b90aac3f1bc1de9d5eeb",
+      "imported_sha256": "a2e7c3d590b2862c730d365d5cf7b0da5601bd6299f3b90aac3f1bc1de9d5eeb",
+      "bytes": 2433
+    },
+    {
+      "source_project": "Orin configuration snapshot",
+      "source_relative": "servo_pair.json",
+      "remote_source": "/home/nvidia/jetson_mech_control/config/servo_pair.json",
+      "read_at": "2026-11-05T21:30:26.714607+08:00",
+      "destination": "config/parallel_exo/servo_pair.ref01.json",
+      "source_sha256": "46aab41affc9f29000714b493a79a2ade93ec77360bf4e8d47bf98cc461d9f6c",
+      "imported_sha256": "fc8bf9417e876cf7ce5d6983946f92fbc3cbb1b6765c2b0316982c01429005e8",
+      "bytes": 2322,
+      "derivation": "Changed only buses[].device_path from machine USB topology to the same board by-id interfaces; equal resolved endpoints verified read-only on Orin"
+    }
+  ],
+  "final_scope_at": "2026-11-05T21:30:26.719608+08:00"
+}

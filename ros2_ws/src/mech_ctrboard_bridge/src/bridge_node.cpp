@@ -5,16 +5,18 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <time.h>
 
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "diagnostic_msgs/msg/diagnostic_status.hpp"
 #include "diagnostic_msgs/msg/key_value.hpp"
 #include "geometry_msgs/msg/vector3_stamped.hpp"
-#include "mech_control_core/posix_cdc_serial_port.hpp"
+#include "mech_ctrboard_bridge/posix_cdc_serial_port.hpp"
 #include "mech_control_core/socketcan_transport.hpp"
 #include "mech_control_core/transport.hpp"
 #include "mech_control_core/usb_cdc_transport.hpp"
 #include "mech_ctrboard_bridge/imu_safety.hpp"
+#include "mech_ctrboard_bridge/timing_trace.hpp"
 #include "mech_ctrboard_bridge/topic_names.hpp"
 #include "mech_protocol_ctrboard/protocol.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -30,7 +32,6 @@ using mech_control_core::CanFrameFormat;
 using mech_control_core::CanFrameType;
 using mech_control_core::CdcProtocolVersion;
 using mech_control_core::FrameFilter;
-using mech_control_core::PosixCdcSerialPort;
 using mech_control_core::RawCanFrame;
 using mech_control_core::SocketCanOptions;
 using mech_control_core::SocketCanTransport;
@@ -43,6 +44,12 @@ using mech_protocol_ctrboard::SensorTelemetryWire;
 
 constexpr std::size_t kMaximumReceiveFramesPerPoll = 64U;
 constexpr auto kDiagnosticPeriod = std::chrono::milliseconds(200);
+
+std::int64_t clock_monotonic_ns() noexcept {
+  timespec stamp{};
+  if (::clock_gettime(CLOCK_MONOTONIC, &stamp) != 0) return 0;
+  return static_cast<std::int64_t>(stamp.tv_sec) * 1000000000LL + stamp.tv_nsec;
+}
 
 std::uint16_t checked_logical_bus(int value) {
   if (value < 0 || value > 65535) {
@@ -108,7 +115,7 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
             declare_parameter<std::string>("transport", "socketcan")),
         interface_name_(declare_parameter<std::string>("interface", "can0")),
         device_path_(
-            declare_parameter<std::string>("device_path", "/dev/ttyACM0")),
+            declare_parameter<std::string>("device_path", "")),
         logical_bus_(checked_logical_bus(
             declare_parameter<int>("logical_bus", 1))),
         board_version_{checked_version_component(
@@ -134,6 +141,19 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
     if (imu_1_frame_id_.empty() || imu_2_frame_id_.empty()) {
       throw std::invalid_argument("IMU frame IDs must not be empty");
     }
+    rcl_interfaces::msg::ParameterDescriptor trace_descriptor;
+    trace_descriptor.read_only = true;
+    const auto trace_path = declare_parameter<std::string>("timing_trace_path", "", trace_descriptor);
+    const auto trace_capacity = declare_parameter<int>("timing_trace_capacity", 400000, trace_descriptor);
+    const auto trace_poll_capacity = declare_parameter<int>("timing_trace_poll_capacity", 100000, trace_descriptor);
+    if (!trace_path.empty()) {
+      if (transport_backend_ != "usb_cdc") {
+        throw std::invalid_argument("timing trace currently supports only usb_cdc");
+      }
+      timing_trace_ = std::make_unique<TimingTrace>(
+          trace_path, trace_capacity, trace_poll_capacity,
+          static_cast<std::int64_t>(poll_period_ms_) * 1000000LL, clock_monotonic_ns);
+    }
     if (transport_backend_ == "socketcan") {
       transport_ = std::make_unique<SocketCanTransport>(
           make_transport_options(interface_name_, logical_bus_));
@@ -146,14 +166,21 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
         throw std::invalid_argument("device_path must not be empty");
       }
       cdc_serial_ = std::make_unique<PosixCdcSerialPort>(device_path_);
+      cdc_serial_->set_read_timing_enabled(timing_trace_ != nullptr);
+      UsbCdcTransport::Clock arrival_clock;
+      if (timing_trace_) {
+        arrival_clock = [this]() noexcept {
+          return *mech_control_core::MonotonicTime::from_nanoseconds(timing_trace_->now_ns());
+        };
+      }
       transport_ = std::make_unique<UsbCdcTransport>(
-          *cdc_serial_, make_usb_cdc_options(logical_bus_, board_version_));
+          *cdc_serial_, make_usb_cdc_options(logical_bus_, board_version_), arrival_clock);
       if (!transport_->open()) {
         throw std::runtime_error(
             "failed to open USB-CDC device " + device_path_ +
             "; check that it exists and the user has dialout access");
       }
-      if (!mech_control_core::initialize_usb_cdc_pass_through(*cdc_serial_)) {
+      if (!cdc_serial_->send_pass_through_init()) {
         transport_->close();
         throw std::runtime_error("failed to initialize USB-CDC pass-through on " +
                                  device_path_);
@@ -212,14 +239,26 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
     if (transport_) {
       transport_->close();
     }
+    if (timing_trace_) {
+      try {
+        timing_trace_->finish(cdc_serial_ ? cdc_serial_->read_clock_errors() : 0);
+      } catch (const std::exception& error) {
+        RCLCPP_ERROR(get_logger(), "Timing trace incomplete: %s", error.what());
+      }
+    }
   }
 
  private:
   void poll_transport() {
+    const auto poll_begin = timing_trace_ ? timing_trace_->now_ns() : 0;
+    const auto packets_before = timing_trace_ ? timing_trace_->packet_observed() : 0;
+    std::uint64_t frames = 0;
+    auto terminal_result = TransportResult::Ok;
     for (std::size_t count = 0U; count < kMaximumReceiveFramesPerPoll;
          ++count) {
       RawCanFrame frame{};
       const auto result = transport_->try_receive(frame);
+      terminal_result = result;
       if (result == TransportResult::WouldBlock) {
         break;
       }
@@ -230,8 +269,11 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
                               static_cast<unsigned int>(result));
         break;
       }
+      ++frames;
+      const auto decode_begin = timing_trace_ ? timing_trace_->now_ns() : 0;
+      const auto serial_read_end = timing_trace_ && cdc_serial_ ? cdc_serial_->last_read_end_ns() : 0;
       for (const auto& packet : decoder_.feed(frame)) {
-        handle_packet(packet);
+        handle_packet(packet, frame.host_arrival.nanoseconds(), serial_read_end, decode_begin);
       }
     }
 
@@ -243,22 +285,43 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
       RCLCPP_WARN(get_logger(), "CtrBoard CRC errors: %llu",
                   static_cast<unsigned long long>(reported_crc_errors_));
     }
+    if (timing_trace_) {
+      timing_trace_->record_poll(poll_begin, timing_trace_->now_ns(), frames,
+                                timing_trace_->packet_observed() - packets_before,
+                                static_cast<std::uint32_t>(terminal_result));
+    }
   }
 
-  void handle_packet(const Packet& packet) {
+  void handle_packet(const Packet& packet, std::int64_t frame_arrival,
+                     std::int64_t serial_read_end, std::int64_t decode_begin) {
     SensorTelemetryWire telemetry{};
     if (!mech_protocol_ctrboard::decode_sensor_state(packet, telemetry)) {
       return;
     }
+    PacketTimingRow trace;
+    if (timing_trace_) {
+      trace.device_ms = telemetry.timestamp_ms;
+      trace.frame_host_arrival_ns = frame_arrival;
+      trace.last_serial_read_end_ns = serial_read_end;
+      trace.decode_begin_ns = decode_begin;
+      trace.decode_end_ns = timing_trace_->now_ns();
+    }
     const auto stamp = now();
+    if (timing_trace_) trace.ros_stamp_ns = stamp.nanoseconds();
     const auto message_stamp =
         static_cast<builtin_interfaces::msg::Time>(stamp);
     const auto imu_1 = prepare_imu_messages(
         telemetry.imu_1, imu_1_frame_id_, message_stamp);
     const auto imu_2 = prepare_imu_messages(
         telemetry.imu_2, imu_2_frame_id_, message_stamp);
+    if (timing_trace_) trace.imu1_publish_begin_ns = timing_trace_->now_ns();
     imu_1_publisher_->publish(imu_1.imu);
+    if (timing_trace_) {
+      trace.imu1_publish_end_ns = timing_trace_->now_ns();
+      trace.imu2_publish_begin_ns = timing_trace_->now_ns();
+    }
     imu_2_publisher_->publish(imu_2.imu);
+    if (timing_trace_) trace.imu2_publish_end_ns = timing_trace_->now_ns();
     if (imu_1.euler.has_value()) {
       imu_1_euler_publisher_->publish(*imu_1.euler);
     }
@@ -291,6 +354,10 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
     std_msgs::msg::UInt32 device_timestamp;
     device_timestamp.data = telemetry.timestamp_ms;
     device_timestamp_publisher_->publish(device_timestamp);
+    if (timing_trace_) {
+      trace.packet_done_ns = timing_trace_->now_ns();
+      timing_trace_->record_packet(trace);
+    }
   }
 
   void publish_diagnostics() {
@@ -356,6 +423,7 @@ class CtrBoardBridgeNode final : public rclcpp::Node {
     diagnostic_publisher_->publish(array);
   }
 
+  std::unique_ptr<TimingTrace> timing_trace_;
   std::string transport_backend_;
   std::string interface_name_;
   std::string device_path_;

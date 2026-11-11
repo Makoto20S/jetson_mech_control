@@ -70,3 +70,31 @@
 - `CubeMars/` 是独立供应商资料仓库，不得进入主仓库。
 - Windows 只作为编辑/Git 环境；ROS 2 Humble、vcan、性能和 ARM64 结论必须来自对应 Ubuntu/ARM64 环境。
 - 控制器、ros2_control hardware plugin 和厂商 codec/session 的边界不得为单个设备品牌而破坏。
+
+
+## 当前工程命名
+
+正式名称为 PH-EXO（并联外骨骼控制系统），ROS 标识采用 ph_exo，公共状态话题为 /ph_exo/state。REF-01 是机构模型的历史标识。新建工程级接口和文档沿用 PH-EXO，模型资料按原编号追溯。仓库及部署路径见 docs/parallel_exo/project_management.md。
+
+## 2026-11-05 并联外骨骼统一项目要求
+
+用户明确要求将现有ROS、IMU、MuJoCo与相关部分整合成同一可迁移工程。先读
+`docs/parallel_exo/project_management.md`与`docs/parallel_exo/restore.md`。
+本分支以整个项目的持续开发与设备迁移为目标，不默认拆成上游贡献任务。
+正式源码在本仓库维护，缓存与机器环境放`.local/`，必要模型及测试输入纳入Git。
+用户需要时整体提交、推送和发起PR；不自行安装自动提交/推送，不自动创建PR。
+旧本地目录是迁入前来源；不得继续在那里修改后声称已经同步本仓库。
+Windows/Linux角色分工仍有效；跨平台源码交接记录提交号，测试结论注明实际主机。
+当前Orin部署不随Git切换；本次整合不授权电机或传感器操作。
+
+本控制仓库不纳入CAD/MATLAB源工程、建模工具、Viewer或历史报告；仅保留运行所需模型、网格、接口和数值验证输入。
+
+
+## 2026-11-06 本地源码与Orin开发副本
+
+按用户要求，本地为唯一正式编辑入口；Orin开发目录为
+`/home/nvidia/parallel_exo_ros_framework/dev/jetson_mech_control`。
+先读`docs/parallel_exo/project_management.md`第7节与`local_orin.md`，使用本地
+`tools/project/Sync-Orin.ps1`同步、核对和发起远端构建/测试。同步可包含未提交内容。
+发现远端独立改动先比对回本地；不强制覆盖，不将源码同步扩大为旧release更新或硬件操作。
+`.local`、日志、编译结果和机器配置留在各端；两端源码清单应一致。Git提交/推送/PR仍按用户需要进行。

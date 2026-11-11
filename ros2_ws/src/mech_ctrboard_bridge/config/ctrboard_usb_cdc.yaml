@@ -1,12 +1,12 @@
 stm32_ctrboard:
   ros__parameters:
     transport: usb_cdc
-    device_path: /dev/ttyACM0
-    logical_bus: 1
+    device_path: /dev/serial/by-id/usb-Livelybot_Livelybot_Communication_Board_2024051701-if08
+    logical_bus: 5
     board_version_major: 4
     board_version_minor: 8
     board_version_patch: 8
     poll_period_ms: 1
     sensor_timeout_ms: 500
-    imu_1_frame_id: thigh_imu_link
-    imu_2_frame_id: shank_imu_link
+    imu_1_frame_id: imu_1_link
+    imu_2_frame_id: imu_2_link

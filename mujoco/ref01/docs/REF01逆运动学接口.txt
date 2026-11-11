@@ -1,0 +1,49 @@
+REF01 逆运动学调用接口
+2026-11-03
+
+文件：项目根目录 ref01_kinematics.py
+依赖：Python 3.10及以上，仅标准库。不需要启动MuJoCo或连接电机。
+可将该文件直接复制到其他Windows/Linux工程使用；几何参数固定为本项目REF01版本。
+
+一、最简调用（脚本在项目根目录，或将项目根目录加入Python模块搜索路径）
+
+from ref01_kinematics import inverse_kinematics
+alpha1, alpha2 = inverse_kinematics(psi=10, beta=20)
+
+默认输入和输出均为度，返回顺序固定为(alpha1, alpha2)。
+弧度调用：inverse_kinematics(psi_rad, beta_rad, unit="rad")，输出也为弧度。
+不要把度数与弧度混用。
+
+二、批量轨迹
+
+from ref01_kinematics import inverse_kinematics_many
+angles = inverse_kinematics_many([(0,20), (10,25), (-10,30)])
+
+每一行是(psi,beta)，返回每一行对应的(alpha1,alpha2)。出现非法行时抛出
+KinematicsError，并指出行号，不返回不完整轨迹。
+
+三、命令行
+
+在项目根目录：
+output\mujoco-windows-venv\Scripts\python.exe -I -B ref01_kinematics.py --psi 10 --beta 20 --unit deg
+
+标准输出为JSON，含psi、beta、alpha1、alpha2和unit。非法输入返回非零退出码。
+
+四、坐标与适用范围
+
+沿用MATLAB固定Oxyz，输出姿态为Rz(psi)Rx(beta)。psi范围[-45,45]度，beta范围[0,45]度。
+alpha1从-x向+y为正，alpha2从+x向+y为正；当前只返回已验证的装配分支。
+函数检查范围、有限数值和几何实数解。非数字、NaN、无穷大和越界值均抛出KinematicsError。
+1e-12弧度以内的边界舍入误差归到边界，不用于扩展工作空间。
+
+返回值是机构输入角，不是电机编码器绝对读数，也不是力矩。
+当前MuJoCo动力学版的ctrl是力矩，不能把此接口输出的角度直接写入ctrl。
+在MuJoCo中应将它作为角度目标交给现有力矩控制器；若用于运动学摆位，另行求被动关节闭合。
+已归档实验的编码器关系alpha1=theta105-45度、alpha2=theta104-45度不在此接口中自动应用。
+
+五、核对
+
+与2026-11-03冻结MATLAB基线的16736组姿态逐项比较，另检查度/弧度一致性、边界、非法输入、批量与命令行。
+记录：output/ref01_kinematics_api/verification.json。
+验证脚本：tools/verify_ref01_kinematics_api.py。
+本次新增接口不修改原MuJoCo模型、原运动学实现或Orin部署。

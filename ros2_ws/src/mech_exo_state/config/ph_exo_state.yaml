@@ -1,0 +1,15 @@
+ph_exo_state:
+  ros__parameters:
+    joint_topic: /joint_states
+    imu1_topic: /imu/imu1/data
+    imu2_topic: /imu/imu2/data
+    joint_names: [motor104_joint, motor105_joint]
+    # Input JointState positions are radians already. Model order is 105, 104.
+    alpha_scales: [1.0, 1.0]
+    alpha_offsets_rad: [-0.7853981633974483, -0.7853981633974483]
+    mapping_confirmed: false
+    # Message-level observation settings, not hardware watchdog settings.
+    timeout_ms: 100.0
+    max_skew_ms: 30.0
+    future_tolerance_ms: 5.0
+    publish_rate_hz: 100.0

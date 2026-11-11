@@ -1,0 +1,71 @@
+{
+  "read_at": "2026-11-06T14:48:04.877582+08:00",
+  "purpose": "EXO-STATE-001 names, units, alpha mapping, timing and evidence boundaries",
+  "copied": false,
+  "derived_changes": "New receive-only ROS state adapter; original sources preserved",
+  "sources": [
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\ROS工程\\jetson_mech_control\\docs\\adr\\ADR-005-monotonic-time-freshness.md",
+      "sha256": "acd009f4a357177a57992c8cdab4377323087d529349cfcc4860a3b7c6591606",
+      "modified_at": "2026-11-05T17:46:30.655838+08:00"
+    },
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\ROS工程\\jetson_mech_control\\docs\\adr\\ADR-016-feedback-quality-fail-closed.md",
+      "sha256": "ee5eb240f5645c23f065f822eea85983835caeae1bc61525c48c77f94b30d94c",
+      "modified_at": "2026-11-05T17:46:30.657836+08:00"
+    },
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\ROS工程\\jetson_mech_control\\docs\\adr\\ADR-020-declared-state-interfaces.md",
+      "sha256": "c93598a1e82a906366ba3f79bb8bab038e0b835a52ecebe5e2b7adce57c50c84",
+      "modified_at": "2026-11-05T17:46:30.658836+08:00"
+    },
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\ROS工程\\jetson_mech_control\\config\\parallel_exo\\servo_pair.ref01.json",
+      "sha256": "fc8bf9417e876cf7ce5d6983946f92fbc3cbb1b6765c2b0316982c01429005e8",
+      "modified_at": "2026-11-05T21:30:26.714608+08:00"
+    },
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\ROS工程\\jetson_mech_control\\ros2_ws\\src\\mech_ctrboard_bridge\\src\\bridge_node.cpp",
+      "sha256": "9ab3f6f41021369e29230c2cc558fc268eff746b5a6d3d5ced3df6057c1a80c7",
+      "modified_at": "2026-11-05T21:10:58.776438+08:00"
+    },
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\并联外骨骼-ROS框架\\Mujoco-Win\\reports\\REF01_CAD运动学验证_20261103_v01.txt",
+      "sha256": "fa7fbd8e627915d02dd2248ffb8db04d3abcc88d9ca515e4d06827c8199e49ef",
+      "modified_at": "2026-11-03T13:42:13.231501+08:00"
+    },
+    {
+      "path": "C:\\Users\\admin\\Desktop\\SSH-ORIN\\并联外骨骼-ROS框架\\Mujoco-Win\\docs\\REF01正逆动力学接口.txt",
+      "sha256": "3a6a02c7c5514164dd6ba1b3dcb720ca1ea88d33cb77b2aaed86626d8dc8ac92",
+      "modified_at": "2026-11-03T17:37:51.621068+08:00"
+    }
+  ],
+  "mujoco_forward_kinematics": {
+    "read_at": "2026-11-06T20:09:00.341343+08:00",
+    "purpose": "MuJoCo runtime FK with original model and frozen numerical acceptance inputs",
+    "copied": false,
+    "derived_changes": "Numerical closure adapter; original MJCF, assets, inverse and dynamics APIs preserved",
+    "evidence_scope": "Software/model consistency only; no hardware or absolute-angle calibration",
+    "sources": [
+      {
+        "project": "unified control repository",
+        "path": "mujoco/ref01/config/mujoco/ref01_dynamics_cad_v1.xml",
+        "sha256": "c1ce29ea3ee4596b6bae5278e232deb25d66e35dc077d936d7ca14f02f23aa5b",
+        "modified_at": "2026-11-05T21:10:57.779956+08:00"
+      },
+      {
+        "project": "unified control repository",
+        "path": "mujoco/ref01/fixtures/ref01_kinematics_validation_20261103/matlab_baseline.json",
+        "sha256": "1c27b4f058a2ca4a1ab655da53aabd3e7fc11bcdb8ab52a7f429296ce7348e2d",
+        "modified_at": "2026-11-05T21:10:58.691590+08:00"
+      },
+      {
+        "project": "unified control repository",
+        "path": "mujoco/ref01/ref01_dynamics_api.py",
+        "sha256": "55c6c97a50f4dfba990e6104d245fd8e0b7ef07c02beb5bbd4e2c91460f87fdd",
+        "modified_at": "2026-11-05T21:10:58.658963+08:00"
+      }
+    ],
+    "historical_reference": "Existing state sources and parallel_exo_import_20261105.json retain original provenance; no MATLAB source copied or used at runtime."
+  }
+}

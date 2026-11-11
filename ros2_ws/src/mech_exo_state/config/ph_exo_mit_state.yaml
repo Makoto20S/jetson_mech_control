@@ -1,0 +1,12 @@
+ph_exo_state:
+  ros__parameters:
+    motor_source: mit
+    mit_topic: /mit_comm/dynamic_joint_states
+    mit_joint_names: [mit_comm_motor104, mit_comm_motor105]
+    mit_feedback_ttl_ms: 60.0
+    # Axes 104,105. AKE60-8 internal ratio; installed speed signs await measurement.
+    mit_pole_pairs: [14, 14]
+    mit_gear_ratios: [8.0, 8.0]
+    mit_speed_directions: [1, 1]
+    mit_speed_confirmed: [false, false]
+    mapping_confirmed: false
