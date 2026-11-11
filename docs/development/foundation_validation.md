@@ -4,6 +4,42 @@ This document is the executable evidence checklist for FND-014/FND-015. All
 commands are software-only unless an operator separately authorizes a vcan
 interface. They never enable a physical CAN interface or open `/dev/ttyACM*`.
 
+## Cold-build dependency network
+
+PR checks can restore dependency layers from the PR merge-ref cache. A main
+push cannot restore that PR-only cache, so a green cached PR does not establish
+that a fresh dependency download currently works. The post-PR35 main run
+failed twice before compilation: Ubuntu archive DNS lookups failed while the
+ROS repository remained reachable, leaving incomplete APT indexes.
+
+Both native builds and the sanitizer builder use
+[`buildkitd.toml`](../../docker/ros_humble_jammy/buildkitd.toml) to configure
+build-container DNS explicitly. This changes only CI builders, not the runner
+host or robot networking. Resolver reachability still needs a real cold build;
+the configured public resolvers are not evidence that the failure is fixed.
+`network-host.log` in each CI evidence artifact records runner resolver settings
+and bounded DNS probes. On an APT failure, the image-build log records the same
+probes from inside the build container, allowing the two environments to be
+compared.
+
+[`apt_update.sh`](../../tools/ci/apt_update.sh) requires a complete index refresh
+(`APT::Update::Error-Mode=any`), makes at most three attempts with 5/10-second
+backoff, and returns failure after exhaustion. A failed refresh never advances
+to package installation. Archive retries/timeouts remain enabled for rosdep as
+well. No source, signature, test or sanitizer check is disabled.
+
+After publishing the repair branch, run **Foundation v0.1 → Run workflow** with
+`cold_cache=true` and `stability_repetitions=0`. Verify both native build/test
+jobs and ASan/UBSan complete, rather than treating a passing portable check or
+cached build as cold validation. A normal PR remains the merge gate; there is
+no need to run the separate 20-round timing campaign for this network change.
+The dispatch uses the workflow from the selected branch; re-running the old
+failed main job uses its old configuration and cannot test this repair.
+
+References: [GitHub cache scope](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache),
+[BuildKit DNS configuration](https://docs.docker.com/build/buildkit/toml-configuration/),
+[Jammy apt-get strict updates](https://manpages.ubuntu.com/manpages/jammy/man8/apt-get.8.html).
+
 ## Required checks
 
 1. Portable repository checks:

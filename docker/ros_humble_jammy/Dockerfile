@@ -9,13 +9,14 @@ ENV LANG=C.UTF-8 \
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # rosdep invokes apt-get too. Bound transient DNS/download retries for both
-# direct toolchain installs and rosdep; exhausted retries still fail the image.
-RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80mech-network-retries
+# direct toolchain installs and rosdep; incomplete indexes must fail as well.
+RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/80mech-network-retries
+COPY tools/ci/apt_update.sh tools/ci/build_network_diagnostics.sh /usr/local/lib/mech-ci/
 
 # The ros-base image intentionally contains the runtime, not the complete
 # build/test toolchain. Keep this list aligned with `base_image_tools` in the
 # dependency manifest so a clean image can run the shared workspace script.
-RUN apt-get update \
+RUN bash /usr/local/lib/mech-ci/apt_update.sh \
     && apt-get install -y --no-install-recommends \
         build-essential \
         git \
@@ -26,7 +27,7 @@ RUN apt-get update \
         python3-vcstool \
     && rm -rf /var/lib/apt/lists/*
 
-# Only dependency manifests invalidate this layer; source/docs arrive later.
+# Dependency manifests and the APT helpers arrive before application source/docs.
 COPY ros2_ws/src/mech_control_core/package.xml /opt/mech-dependencies/mech_control_core/package.xml
 COPY ros2_ws/src/mech_simulation/package.xml /opt/mech-dependencies/mech_simulation/package.xml
 COPY ros2_ws/src/mech_hardware_ros2_control/package.xml /opt/mech-dependencies/mech_hardware_ros2_control/package.xml
@@ -39,7 +40,7 @@ COPY ros2_ws/src/mech_protocol_damiao/package.xml /opt/mech-dependencies/mech_pr
 COPY ros2_ws/src/mech_knee_kinematics/package.xml /opt/mech-dependencies/mech_knee_kinematics/package.xml
 COPY ros2_ws/src/mech_exo_state/package.xml /opt/mech-dependencies/mech_exo_state/package.xml
 COPY ros2_ws/src/mech_assist_control/package.xml /opt/mech-dependencies/mech_assist_control/package.xml
-RUN apt-get update \
+RUN bash /usr/local/lib/mech-ci/apt_update.sh \
     && rosdep update --rosdistro "${ROS_DISTRO}" \
     && rosdep install --from-paths /opt/mech-dependencies --ignore-src \
         --rosdistro "${ROS_DISTRO}" -r -y \
