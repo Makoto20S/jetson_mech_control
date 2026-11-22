@@ -97,18 +97,22 @@ class StateCore:
         if self.motor_source == 'mit' or not self.accept(0, message, now, mono):
             return
         size = len(message.name)
+        # joint_state_broadcaster fills an unexported effort interface with NaN.
+        # Preserve "unavailable" as an empty array, never fabricate zero torque.
+        effort_missing = len(message.effort) == size and all(math.isnan(v) for v in message.effort)
+        effort = [] if effort_missing else message.effort
         if (len(set(message.name)) != size or not all(n in message.name for n in self.names)
                 or len(message.position) != size
                 or len(message.velocity) not in (0, size)
                 or len(message.effort) not in (0, size)
-                or not finite([*message.position, *message.velocity, *message.effort])):
+                or not finite([*message.position, *message.velocity, *effort])):
             self.status[0].valid = False
             self.status[0].reason = 'invalid_joint_fields'
             return
         indices = [message.name.index(n) for n in self.names]
         out = JointState(header=copy.deepcopy(message.header), name=list(self.names))
         for field in ('position', 'velocity', 'effort'):
-            values = getattr(message, field)
+            values = effort if field == 'effort' else getattr(message, field)
             setattr(out, field, [values[i] for i in indices] if len(values) else [])
         self.samples[0] = out
 
@@ -147,6 +151,9 @@ class StateCore:
         out.alpha_velocity = [math.nan, math.nan]
         out.q_position = [math.nan, math.nan]
         out.q_reason = 'joint_source_invalid'
+        out.q_velocity = [math.nan, math.nan]
+        out.q_velocity_reason = 'position_or_input_velocity_invalid'
+        out.q_velocity_condition = math.nan
         out.q_closure_residual_m = math.nan
         out.source_skew_ms = math.nan
         for i, source_status in enumerate(self.status):
@@ -207,6 +214,15 @@ class StateCore:
                     out.q_reason = 'valid_from_motor_angles'
                 except KinematicsError as error:
                     out.q_reason = 'fk_invalid:' + str(error)
+        if out.q_valid and out.alpha_velocity_valid:
+            try:
+                velocity, condition = self.fk.velocity(out.alpha_position, out.alpha_velocity)
+                out.q_velocity = velocity.tolist()
+                out.q_velocity_condition = condition
+                out.q_velocity_valid = True
+                out.q_velocity_reason = 'valid_from_motor_velocities'
+            except KinematicsError as error:
+                out.q_velocity_reason = 'velocity_invalid:' + str(error)
         for i in range(2):
             if self.samples[i+1] is not None:
                 out.imus[i] = copy.deepcopy(self.samples[i+1])

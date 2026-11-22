@@ -116,6 +116,13 @@ class Ak30System : public mech_hardware_ros2_control::CompositeSystem {
   void set_telemetry_sink_for_testing(TelemetrySink sink) noexcept;
 
  protected:
+  bool submit_kinematic_torque() noexcept {
+    return runtime_view_ && runtime_view_->submit_active_torque();
+  }
+  const std::array<double, 9>& kinematic_raw_feedback() const noexcept { return raw_values_; }
+  Ak30ForceControlRuntime::AcceptedTorque kinematic_accepted_torque() const noexcept {
+    return runtime_view_ ? runtime_view_->accepted_torque() : Ak30ForceControlRuntime::AcceptedTorque{};
+  }
   // Read-only/recorder seams for BUILD_TESTING timing composition.
   CommandTrace* timing_trace() noexcept { return command_trace_.get(); }
   const mech_control_core::StatusSnapshot* timing_status() const noexcept {

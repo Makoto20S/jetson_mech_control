@@ -15,7 +15,7 @@ HOME = np.deg2rad([0., 20.])
 
 def ik(q, p=PARAMS):
     psi, beta = q
-    if abs(psi) > np.pi/4+1e-10 or not -1e-10 <= beta <= np.pi/4+1e-10:
+    if abs(psi) > np.pi/4+1e-10 or not np.deg2rad(-8)-1e-10 <= beta <= np.pi/4+1e-10:
         raise ValueError('Outside REF01 selected branch')
     Y = p['h']+p['l']*np.cos(beta)
     Z = p['l']*np.sin(beta)-p['d']
@@ -28,7 +28,7 @@ def ik(q, p=PARAMS):
 def fk(alpha, p=PARAMS):
     psi = (alpha[1]-alpha[0])/2
     phi = np.pi/2-sum(alpha)/2
-    lo, hi = ik([0,0],p)[1], ik([0,np.pi/4],p)[1]
+    lo, hi = ik([0,np.deg2rad(-8)],p)[1], ik([0,np.pi/4],p)[1]
     if abs(psi)>np.pi/4+1e-7 or not lo-1e-7<=phi<=hi+1e-7:
         raise ValueError('Outside coupled alpha domain')
     u = p['h']-p['r']*np.cos(phi)
@@ -81,7 +81,7 @@ def numbers(values):
 def build():
     """Nested two-hinge ideal U joints. Their axes are a declared modeling assumption, not CAD measurements."""
     p=PARAMS; alpha,_=ik(HOME); univ=universal_angles(HOME,alpha)
-    root=ET.Element('mujoco',model='REF01_v1_kinematics')
+    root=ET.Element('mujoco',model='PH-EXO_v1_kinematics')
     root.append(ET.Comment('Geometric prototype: synthetic inertia, gravity/contact off; no hardware commands.'))
     ET.SubElement(root,'compiler',angle='radian',autolimits='true')
     ET.SubElement(root,'option',timestep='0.0005',gravity='0 0 0',integrator='implicitfast',solver='Newton',iterations='100',tolerance='1e-12',jacobian='dense')

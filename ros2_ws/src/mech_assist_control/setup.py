@@ -9,7 +9,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/mech_assist_control']),
         ('share/mech_assist_control', ['package.xml']),
-        ('share/mech_assist_control/config', glob('config/*.yaml')),
+        ('share/mech_assist_control/config', glob('config/*.yaml') + glob('config/*.json')),
         ('share/mech_assist_control/launch', glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],

@@ -19,4 +19,5 @@
     <description>DM4340 MIT velocity/effort system using the shared USB-CAN
     transport and ros2_control command lifecycle.</description>
   </class>
+  <class name="mech_bringup/Ak30KinematicSystem" type="mech::mech_bringup::Ak30KinematicSystem" base_class_type="hardware_interface::SystemInterface"><description>Explicit PTY simulation or supported REF01 bench composition with raw-feedback mapping and bounded command hold.</description></class>
 </library>

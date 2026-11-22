@@ -40,6 +40,27 @@ def populate(core, stamp=NOW, now=NOW, mono=MONO):
 
 
 class StateCoreTests(unittest.TestCase):
+
+    def test_output_velocity_requires_fresh_valid_motor_velocity(self):
+        from ref01_dynamics_api import REF01Dynamics
+        model = REF01Dynamics()
+        native = model.reset([0., math.radians(20.)],[.2,-.3])
+        core = StateCore(mapping_confirmed=True)
+        msg = joints(positions=[float(x)+math.pi/4 for x in native['alpha'][::-1]],
+                     velocities=[float(x) for x in native['alpha_velocity'][::-1]])
+        core.joints(msg,NOW,MONO)
+        state = core.snapshot(NOW,MONO)
+        self.assertTrue(state.q_velocity_valid)
+        for actual,expected in zip(state.q_velocity,native['dq']):
+            self.assertAlmostEqual(actual,float(expected),places=9)
+        stale = core.snapshot(NOW+101*MS,MONO+101*MS)
+        self.assertFalse(stale.q_velocity_valid)
+        self.assertTrue(all(math.isnan(x) for x in stale.q_velocity))
+        msg = joints(stamp=NOW+102*MS,positions=list(msg.position))
+        core.joints(msg,NOW+102*MS,MONO+102*MS)
+        self.assertFalse(core.snapshot(NOW+102*MS,MONO+102*MS).q_velocity_valid)
+
+
     def test_mit_cache_never_refreshes_an_axis_and_ignores_placeholders(self):
         from types import SimpleNamespace
         from mit_feedback import FIELDS
@@ -125,6 +146,25 @@ class StateCoreTests(unittest.TestCase):
         self.assertAlmostEqual(out.alpha_position[0], -1.5)
         self.assertAlmostEqual(out.alpha_position[1], 1.3)
         self.assertEqual(list(out.alpha_velocity), [-8.0, 6.0])
+
+    def test_jsb_absent_effort_is_unavailable_not_zero(self):
+        core = StateCore(mapping_confirmed=True)
+        message = joints(velocities=[0., 0.])
+        message.effort = [math.nan, math.nan]
+        core.joints(message, NOW, MONO)
+        out = core.snapshot(NOW, MONO)
+        self.assertTrue(out.sources[0].valid)
+        self.assertTrue(out.q_valid)
+        self.assertTrue(out.q_velocity_valid)
+        self.assertEqual(list(out.joints.effort), [])
+
+    def test_mixed_or_infinite_effort_still_invalid(self):
+        for effort in ([math.nan, 1.], [math.inf, math.inf]):
+            core = StateCore(mapping_confirmed=True)
+            message = joints(velocities=[0., 0.])
+            message.effort = effort
+            core.joints(message, NOW, MONO)
+            self.assertFalse(core.snapshot(NOW, MONO).sources[0].valid)
 
     def test_bad_joint_frame_invalidates_previous_valid_state_immediately(self):
         bad_frames = [

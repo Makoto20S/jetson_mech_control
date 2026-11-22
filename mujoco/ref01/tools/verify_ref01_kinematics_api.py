@@ -14,7 +14,7 @@ for pose,expected in zip(baseline['q_deg'],baseline['alpha_rad'],strict=True):
     max_error=max(max_error,*(abs(x-y) for x,y in zip(rad,expected)),
                   *(abs(math.radians(x)-y) for x,y in zip(deg,expected)))
 assert max_error<1e-12
-invalid=[(46,20,'deg'),(0,-.01,'deg'),(0,45.01,'deg'),(-46,20,'deg'),
+invalid=[(46,20,'deg'),(0,-8.01,'deg'),(0,45.01,'deg'),(-46,20,'deg'),
          (float('nan'),20,'deg'),(0,float('inf'),'deg'),('10',20,'deg'),(True,20,'deg'),
          (0,20,'degrees'),(0,1,'rad')]
 for psi,beta,unit in invalid:

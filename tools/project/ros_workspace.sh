@@ -11,11 +11,12 @@ fi
 test ! -e "$root/.local/sync/incomplete.json" || { echo 'An interrupted sync needs recovery before building.' >&2; exit 2; }
 action="${1:-build}"
 profile="${2:-imu}"
-case "$action" in build|test|run-state) ;; *) echo 'Usage: ros_workspace.sh build|test|run-state imu|state|servo_imu|all [launch arguments]' >&2; exit 2;; esac
+case "$action" in build|test|run-state) ;; *) echo 'Usage: ros_workspace.sh build|test|run-state imu|state|servo_imu|ref01_native|all [launch arguments]' >&2; exit 2;; esac
 case "$profile" in
   state) selection=(--packages-up-to mech_exo_state);;
   imu) selection=(--packages-up-to mech_ctrboard_bridge);;
   servo_imu) selection=(--packages-up-to mech_bringup mech_ctrboard_bridge mech_exo_state);;
+  ref01_native) selection=(--packages-up-to mech_controllers mech_simulation mech_bringup mech_assist_control);;
   all) selection=();;
   *) echo 'Unknown profile' >&2; exit 2;;
 esac
@@ -35,11 +36,16 @@ export COLCON_HOME="$out/colcon_home" XDG_CACHE_HOME="$root/.local/cache"
 export TMPDIR="$root/.local/tmp"
 mkdir -p "$out" "$ROS_LOG_DIR" "$COLCON_HOME" "$XDG_CACHE_HOME" "$TMPDIR"
 cd "$root"
+cmake_extra=()
+if [[ "$profile" == ref01_native ]]; then
+  mujoco_dir="$("$root/.local/venv/bin/python" -c 'import pathlib,mujoco; print(pathlib.Path(mujoco.__file__).parent)')"
+  cmake_extra=(-DPH_EXO_ENABLE_MUJOCO=ON "-DMUJOCO_ROOT=$mujoco_dir")
+fi
 if [[ "$action" == build ]]; then
   colcon --log-base "$out/log" build --base-paths "$root/ros2_ws/src" \
     --build-base "$out/build" --install-base "$out/install" \
     --executor sequential "${selection[@]}" --cmake-args \
-    -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3 -DCMAKE_BUILD_TYPE=RelWithDebInfo "${cmake_extra[@]}"
 else
   test -f "$out/install/local_setup.bash" || { echo 'Build this profile first.' >&2; exit 2; }
   source "$out/install/local_setup.bash"

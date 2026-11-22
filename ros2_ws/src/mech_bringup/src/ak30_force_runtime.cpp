@@ -346,6 +346,32 @@ bool Ak30ForceControlRuntime::write(const CommandDispatch* commands,
   return true;
 }
 
+bool Ak30ForceControlRuntime::submit_pending_torque() noexcept {
+  if (!started_ || config_.sub_mode !=
+      mech::mech_protocol_cubemars::ForceControlSubMode::Torque) return false;
+  if (!have_pending_ || !fresh_write_) return true;
+  const auto now = clock_();
+  const auto status = session_.snapshot(now).status;
+  const bool usable = has_valid_sample_ && raw_erpm_available_ &&
+      status.has_sample() && status.sequence == raw_erpm_status_.sequence &&
+      status.host_rx_time == raw_erpm_status_.host_rx_time &&
+      (status.quality == SampleQuality::Valid || status.quality == SampleQuality::Degraded) &&
+      !session_.fault_latched() && !torque_overspeed_latched_ &&
+      !position_envelope_latched_ && !position_tuple_latched_;
+  if (!usable) {
+    has_valid_sample_ = false;
+    cancel_pending(0);
+    capture_error(FeedbackTelemetryReason::TorqueSpeedUnavailable, now);
+    return false;
+  }
+  if (!submit_stored(now)) {
+    cancel_pending(0);
+    capture_error(FeedbackTelemetryReason::CommandSubmission, now);
+    return false;
+  }
+  return true;
+}
+
 void Ak30ForceControlRuntime::cancel_pending(std::size_t index) noexcept {
   if (index >= resource_count_) {
     return;
@@ -503,6 +529,17 @@ bool Ak30ForceControlRuntime::submit_stored(MonotonicTime now) noexcept {
     return true;
   }
   return false;
+}
+
+Ak30ForceControlRuntime::AcceptedTorque Ak30ForceControlRuntime::accepted_torque() const noexcept {
+  const auto& frame=session_.last_accepted_frame();
+  if(config_.sub_mode!=mech::mech_protocol_cubemars::ForceControlSubMode::Torque ||
+     !frame.has_value() || frame->payload_size!=8U)return {};
+  const unsigned code=(static_cast<unsigned>(frame->payload[6]&15U)<<8U)|frame->payload[7];
+  const double range=config_.mapping.ranges.torque_max_nm;
+  const double effort=config_.mapping.direction_sign.value*
+      mech::mech_protocol_cubemars::dequantize(code,-range,range,12U);
+  return {effort,frame->host_arrival.nanoseconds()*1e-9,session_.accepted_command_sequence()};
 }
 
 bool Ak30ForceControlRuntime::publish_states(

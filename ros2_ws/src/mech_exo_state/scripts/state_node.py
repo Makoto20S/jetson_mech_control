@@ -3,11 +3,13 @@
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 import math
+import gc
+import json
 import time
 import rclpy
 from rclpy.node import Node
 from rclpy.clock import Clock, ClockType
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from rcl_interfaces.msg import ParameterDescriptor
 from control_msgs.msg import DynamicJointState
 from sensor_msgs.msg import JointState, Imu
@@ -21,6 +23,8 @@ class StateNode(Node):
         super().__init__('ph_exo_state')
         def param(name, default):
             return self.declare_parameter(name, default, ParameterDescriptor(read_only=True)).value
+        self.freeze_gc_before_spin = param('freeze_gc_before_spin', False)
+        self.timing_gc_path = param('timing_gc_path', '')
         model_path = str(Path(get_package_share_directory('mech_exo_state')) / 'mujoco/ref01_dynamics_cad_v1.xml')
         self.core = StateCore(model_path=model_path,
             motor_source=param('motor_source', 'joint_states'),
@@ -39,12 +43,15 @@ class StateNode(Node):
         rate = param('publish_rate_hz', 100.)
         if not math.isfinite(rate) or not 1 <= rate <= 1000:
             raise ValueError('publish_rate_hz must be in [1, 1000]')
+        self.publish_on_joint_message = param('publish_on_joint_message', False)
         self.trace = TimingTrace(param('timing_trace_path', ''), round(1e9 / rate),
                                  param('timing_capacity_rows', 2_000_000))
         self.publisher = self.create_publisher(RobotState, 'ph_exo/state', qos_profile_sensor_data)
         self.create_subscription(DynamicJointState, param('mit_topic', '/mit_comm/dynamic_joint_states'),
                                  self.on_mit_feedback, qos_profile_sensor_data)
-        self.create_subscription(JointState, param('joint_topic', '/joint_states'), self.on_joints, qos_profile_sensor_data)
+        joint_qos = (QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+                     if self.publish_on_joint_message else qos_profile_sensor_data)
+        self.create_subscription(JointState, param('joint_topic', '/joint_states'), self.on_joints, joint_qos)
         self.create_subscription(Imu, param('imu1_topic', '/imu/imu1/data'), lambda msg: self.on_imu(1, msg), qos_profile_sensor_data)
         self.create_subscription(Imu, param('imu2_topic', '/imu/imu2/data'), lambda msg: self.on_imu(2, msg), qos_profile_sensor_data)
         self.timer = self.create_timer(1./rate, self.publish_state, clock=Clock(clock_type=ClockType.STEADY_TIME))
@@ -70,6 +77,8 @@ class StateNode(Node):
 
     def on_joints(self, msg):
         self.core.joints(msg, self.get_clock().now().nanoseconds, time.monotonic_ns())
+        if self.publish_on_joint_message:
+            self.publish_state(feedback_event=True)
 
     def on_imu(self, index, msg):
         if not self.trace.enabled:
@@ -80,14 +89,27 @@ class StateNode(Node):
         end = time.monotonic_ns()
         self.trace.record_imu(index, ns(msg.header.stamp), entry, end)
 
-    def publish_state(self):
+    def publish_state(self, feedback_event=False):
+        if self.publish_on_joint_message and not feedback_event:
+            status = self.core.status[0]
+            received = self.core.mono[0]
+            # Avoid recomputing FK for an already published, still-fresh sample.
+            if (status.valid and received is not None
+                    and 0 <= time.monotonic_ns() - received <= self.core.ttl
+                    and -self.core.future <= self.get_clock().now().nanoseconds
+                        - ns(status.source_stamp) <= self.core.ttl):
+                return
         if not self.trace.enabled:
-            self.publisher.publish(self.core.snapshot(self.get_clock().now().nanoseconds, time.monotonic_ns()))
+            state = self.core.snapshot(self.get_clock().now().nanoseconds, time.monotonic_ns())
+            if not self.publish_on_joint_message or feedback_event or not state.sources[0].valid:
+                self.publisher.publish(state)
             return
         start = time.monotonic_ns()
         now = self.get_clock().now().nanoseconds
         snapshot = time.monotonic_ns()
         state = self.core.snapshot(now, snapshot)
+        if self.publish_on_joint_message and not feedback_event and state.sources[0].valid:
+            return
         publish_begin = time.monotonic_ns()
         self.publisher.publish(state)
         end = time.monotonic_ns()
@@ -111,13 +133,26 @@ class StateNode(Node):
 def main():
     rclpy.init()
     node = None
+    gc_events = []
+    def gc_event(phase, info):
+        gc_events.append((time.monotonic_ns(), phase, info['generation']))
     try:
         node = StateNode()
+        if node.timing_gc_path:
+            gc.callbacks.append(gc_event)
+        if node.freeze_gc_before_spin:
+            gc.collect()
+            gc.freeze()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
         if node is not None:
+            if node.timing_gc_path:
+                gc.callbacks.remove(gc_event)
+                Path(node.timing_gc_path).write_text(json.dumps(gc_events))
+            if node.freeze_gc_before_spin:
+                gc.unfreeze()
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

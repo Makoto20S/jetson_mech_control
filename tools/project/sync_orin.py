@@ -80,6 +80,26 @@ def file_record(path, mode=None):
             'mode': mode if mode is not None else (0o755 if path.stat().st_mode & 0o111 else 0o644)}
 
 
+def runtime_policy(root):
+    path = root / "manifests/orin_runtime.json"
+    if not path.exists():
+        return None
+    policy = json.loads(path.read_text(encoding="utf-8"))
+    if policy.get("schema") != 1 or not policy.get("files") or not policy.get("directories"):
+        raise RuntimeError("Invalid Orin runtime deployment policy")
+    for name in policy["files"] + policy["directories"]:
+        relative(name)
+    for name in policy["files"]:
+        if not safe_path(root, name).is_file():
+            raise RuntimeError("Missing runtime dependency: " + name)
+    return policy
+
+
+def runtime_selected(name, policy):
+    return policy is None or name in policy["files"] or any(
+        name.startswith(prefix + "/") for prefix in policy["directories"])
+
+
 def local_files(root):
     env = {**os.environ, 'GIT_OPTIONAL_LOCKS': '0'}
     def git(*args):
@@ -96,8 +116,9 @@ def local_files(root):
                 raise RuntimeError('Resolve Git conflicts, links or nested repositories before syncing')
             modes[name.decode()] = 0o755 if mode == b'100755' else 0o644
     result = {}
+    policy = runtime_policy(root)
     for name in sorted(set(p.decode() for p in raw.split(b'\0') if p)):
-        if excluded(name) or local_only_report(name):
+        if excluded(name) or local_only_report(name) or not runtime_selected(name, policy):
             continue
         relative(name)
         path = safe_path(root, name)
@@ -279,7 +300,7 @@ def remote_operation(request):
             if not state or current != wanted or state['stamp'] != stamp(wanted):
                 raise RuntimeError('Local and Orin sources differ; synchronize first')
             profile = request['profile']
-            if profile not in ('imu', 'state', 'servo_imu', 'all'):
+            if profile not in ('imu', 'state', 'servo_imu', 'ref01_native', 'all'):
                 raise RuntimeError('Invalid build profile')
             build_path = metadata / 'builds.json'
             builds = json.loads(build_path.read_text()) if build_path.exists() else {}
@@ -306,7 +327,7 @@ def remote_operation(request):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['status', 'sync', 'build', 'test'], nargs='?', default='status')
-    parser.add_argument('--profile', choices=['imu', 'state', 'servo_imu', 'all'], default='imu')
+    parser.add_argument('--profile', choices=['imu', 'state', 'servo_imu', 'ref01_native', 'all'], default='imu')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     config = json.loads((root / 'config/parallel_exo/orin_sync.json').read_text(encoding='utf-8-sig'))

@@ -340,6 +340,37 @@ TEST_F(Ak30SystemPluginTest, SecondBusZeroTorqueUsesProductionTransportAndTrace)
   EXPECT_FALSE(serial_->is_open());
 }
 
+TEST_F(Ak30SystemPluginTest, ErrorRevokesWithoutDumpingTraceInManagerCycle) {
+  use_fake_serial();
+  auto params = params_with_sub_mode("torque");
+  params["kp"] = "0"; params["kd"] = "0";
+  const auto path = std::filesystem::temp_directory_path() /
+      ("ak30-error-" + std::to_string(CommandTrace::now()) + ".jsonl");
+  params["command_trace_path"] = path.string();
+  ASSERT_EQ(system_.on_init(hardware_info(params, {"effort"})),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_configure(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system_.on_activate(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  serial_->clear_tx();
+  ASSERT_EQ(system_.on_error(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_FALSE(serial_->is_open());
+  const auto period = rclcpp::Duration::from_nanoseconds(5000000);
+  EXPECT_EQ(system_.write(rclcpp::Time(0), period), hardware_interface::return_type::ERROR);
+  EXPECT_TRUE(serial_->take_tx().empty());
+  ASSERT_EQ(system_.on_shutdown(lifecycle_state()),
+            hardware_interface::CallbackReturn::SUCCESS);
+  std::ifstream file(path);
+  const std::string trace((std::istreambuf_iterator<char>(file)), {});
+  EXPECT_NE(trace.find("hardware_error_begin"), std::string::npos);
+  EXPECT_NE(trace.find("hardware_error_revoked"), std::string::npos);
+  EXPECT_NE(trace.find("hardware_error_end"), std::string::npos);
+  EXPECT_NE(trace.find("\"dropped\":0"), std::string::npos);
+}
+
 // Task12: the manager continues cycling INACTIVE hardware after configure and
 // after deactivate. Use Humble's real System wrapper: an erroneous read/write
 // invokes on_error and moves the component out of INACTIVE, exactly as on bench.

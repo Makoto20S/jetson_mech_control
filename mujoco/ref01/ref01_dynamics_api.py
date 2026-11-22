@@ -62,7 +62,7 @@ class REF01Dynamics:
         return np.vstack(J)
 
     def _position(self, q):
-        alpha = np.array(inverse_kinematics(*q,unit='rad'))
+        alpha = np.array(inverse_kinematics(*q,unit='rad',observed_pose=True))
         u = universal_angles(q,alpha)
         values = dict(psi=q[0], beta=q[1], alpha1=alpha[0], alpha2=alpha[1],
                       u1_z=u[0,0],u1_x=u[0,1],u2_z=u[1,0],u2_x=u[1,1])
@@ -153,5 +153,6 @@ class REF01Dynamics:
         d = self._sim
         closure = max(np.linalg.norm(d.site_xpos[a]-d.site_xpos[b]) for a,b in self._sites)
         return dict(time_s=float(d.time),q=d.qpos[self._out].copy(),dq=d.qvel[self._out].copy(),
+                    alpha=d.qpos[self._active].copy(),alpha_velocity=d.qvel[self._active].copy(),
                     ddq=d.qacc[self._out].copy(),tau_applied=d.actuator_force[self._actuators].copy(),
                     max_closure_m=float(closure),warnings=int(sum(w.number for w in d.warning)))

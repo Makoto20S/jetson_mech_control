@@ -38,6 +38,7 @@ COPY ros2_ws/src/mech_ctrboard_bridge/package.xml /opt/mech-dependencies/mech_ct
 COPY ros2_ws/src/mech_bringup/package.xml /opt/mech-dependencies/mech_bringup/package.xml
 COPY ros2_ws/src/mech_protocol_damiao/package.xml /opt/mech-dependencies/mech_protocol_damiao/package.xml
 COPY ros2_ws/src/mech_knee_kinematics/package.xml /opt/mech-dependencies/mech_knee_kinematics/package.xml
+COPY ros2_ws/src/ph_exo_interfaces/package.xml /opt/mech-dependencies/ph_exo_interfaces/package.xml
 COPY ros2_ws/src/mech_exo_state/package.xml /opt/mech-dependencies/mech_exo_state/package.xml
 COPY ros2_ws/src/mech_assist_control/package.xml /opt/mech-dependencies/mech_assist_control/package.xml
 RUN bash /usr/local/lib/mech-ci/apt_update.sh \

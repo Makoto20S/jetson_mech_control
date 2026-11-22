@@ -1,4 +1,4 @@
-REF01 正逆动力学调用接口
+PH-EXO 正逆动力学调用接口
 2026-11-03
 
 入口：项目根目录 ref01_dynamics_api.py，类 REF01Dynamics。
@@ -27,7 +27,7 @@ ddq = robot.forward_dynamics(q, dq, tau)
 q顺序始终为[psi,beta]，单位rad；dq为rad/s，ddq为rad/s²。
 tau顺序为[tau_alpha1,tau_alpha2]，单位N·m，定义在机构输入轴，不是减速器前电机轴。
 不要把角度写入力矩参数；输入度数时先用np.deg2rad转换。
-范围：psi±45°，beta0～45°，沿用已验证装配分支。非法形状、非有限值和越界姿态报错。
+范围：psi±45°，beta−8～45°，沿用已验证装配分支。非法形状、非有限值和越界姿态报错。
 
 三、闭链动力学处理
 MuJoCo内部8个铰链坐标，以6个闭链约束消去被动自由度。

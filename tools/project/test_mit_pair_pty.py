@@ -1,5 +1,8 @@
 """Orin software test. The only device endpoints are the PTYs owned by this process."""
+import argparse
+import csv
 import json
+import math
 import os
 from pathlib import Path
 import struct
@@ -55,7 +58,47 @@ def code(row):
     return int(row['hex'][-3:], 16)
 
 
-def run_case(work, mode, node, manager_bin, disable_bin):
+def torque_code(nm):
+    # The PTY controller clips commands at +/-0.2 Nm before 12-bit encoding.
+    limited = max(-.2, min(.2, nm))
+    return int((limited + 15.) / 30. * 4095)
+
+
+def select_trace_targets(path):
+    """Select one original in-envelope row per disturbance; never rescale it."""
+    required = {'case', 'time_s', 'tau104_nm', 'tau105_nm'}
+    selected = {}
+    scores = {}
+    with path.open(encoding='utf-8', newline='') as stream:
+        rows = csv.DictReader(stream)
+        if not required.issubset(rows.fieldnames or ()):
+            raise ValueError(f'Trace requires {sorted(required)}')
+        for index, row in enumerate(rows, start=2):
+            case = row['case'].strip()
+            stamp = float(row['time_s'])
+            pair = [float(row[key]) for key in ('tau104_nm', 'tau105_nm')]
+            if not case or not all(math.isfinite(x) for x in [stamp, *pair]):
+                raise ValueError(f'Invalid trace row {index}')
+            scores.setdefault(case, None)
+            if max(map(abs,pair)) > .2:
+                continue
+            codes = [torque_code(value) for value in pair]
+            if codes == [2047,2047]:
+                continue
+            # Maximise the ability to detect an axis swap, then distance from zero.
+            score = (abs(codes[0]-codes[1]), sum(abs(c-2047) for c in codes))
+            if scores[case] is None or score > scores[case]:
+                scores[case] = score
+                selected[case] = dict(case=case, time_s=stamp, csv_line=index,
+                                      effort_nm=pair, expected_codes=codes)
+    if len(scores) < 2 or set(selected) != set(scores):
+        raise ValueError('Each of at least two cases needs a nonzero target inside +/-0.2 Nm')
+    if not any(score[0] >= 2 for score in scores.values()):
+        raise ValueError('Trace contains no distinct pair suitable for checking axis order')
+    return list(selected.values())
+
+
+def run_case(work, mode, node, manager_bin, disable_bin, trace_target=None):
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
     from std_srvs.srv import Trigger
     import rclpy
@@ -65,6 +108,7 @@ def run_case(work, mode, node, manager_bin, disable_bin):
     # Unique ROS namespace prevents discovery of a different controller manager.
     mit.NS = '/mit_pair_pty_' + uuid4().hex
     joint_names = ['mit_comm_motor104', 'mit_comm_motor105']
+    effort_nm = trace_target['effort_nm'] if trace_target is not None else [.5, -.1]
     gateways = []
     manager = None
     pub = None
@@ -99,7 +143,7 @@ def run_case(work, mode, node, manager_bin, disable_bin):
             stamp = node.get_clock().now().nanoseconds + delta_ns
             msg = JointTrajectory(joint_names=names)
             msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(stamp, 10**9)
-            msg.points = [JointTrajectoryPoint(effort=[.5, -.1])]
+            msg.points = [JointTrajectoryPoint(effort=effort_nm)]
             pub.publish(msg)
 
         with (work/'manager.log').open('w') as log:
@@ -119,15 +163,20 @@ def run_case(work, mode, node, manager_bin, disable_bin):
                 rclpy.spin_once(node,timeout_sec=.012)
             assert not any(g.rows for g in gateways), 'Invalid/old commands armed a drive'
 
-            expected = [int((v+15.)/30*4095) for v in (.2,-.1)]
+            expected = [torque_code(v) for v in effort_nm]
             def at_targets():
-                return all(any(r['id']==0x800+g.drive and code(r)==want for r in g.rows)
-                           for g,want in zip(gateways,expected))
+                # Check the settled values, not a transient crossed on the ramp.
+                for gateway, want in zip(gateways, expected):
+                    latest = gateway.rows[-3:]
+                    if len(latest) != 3 or any(
+                            r['id'] != 0x800 + gateway.drive or code(r) != want for r in latest):
+                        return False
+                return True
             deadline = time.monotonic()+1
             while time.monotonic()<deadline and not at_targets():
                 publish()
                 rclpy.spin_once(node,timeout_sec=.01)
-            assert at_targets(), 'Did not observe distinct signed clipped targets on both wires'
+            assert at_targets(), 'Did not observe settled target codes on both PTYs'
             injected = time.monotonic_ns()
             if mode == 'overcurrent':
                 gateways[1].iq_word = 75
@@ -175,7 +224,7 @@ def run_case(work, mode, node, manager_bin, disable_bin):
         assert shutdown_result.returncode == (2 if mode=='loss' else 0)
         for g in gateways:
             assert not g.errors and sum(r['id']==0xf00+g.drive for r in g.rows)==1, (g.drive,g.errors)
-        print(json.dumps(dict(case=mode, codes=expected, status=status.message, last_frame_ms=stop_ms,
+        print(json.dumps(dict(case=mode, trace_target=trace_target, codes=expected, status=status.message, last_frame_ms=stop_ms,
                               disable_ack=ack, missing=summary['missing'])), flush=True)
     except BaseException:
         if (work/'manager.log').exists():
@@ -193,6 +242,18 @@ def run_case(work, mode, node, manager_bin, disable_bin):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--impedance-trace', type=Path,
+                        help='traces.csv from the fixed-pose MuJoCo run; test actual paired efforts')
+    parser.add_argument('--check', action='store_true',
+                        help='check CSV selection/expected codes only; portable, no ROS or device I/O')
+    args = parser.parse_args()
+    targets = select_trace_targets(args.impedance_trace) if args.impedance_trace else []
+    if args.check:
+        if not targets:
+            parser.error('--check requires --impedance-trace')
+        print(json.dumps(targets, indent=2))
+        return
     from ament_index_python.packages import get_package_prefix
     import rclpy
     os.environ.update(ROS_DOMAIN_ID='178', ROS_LOCALHOST_ONLY='1')
@@ -204,9 +265,12 @@ def main():
     rclpy.init()
     node = rclpy.create_node('ph_exo_pair_pty_test_'+uuid4().hex)
     try:
-        for mode in ('expiry','overcurrent','loss'):
+        scenarios = [('expiry',target) for target in targets] if targets else [
+            ('expiry',None), ('overcurrent',None), ('loss',None)]
+        for mode,target in scenarios:
             with tempfile.TemporaryDirectory(dir=mit.ROOT/'.local/tmp') as temp:
-                run_case(Path(temp),mode,node,manager_bin,bringup/'lib/mech_bringup/servo_disable')
+                run_case(Path(temp),mode,node,manager_bin,bringup/'lib/mech_bringup/servo_disable',
+                         trace_target=target)
     finally:
         node.destroy_node()
         rclpy.shutdown()

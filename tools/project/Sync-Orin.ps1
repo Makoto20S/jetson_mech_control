@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('status','sync','build','test')][string]$Action = 'status',
-    [ValidateSet('imu','state','servo_imu','all')][string]$Profile = 'imu',
+    [ValidateSet('imu','state','servo_imu','ref01_native','all')][string]$Profile = 'imu',
     [string]$Python = ''
 )
 $ErrorActionPreference = 'Stop'

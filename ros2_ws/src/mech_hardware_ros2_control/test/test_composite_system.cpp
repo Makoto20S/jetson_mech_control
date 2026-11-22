@@ -245,6 +245,20 @@ TEST(CompositeSystem, UnclaimedJointIsNeverHandedToTheRuntime) {
   EXPECT_FALSE(system.fault_latched());
 }
 
+TEST(CompositeSystem, InactiveReleaseIsIdempotentButCannotStart) {
+  CompositeSystem system;
+  ASSERT_EQ(system.on_init(info(1U)), hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(system.on_configure(state()), hardware_interface::CallbackReturn::SUCCESS);
+  const std::vector<std::string> keys{"joint_1/position", "joint_1/command_generation"};
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_EQ(system.prepare_command_mode_switch({}, keys), hardware_interface::return_type::OK);
+    EXPECT_EQ(system.perform_command_mode_switch({}, keys), hardware_interface::return_type::OK);
+  }
+  EXPECT_EQ(system.perform_command_mode_switch(keys, {}), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(system.prepare_command_mode_switch({}, {"joint_1/bad"}), hardware_interface::return_type::ERROR);
+  EXPECT_EQ(system.prepare_command_mode_switch({}, {keys[0], keys[0]}), hardware_interface::return_type::ERROR);
+}
+
 // Fixture-free helper: brings a RecordingRuntime-backed system to ACTIVE and
 // hands back the recorder plus the exported command interfaces.
 struct ActiveSystem final {

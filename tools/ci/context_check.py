@@ -15,7 +15,7 @@ EXPECTED_PACKAGES = {
     "mech_control_core": set(),
     "mech_simulation": {"mech_control_core"},
     "mech_hardware_ros2_control": {"mech_control_core"},
-    "mech_controllers": {"mech_control_core"},
+    "mech_controllers": {"mech_control_core", "mech_exo_state", "ph_exo_interfaces"},
     "mech_bringup": {
         "mech_control_core",
         "mech_simulation",
@@ -23,13 +23,15 @@ EXPECTED_PACKAGES = {
         "mech_controllers",
         "mech_protocol_cubemars",
         "mech_protocol_damiao",
+        "mech_exo_state",
     },
     "mech_protocol_cubemars": {"mech_control_core", "mech_simulation"},
     "mech_protocol_ctrboard": {"mech_control_core"},
     "mech_protocol_damiao": {"mech_control_core", "mech_simulation"},
     "mech_knee_kinematics": set(),
     "mech_exo_state": set(),
-    "mech_assist_control": {"mech_knee_kinematics"},
+    "ph_exo_interfaces": set(),
+    "mech_assist_control": {"mech_knee_kinematics", "mech_bringup", "ph_exo_interfaces", "mech_exo_state"},
     "mech_ctrboard_bridge": {
         "mech_control_core",
         "mech_protocol_ctrboard",
@@ -279,6 +281,10 @@ def main() -> int:
                 fail(f"{expected_name}: unsupported build type: {build_type}")
             if not (package_dir / "CMakeLists.txt").is_file():
                 fail(f"{expected_name}: CMakeLists.txt is missing")
+            if document.findtext("member_of_group") == "rosidl_interface_packages" and expected_name == "ph_exo_interfaces":
+                if "rosidl_generate_interfaces(" not in (package_dir / "CMakeLists.txt").read_text(encoding="utf-8"):
+                    fail(f"{expected_name}: interface generation is missing")
+                continue
             required_test = ("test/test_state_core.py" if expected_name == "mech_exo_state"
                              else "test/test_package_marker.cpp")
             if not (package_dir / required_test).is_file():

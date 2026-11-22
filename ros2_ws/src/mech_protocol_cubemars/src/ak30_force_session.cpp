@@ -80,6 +80,7 @@ AdapterResult Ak30ForceControlSession::configure(
   last_state_ = mech_control_core::CanonicalDeviceState{};
   last_feedback_time_.reset();
   last_command_time_.reset();
+  last_accepted_frame_.reset();
   return AdapterResult::Ok;
 }
 
@@ -89,6 +90,7 @@ AdapterResult Ak30ForceControlSession::activate() noexcept {
   }
   fault_latched_ = false;
   last_command_time_.reset();
+  last_accepted_frame_.reset();
   // Activation is a clean slate for observation state, matching configure().
   // A sample captured before a prior deactivation must never be reported as
   // a current measurement after reactivation - deactivate-then-activate is
@@ -106,6 +108,7 @@ void Ak30ForceControlSession::deactivate() noexcept {
     lifecycle_ = Lifecycle::Ready;
   }
   last_command_time_.reset();
+  last_accepted_frame_.reset();
 }
 
 AdapterResult Ak30ForceControlSession::submit(
@@ -132,6 +135,8 @@ AdapterResult Ak30ForceControlSession::submit(
   switch (transport().try_send(frame)) {
     case mech_control_core::TransportResult::Ok:
       last_command_time_ = now;
+      last_accepted_frame_ = frame;
+      ++accepted_command_sequence_;
       return AdapterResult::Ok;
     // Backpressure is retryable. Faulting the bus on a transient WouldBlock is
     // the RC defect this branch exists to avoid.

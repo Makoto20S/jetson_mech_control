@@ -14,9 +14,14 @@ bool alpha_valid
 bool alpha_velocity_valid
 # FK result in fixed REF01 frame: [psi, beta], radians.
 # Derived only from joints/alpha; timestamp/quality source is sources[0].
-# Invalid => NaN. No IMU dependency, velocity estimate or measured-truth claim.
+# Invalid => NaN. Position and velocity use motor feedback and MuJoCo constraints.
 float64[2] q_position
 bool q_valid
+# [dpsi, dbeta], rad/s; source and mapping validity inherited from motor feedback.
+float64[2] q_velocity
+bool q_velocity_valid
+string q_velocity_reason
+float64 q_velocity_condition
 string q_reason
 # Maximum absolute MuJoCo connect-constraint position residual (metres).
 float64 q_closure_residual_m

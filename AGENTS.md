@@ -74,7 +74,7 @@
 
 ## 当前工程命名
 
-正式名称为 PH-EXO（并联外骨骼控制系统），ROS 标识采用 ph_exo，公共状态话题为 /ph_exo/state。REF-01 是机构模型的历史标识。新建工程级接口和文档沿用 PH-EXO，模型资料按原编号追溯。仓库及部署路径见 docs/parallel_exo/project_management.md。
+正式名称为 PH-EXO（并联外骨骼控制系统），ROS 标识采用 ph_exo，公共状态话题为 /ph_exo/state。REF-01 是机构模型的历史标识。工程介绍、控制器方案、提示词、图表标题及新建工程级接口和文档统一使用 PH-EXO；模型资料按原编号 REF-01 追溯。仓库及部署路径见 docs/parallel_exo/project_management.md。
 
 ## 2026-11-05 并联外骨骼统一项目要求
 
@@ -97,4 +97,12 @@ Windows/Linux角色分工仍有效；跨平台源码交接记录提交号，测�
 先读`docs/parallel_exo/project_management.md`第7节与`local_orin.md`，使用本地
 `tools/project/Sync-Orin.ps1`同步、核对和发起远端构建/测试。同步可包含未提交内容。
 发现远端独立改动先比对回本地；不强制覆盖，不将源码同步扩大为旧release更新或硬件操作。
-`.local`、日志、编译结果和机器配置留在各端；两端源码清单应一致。Git提交/推送/PR仍按用户需要进行。
+`.local`、日志、编译结果和机器配置留在各端；Orin端与manifests/orin_runtime.json选出的运行文件清单一致；电脑保留完整Git工程。Git提交/推送/PR仍按用户需要进行。
+
+## 2026-11-13：电脑工具与Orin运行部署
+
+界面和调参数据归tools/bench_panel；data/仅电脑保存，不入Git、不随部署同步。
+默认不读取历史数据，只有用户显式选文件/指定实验编号才回放或回收。
+Orin只部署运行清单：ROS/电机通信、接口、模型配置以及构建验证必需依赖。
+临时采集在停止后回传，电脑SHA256校验确认后才清理对应远端缓存；失败保留待回收。
+不得因查看/整理工具数据而启动电机。普通控制入口不得依赖tools/bench_panel/data。

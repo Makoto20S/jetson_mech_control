@@ -2,7 +2,7 @@
 
 Input: fixed MATLAB frame output angles psi, beta, with R6=Rz(psi)Rx(beta).
 Output: mechanism input angles alpha1, alpha2, in the same requested unit.
-Selected branch: psi in [-45,45] degrees, beta in [0,45] degrees.
+Selected branch: psi in [-45,45] degrees, beta in [-8,45] degrees.
 No simulation, files, hardware access or motor commands are performed on import/call.
 """
 import math
@@ -15,11 +15,13 @@ class KinematicsError(ValueError):
     """Invalid input or pose outside the supported REF01 assembly branch."""
 
 
-def inverse_kinematics(psi: float, beta: float, *, unit: str = 'deg') -> tuple[float, float]:
+def inverse_kinematics(psi: float, beta: float, *, unit: str = 'deg', observed_pose: bool = False) -> tuple[float, float]:
     """Return (alpha1, alpha2); input and output both use ``unit`` (deg or rad).
 
     alpha1 is positive from -x towards +y; alpha2 from +x towards +y.
     These are mechanism input angles, not motor encoder readings or motor torque.
+    observed_pose=True accepts measured psi ±60° and beta [-11,45]°.
+    Reference IK accepts psi ±45° and beta [-8,45]°.
     Raises KinematicsError for nonfinite, nonnumeric or out-of-domain input.
     """
     if unit not in ('deg', 'rad'):
@@ -32,11 +34,16 @@ def inverse_kinematics(psi: float, beta: float, *, unit: str = 'deg') -> tuple[f
     psi, beta = float(psi), float(beta)
     if unit == 'deg':
         psi, beta = math.radians(psi), math.radians(beta)
+    psi_limit = math.pi/3 if observed_pose else math.pi/4
+    beta_min_deg = -11 if observed_pose else -8
+    beta_min = math.radians(beta_min_deg)
     limit = math.pi/4
     tol = 1e-12  # radians, floating-point boundary tolerance only
-    if not -limit-tol <= psi <= limit+tol or not -tol <= beta <= limit+tol:
-        raise KinematicsError('Supported branch: psi in [-45,45] deg; beta in [0,45] deg')
-    psi, beta = max(-limit,min(limit,psi)), max(0.,min(limit,beta))
+    # FK projection can land a few nanoradians past an exact endpoint.
+    angle_tol = 1e-8 if observed_pose else tol
+    if not -psi_limit-angle_tol <= psi <= psi_limit+angle_tol or not beta_min-angle_tol <= beta <= limit+angle_tol:
+        raise KinematicsError(f'Supported branch: psi within ±{60 if observed_pose else 45} deg; beta in [{beta_min_deg},45] deg')
+    psi, beta = max(-psi_limit,min(psi_limit,psi)), max(beta_min,min(limit,beta))
     # Frozen REF01 geometry, SI metres; same parameters as the MATLAB baseline.
     r, L, l, a, h, d = .060, .236, .200, .020, .060, .0913
     Y = h+l*math.cos(beta)

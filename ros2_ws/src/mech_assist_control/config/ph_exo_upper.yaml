@@ -1,0 +1,13 @@
+exoskeleton_control:
+  ros__parameters:
+    policy: ph_exo_fixed_pose
+    allow_motor_output: false
+    joint_mapping_verified: false
+    hold.backend: simulation
+    hold.cm: /ph_exo_manager_launch/controller_manager
+    hold.ctrl: /ph_exo_manager_launch/ref01_impedance
+    hold.hw: [ref01_mujoco]
+    hold.state: /ph_exo/state
+    hold.k: [2.4, 2.0]
+    hold.b: [0.18, 0.15]
+    hold.tau: [0.2, 0.2]

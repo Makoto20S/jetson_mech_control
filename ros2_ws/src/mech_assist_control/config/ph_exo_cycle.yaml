@@ -1,0 +1,23 @@
+# Explicit prototype profile. Requires a matching dynamic_ref_v1 controller.
+# Loading this upper node does not activate hardware or send references.
+exoskeleton_control:
+  ros__parameters:
+    policy: ph_exo_fixed_pose
+    allow_motor_output: false
+    joint_mapping_verified: false
+    hold.cm: /ph_exo_manager_launch/controller_manager
+    hold.ctrl: /ph_exo_manager_launch/ref01_impedance
+    hold.hw: [ref01_mujoco]
+    hold.backend: simulation
+    hold.state: /ph_exo_manager_launch/ph_exo/state
+    hold.source: dynamic_ref_v1
+    hold.profile: ref01_supported_v1
+    hold.ref: cycle
+    hold.target: false
+    hold.q: [0.0, 0.3490658503988659]
+    hold.amp: [0.05235987755982989, -0.03490658503988659]
+    hold.period: [6.0, 4.0]
+    hold.move: 3.0
+    hold.k: [20.0, 20.0]
+    hold.b: [0.3, 0.3]
+    hold.tau: [10.0, 10.0]

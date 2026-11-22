@@ -37,6 +37,7 @@ add_library(${PROJECT_NAME} SHARED
   src/ak30_runtime_params.cpp
   src/pass_through_init.cpp
   src/ak30_system.cpp
+  src/ak30_kinematic_system.cpp
   src/mit_pair_effort_controller.cpp
   src/dm4340_runtime.cpp
   src/dm4340_system.cpp
@@ -114,11 +115,24 @@ ament_export_dependencies(
   mech_controllers mech_protocol_cubemars mech_protocol_damiao realtime_tools)
 
 if(BUILD_TESTING)
+
   add_executable(test_mit_pair_guard test/test_mit_pair_guard.cpp)
   target_include_directories(test_mit_pair_guard PRIVATE include)
   add_test(NAME mit_pair_guard COMMAND test_mit_pair_guard)
   find_package(ament_cmake_gtest REQUIRED)
+  add_executable(ph_exo_same_cycle_runtime_test test/test_same_cycle_runtime.cpp)
+  target_link_libraries(ph_exo_same_cycle_runtime_test mech_bringup)
+  add_test(NAME ph_exo_same_cycle_runtime_test COMMAND ph_exo_same_cycle_runtime_test)
+
   find_package(ament_cmake_test REQUIRED)
+  add_executable(ak30_kinematic_lease_test
+    ../../../tools/project/test_kinematic_lease.cpp)
+  target_include_directories(ak30_kinematic_lease_test PRIVATE include)
+  ament_add_test(ak30_kinematic_lease
+    COMMAND $<TARGET_FILE:ak30_kinematic_lease_test>
+    TIMEOUT 20
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+
   find_package(ament_cmake_lint_cmake REQUIRED)
   find_package(ament_cmake_xmllint REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
@@ -381,4 +395,8 @@ if(BUILD_TESTING)
   ament_xmllint()
 endif()
 
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../../mujoco/ref01/config/"
+  DESTINATION share/${PROJECT_NAME}/ph_exo/ref01/config)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../mech_assist_control/config/ph_exo_fixed_pose.json"
+  DESTINATION share/${PROJECT_NAME}/config)
 ament_package()

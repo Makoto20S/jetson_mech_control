@@ -156,6 +156,14 @@ class Ak30ForceControlRuntime final
   // released claim or a lifecycle exit stops submission immediately instead
   // of waiting for the hard TTL (ADR-015 Decision 3).
   void cancel_pending(std::size_t index) noexcept override;
+  // Opt-in PH-EXO torque path: commit an already authorized fresh write now.
+  // No receive or synthetic refresh; rechecks feedback at actual submission time.
+  [[nodiscard]] bool submit_pending_torque() noexcept;
+  // Hardware write may follow a successful inactive base write in Humble.
+  // The caller must propagate base errors first; dormant cycles transmit nothing.
+  [[nodiscard]] bool submit_active_torque() noexcept {
+    return !started_ || submit_pending_torque();
+  }
   // ADR-016: true only while the last read() saw Valid or Degraded feedback.
   [[nodiscard]] bool has_valid_sample() const noexcept override {
     return has_valid_sample_;
@@ -170,6 +178,13 @@ class Ak30ForceControlRuntime final
   [[nodiscard]] std::uint64_t motor_command_frames() const noexcept {
     return motor_command_frames_;
   }
+  struct AcceptedTorque final {
+    double effort_nm{0.}, host_time_s{0.};
+    std::uint64_t sequence{0U};
+  };
+  // Exact decoded wire target, in canonical direction. It is a command,
+  // not measured torque, and its time denotes host transport acceptance.
+  [[nodiscard]] AcceptedTorque accepted_torque() const noexcept;
   [[nodiscard]] bool expired() const noexcept { return expired_; }
   // One wire sample and its transport receipt identity. All values below
   // are from the same accepted CAN frame, even if read() subsequently faults.
