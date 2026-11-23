@@ -1,0 +1,1 @@
+<library path="mech_simulation_ref01"><class name="mech_simulation/Ref01MujocoSystem" type="mech::mech_simulation::Ref01MujocoSystem" base_class_type="hardware_interface::SystemInterface"><description>REF01 software-only MuJoCo system for manager validation.</description></class></library>

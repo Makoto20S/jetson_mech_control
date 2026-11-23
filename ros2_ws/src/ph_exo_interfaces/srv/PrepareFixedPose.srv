@@ -1,0 +1,7 @@
+# Prepare only: must never enable hardware or send motor targets.
+string profile
+---
+bool accepted
+uint64 session_id
+string reason
+float64[2] reference_rad

@@ -27,8 +27,16 @@ def level_number(level):
 class ExoskeletonNode(Node):
     def __init__(self, **kwargs):
         super().__init__('exoskeleton_control', **kwargs)
+        self.ph_exo = None
+        policy = self.declare_parameter('policy', 'resistance').value
+        if policy == 'ph_exo_fixed_pose':
+            for name in ('allow_motor_output', 'joint_mapping_verified'):
+                self.declare_parameter(name, False)
+            from .ph_exo_adapter import PhExoAdapter
+            self.ph_exo = PhExoAdapter(self)
+            return
         defaults = {
-            'policy': 'resistance', 'output_mode': 'preview',
+            'output_mode': 'preview',
             'resistance_execution': 'application',
             'input_source': 'estimator', 'feedback_topic': '/joint_states',
             'damping': 0.5, 'velocity_deadband': 0.02,
@@ -384,22 +392,39 @@ class ExoskeletonNode(Node):
         self.diagnostics.publish(DiagnosticArray(header=preview.header, status=[status]))
 
     def stop(self):
+        if self.ph_exo is not None:
+            self.ph_exo.close();return
         self.supervisor.disarm()
         self._neutral_once()
 
 
 def main(args=None):
     from rclpy.executors import ExternalShutdownException
-    rclpy.init(args=args)
+    from rclpy.signals import SignalHandlerOptions
+    import signal
+    shutdown_requested = False
+    def request_shutdown(signum, frame):
+        nonlocal shutdown_requested
+        shutdown_requested = True
+    old_handlers = {sig: signal.signal(sig, request_shutdown)
+                    for sig in (signal.SIGINT, signal.SIGTERM)}
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = None
     try:
         node = ExoskeletonNode()
-        rclpy.spin(node)
+        while rclpy.ok() and not shutdown_requested:
+            rclpy.spin_once(node, timeout_sec=.02)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if node is not None:
             node.stop()
+            if node.ph_exo is not None:
+                end=time.monotonic()+30
+                while rclpy.ok() and node.ph_exo.worker and node.ph_exo.worker.is_alive() and time.monotonic()<end:
+                    rclpy.spin_once(node,timeout_sec=.02)
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)

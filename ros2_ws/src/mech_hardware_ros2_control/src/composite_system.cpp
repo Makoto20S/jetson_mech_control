@@ -415,6 +415,10 @@ bool CompositeSystem::validate_switch(
       return false;
     }
   }
+  // Fault cleanup already revoked the local claims. Humble still needs to
+  // release the controller's stale loans after reconfiguring to INACTIVE.
+  // Accept only known, unique stop keys; never authorize a start here.
+  if (!active_ && start_interfaces.empty()) return true;
   auto next_motion = motion_claimed_;
   auto next_generation = generation_claimed_;
   for (const auto& name : stop_interfaces) {
@@ -490,6 +494,11 @@ hardware_interface::return_type CompositeSystem::perform_command_mode_switch(
   const auto stop_interfaces = local_switch_interfaces(stop);
   if (start_interfaces.empty() && stop_interfaces.empty())
     return hardware_interface::return_type::OK;
+  if (!active_ && start_interfaces.empty() &&
+      validate_switch(start_interfaces, stop_interfaces)) {
+    revoke_all_authorization();
+    return hardware_interface::return_type::OK;
+  }
   if (!active_ || !validate_switch(start_interfaces, stop_interfaces)) {
     return hardware_interface::return_type::ERROR;
   }

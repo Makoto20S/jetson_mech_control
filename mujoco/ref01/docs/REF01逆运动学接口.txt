@@ -1,4 +1,4 @@
-REF01 逆运动学调用接口
+PH-EXO 逆运动学调用接口
 2026-11-03
 
 文件：项目根目录 ref01_kinematics.py
@@ -31,7 +31,7 @@ output\mujoco-windows-venv\Scripts\python.exe -I -B ref01_kinematics.py --psi 10
 
 四、坐标与适用范围
 
-沿用MATLAB固定Oxyz，输出姿态为Rz(psi)Rx(beta)。psi范围[-45,45]度，beta范围[0,45]度。
+沿用MATLAB固定Oxyz，输出姿态为Rz(psi)Rx(beta)。psi范围[-45,45]度，beta范围[-8,45]度。
 alpha1从-x向+y为正，alpha2从+x向+y为正；当前只返回已验证的装配分支。
 函数检查范围、有限数值和几何实数解。非数字、NaN、无穷大和越界值均抛出KinematicsError。
 1e-12弧度以内的边界舍入误差归到边界，不用于扩展工作空间。

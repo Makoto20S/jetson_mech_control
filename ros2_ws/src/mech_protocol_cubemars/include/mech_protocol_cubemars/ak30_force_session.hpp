@@ -62,6 +62,9 @@ class Ak30ForceControlSession final : public mech_control_core::DeviceSession {
   [[nodiscard]] CommandStage command_stage(
       mech_control_core::MonotonicTime now) const noexcept;
   [[nodiscard]] bool fault_latched() const noexcept { return fault_latched_; }
+  // Last frame accepted by the HOST transport, not a drive execution ACK.
+  const auto& last_accepted_frame() const noexcept { return last_accepted_frame_; }
+  std::uint64_t accepted_command_sequence() const noexcept { return accepted_command_sequence_; }
 
  private:
   enum class Lifecycle : std::uint8_t { Unconfigured, Ready, Active };
@@ -75,6 +78,8 @@ class Ak30ForceControlSession final : public mech_control_core::DeviceSession {
   mech_control_core::CanonicalDeviceState last_state_{};
   std::optional<mech_control_core::MonotonicTime> last_feedback_time_;
   std::optional<mech_control_core::MonotonicTime> last_command_time_;
+  std::optional<mech_control_core::RawCanFrame> last_accepted_frame_;
+  std::uint64_t accepted_command_sequence_{0U};
 };
 
 }  // namespace mech::mech_protocol_cubemars

@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PH-EXO · 阻抗调参</title>
+<style>
+:root{color-scheme:light;--ink:#202a34;--muted:#64717b;--line:#bfc6cc;--panel:#f0f0f0;--blue:#1467ab;--orange:#bd6418}
+*{box-sizing:border-box}body{margin:0;background:#e9e9e9;color:var(--ink);font:12px "Microsoft YaHei","Segoe UI",sans-serif}
+header{height:30px;padding:0 7px;background:#f4f6f8;border-bottom:1px solid #b9c2c8;display:flex;align-items:center;justify-content:space-between}
+h1{font-size:14px;margin:0;letter-spacing:.3px}h1 small{font-size:12px;font-weight:400;margin-left:12px;color:#526575}
+main{display:grid;grid-template-columns:224px minmax(0,1fr);gap:4px;padding:4px;width:100%;height:calc(100dvh - 30px);margin:0;min-height:0}
+aside{min-width:0;min-height:0;overflow:auto}.box{border:1px solid var(--line);background:var(--panel);margin-bottom:4px;padding:4px}
+h2,.box-title{font-size:12px;font-weight:600;margin:-4px -4px 3px;padding:2px 5px;background:#e2e6e9;border-bottom:1px solid var(--line)}
+fieldset{border:0;padding:0;margin:0}table{border-collapse:collapse;width:100%;table-layout:fixed}
+th,td{border:1px solid #c9cfd4;padding:1px 3px;height:24px;text-align:left;vertical-align:middle}
+th{background:#e4ebf2;font-weight:400}thead th{text-align:center;background:#e0e7ed}td{background:#fafafa}
+label{cursor:default}.muted{font-size:11px;color:var(--muted);line-height:1.5}
+input[type=number]{width:100%;height:21px;border:1px solid #abb5bd;background:#fff;color:#14212c;font:12px Consolas,"Microsoft YaHei",monospace;padding:2px 5px;border-radius:1px}
+input:disabled{background:#eee;color:#777}input[type=file]{display:none}
+button,.file{min-height:23px;padding:2px 6px;border:1px solid #abb5bd;border-radius:2px;background:linear-gradient(#fff,#ededed);color:#253644;cursor:pointer;font:12px "Microsoft YaHei",sans-serif;white-space:nowrap;text-align:center;display:inline-block}
+button:hover,.file:hover{background:#ddebf6;border-color:#87a3b9}button:disabled{opacity:.42;cursor:default}
+.primary{border-color:#5881a4;color:#164970;background:#e2effa}.stop{color:#a33a23;border-color:#c79b91}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:3px}
+.badge{padding:2px 6px;border:1px solid #b4c8d6;background:#e4eef5;font-size:11px}
+#state[data-phase=running]{background:#d7ebdf;color:#145b34;border-color:#8eb49b}
+#state[data-phase=unconfirmed],#state[data-phase=error]{background:#ffe3da;color:#982d11}
+.mode{margin:3px 0 0;padding:2px 4px;border:1px solid #cbd1d5;background:#e8edf0}
+#scope{font-size:11px;line-height:1.3;margin:3px 0 0;color:#4f6576}
+#error:empty{display:none}#error{white-space:pre-wrap;color:#a52a16;padding:6px;border:1px solid #d9b4aa;background:#fff0e9;margin-top:6px}
+summary{cursor:pointer;padding:1px}.help{line-height:1.6;font-size:11px;color:#536471;margin:5px 0}
+.monitor{display:flex;flex-direction:column;min-height:0;min-width:0;border:1px solid var(--line);background:#eee;padding:4px}
+.monitor-title{font-weight:600;line-height:21px;border-bottom:1px solid #c8ced2;margin:-2px 0 5px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:25px;padding:0 1px 3px}
+.toolbar label{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.toolbar input{width:64px}.channels{font-size:11px}.channels span{margin-right:10px}
+.dot{display:inline-block;width:8px;height:8px;margin-right:4px}.blue{background:var(--blue)}.orange{background:var(--orange)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:3px;flex:1;min-height:0}
+[hidden]{display:none!important}#trackingGrid{grid-template-rows:repeat(2,minmax(0,1fr))}
+#kinTools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0}#kinTools input{width:52px}
+#viewKin[aria-pressed=true],#viewMotor[aria-pressed=true]{background:#d4e8f8;border-color:#5881a4}
+.motor-title{padding:2px 7px;background:#dce7ef;border:1px solid #bdc8d0;font-weight:600}
+.motor-title.second{background:#eee5db}
+.plot{min-height:0;border:1px solid #bec7ce;background:white;display:flex;flex-direction:column;overflow:hidden}
+h3{flex-shrink:0;font-size:11px;font-weight:400;padding:1px 5px;margin:0;background:#f5f6f7;border-bottom:1px solid #e0e4e7;height:19px}
+svg{display:block;width:100%;flex:1;min-height:0}
+.plot-foot{padding:2px 1px;font-size:10px;color:#657078;line-height:1.4}
+.statusbar{border:1px solid #c3cbd1;background:#f7f8f9;margin-top:2px;padding:3px 5px;font-size:11px}
+#info{white-space:pre-wrap;max-height:62px;overflow:auto;line-height:1.5}
+#source{font-size:10px;color:#6a7883;margin-top:1px}
+pre{font:11px/1.5 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;max-height:100px;overflow:auto;margin:4px 0;color:#536471}
+@media(max-width:750px){main{grid-template-columns:190px minmax(0,1fr)}h1 small{display:none}.toolbar{flex-wrap:wrap}.toolbar label{gap:2px}.channels span{margin-right:4px}.toolbar input{width:44px}.toolbar .muted{display:none}.actions button,.actions .file{padding:2px 3px;font-size:11px}th,td{padding:1px 2px}.grid h3{font-size:10px}.plot-foot{display:none}.statusbar{font-size:10px}#info{max-height:30px}}
+
+</style></head><body>
+<header><h1>PH-EXO <small id="entry">姿态阻抗调试</small></h1><span id="state" class="badge" data-phase="idle">等待操作</span></header>
+<main><aside>
+<section class="box params-box"><h2>控制参数</h2><form id="form"><fieldset id="fields">
+<table aria-label="双轴阻抗参数"><colgroup><col style="width:42%"><col style="width:29%"><col style="width:29%"></colgroup>
+<thead><tr><th>输出轴</th><th>ψ</th><th>β</th></tr></thead><tbody>
+<tr><th><span title="N·m/rad">刚度 K</span></th><td><input aria-label="ψ 刚度 K" id="k_psi" type="number" min="0" max="30" step="any" value="20" required></td><td><input aria-label="β 刚度 K" id="k_beta" type="number" min="0" max="30" step="any" value="20" required></td></tr>
+<tr><th><span title="N·m·s/rad">阻尼 B</span></th><td><input aria-label="ψ 阻尼 B" id="b_psi" type="number" min="0" max="1" step="any" value="0.3" required></td><td><input aria-label="β 阻尼 B" id="b_beta" type="number" min="0" max="1" step="any" value="0.3" required></td></tr>
+</tbody></table>
+<table aria-label="每台电机限幅" style="margin-top:3px"><colgroup><col style="width:62%"><col style="width:38%"></colgroup><tbody>
+<tr class="legacy-limit"><th><label for="torque_nm">扭矩限幅 / N·m</label></th><td><input id="torque_nm" type="number" min="0" max="10" step="any" value="10" required></td></tr>
+<tr class="legacy-limit"><th><label for="current_a">电流停发阈值 / A</label></th><td><input id="current_a" type="number" min="0" max="6" step="any" value="6" required></td></tr>
+<tr class="legacy-limit"><th><label for="travel_deg">相对位移 ± / °</label></th><td><input id="travel_deg" type="number" min="0" max="90" step="any" value="90" required></td></tr>
+<tr class="ros-limit"><th><label for="tau104">104 力矩 / N·m</label></th><td><input id="tau104" type="number" min="0" max="10" step="any" value="10" required></td></tr>
+<tr class="ros-limit"><th><label for="tau105">105 力矩 / N·m</label></th><td><input id="tau105" type="number" min="0" max="10" step="any" value="10" required></td></tr>
+</tbody></table>
+<table aria-label="目标位姿"><tbody>
+<tr><th>目标 ψ / °</th><td><input id="pose_psi" type="number" min="-45" max="45" step="any" placeholder="空=启动姿态"></td></tr>
+<tr><th>目标 β / °</th><td><input id="pose_beta" type="number" min="-8" max="45" step="any" placeholder="空=启动姿态"></td></tr>
+<tr><th>过渡 / s</th><td><input id="move_s" type="number" min="1" max="60" step="any" value="3"></td></tr>
+</tbody></table>
+<table aria-label="连续往返轨迹"><thead><tr><th>往返设置</th><th>ψ</th><th>β</th></tr></thead><tbody>
+<tr id="waveRow"><th>ψ 波形</th><td colspan="2"><input id="wave" aria-label="ψ 波形" list="waveList" value="分段五次" required><datalist id="waveList"><option value="分段五次"><option value="正弦"></datalist></td></tr>
+<tr><th>幅度 / °</th><td><input id="amp_psi" aria-label="ψ 往返幅度" type="number" min="-45" max="45" step="any" placeholder="空=固定"></td><td><input id="amp_beta" aria-label="β 往返幅度" type="number" min="-53" max="53" step="any" placeholder="空=固定"></td></tr>
+<tr><th>周期 / s</th><td><input id="period_psi" aria-label="ψ 往返周期" type="number" min="1" max="60" step="any" value="6"></td><td><input id="period_beta" aria-label="β 往返周期" type="number" min="1" max="60" step="any" value="6"></td></tr>
+</tbody></table><p style="margin:2px;font-size:11px">目标留空用启动姿态；填写后平滑到达。幅度两项留空=固定保持；填写=ψ绕基准±幅度循环（符号定首向），β从基准到基准+幅度再返回，0=该轴保持。周期含去程和回程，手动停止。</p></fieldset>
+<div class="mode" id="mode">普通阻抗　｜　手动停止</div>
+<button type="button" id="estop" style="width:100%;background:#b90000;color:white;font-weight:bold;min-height:34px;margin:5px 0">软件急停 · 失能</button>
+<div class="actions"><button type="button" id="connect">连接 ROS</button><button class="primary" id="start" type="submit">▶ 开始本轮</button><button type="button" id="reset">返回调试</button><button class="stop" id="stop" type="button" disabled>■ 停止</button></div></form>
+<p id="scope">点击开始后连接Orin并运行；无需终端START。</p><div id="error" role="alert"></div>
+</section>
+<section class="box"><h2>文件与记录</h2>
+<div class="actions"><button id="saveConfig">导出参数</button><label class="file">导入参数<input id="loadConfig" type="file" accept=".json"></label>
+<label class="file">打开结果<input id="loadResult" type="file" accept=".json"></label><button id="saveResult" disabled>保存结果</button>
+<button id="csv" disabled style="grid-column:span 2">导出跟踪与电机 CSV</button></div>
+</section>
+<section class="box"><details><summary>运行说明与参数范围</summary>
+<div class="help">目标：留空保持启动姿态；填写ψ/β则过渡到目标<br>MIT：Kp = Kd = 0<br>保持：无预设时长<br>调参：停止后生效</div>
+<div class="help">
+刚度单位 N·m/rad；阻尼单位 N·m·s/rad。<br>0&lt;K≤30，0≤B≤1。<br>每台限幅：0&lt;扭矩≤10 N·m、0&lt;电流≤6 A、0&lt;相对角度≤90°。<br>
+位置为电机编码器，非ψ、β。<br>停止、关页或失联会停发并核验失能；保留现场急停。</div></details>
+</section>
+</aside><section class="monitor">
+<div class="toolbar"><div><button id="viewKin" aria-pressed="true">运动学跟踪</button> <button id="viewMotor" aria-pressed="false">电机监测</button></div><div id="motorLegend" class="channels" hidden><span><i class="dot blue"></i>电机104</span><span><i class="dot orange"></i>电机105</span></div>
+<label for="range">时间窗 / s <input id="range" type="number" min="0" max="120" step="any" value="10"><span class="muted">0=保留段</span></label></div>
+<div id="kinTools"><label>预览起点 ψ <input id="homePsi" type="number" value="0" step="any" aria-label="预览起点 ψ"> °</label>
+<label>β <input id="homeBeta" type="number" value="0" step="any" aria-label="预览起点 β"> °</label>
+<button id="plan" type="button">预览规划</button><button id="tracking" type="button" hidden>返回跟踪</button>
+<span id="kinSource">目标（蓝色虚线） · 反馈（橙色实线）</span></div>
+<div id="trackingGrid" class="grid">
+<div class="plot"><h3>机构 ψ / °　<span id="read_psi"></span></h3><svg id="psi" role="img" aria-label="机构 ψ规划与反馈"></svg></div>
+<div class="plot"><h3>机构 β / °　<span id="read_beta"></span></h3><svg id="beta" role="img" aria-label="机构 β规划与反馈"></svg></div>
+<div class="plot"><h3>104 编码器 / °　<span id="read_enc104"></span></h3><svg id="enc104" role="img" aria-label="104 编码器规划与反馈"></svg></div>
+<div class="plot"><h3>105 编码器 / °　<span id="read_enc105"></span></h3><svg id="enc105" role="img" aria-label="105 编码器规划与反馈"></svg></div>
+</div>
+<div class="grid" id="motorGrid" hidden>
+<div class="plot"><h3>104 · 目标扭矩 / N·m</h3><svg id="torque104" role="img" aria-label="电机104目标扭矩波形"></svg></div>
+<div class="plot"><h3>105 · 目标扭矩 / N·m</h3><svg id="torque105" role="img" aria-label="电机105目标扭矩波形"></svg></div>
+<div class="plot"><h3>104 · 输出轴速度 / RPM</h3><svg id="speed104" role="img" aria-label="电机104速度波形"></svg></div>
+<div class="plot"><h3>105 · 输出轴速度 / RPM</h3><svg id="speed105" role="img" aria-label="电机105速度波形"></svg></div>
+<div class="plot"><h3>104 · 编码器位置 / °</h3><svg id="position104" role="img" aria-label="电机104位置波形"></svg></div>
+<div class="plot"><h3>105 · 编码器位置 / °</h3><svg id="position105" role="img" aria-label="电机105位置波形"></svg></div>
+</div>
+<div class="plot-foot">目标扭矩非实测；速度使用Orin输出轴角速度换算。显示约20 Hz，最近最多120秒；不用于5 ms截止期验收。</div>
+<div class="statusbar"><div id="info">尚未开始。设置参数或打开历史记录。</div><div id="source">未连接设备 · 打开界面不会启机</div></div>
+<details style="margin-top:2px"><summary>运行与退出日志</summary><pre id="log">暂无运行信息</pre></details>
+</section></main>
+<script>
+"use strict";
+let kinView=true, planRows=null, planTicket=0;
+const ROS=typeof __ROS__==="boolean"?__ROS__:false,TOKEN="__TOKEN__",keys=["k_psi","k_beta","b_psi","b_beta","torque_nm","current_a","travel_deg"],$=id=>document.getElementById(id);
+let cursor=0,phase="idle",preview=false,software=false,linkReset=false,resetView=false,canStart=true,needStop=false,rows=[],result=null,runId=null,imported=false,ref=null,lastDraw=0;
+const active=()=>["connecting","preparing","starting","running","stopping","resetting"].includes(phase);
+const rad=180/Math.PI, labels={debug:"ROS调试待命",connecting:"连接ROS中",connect_error:"ROS连接失败 · 可返回调试",starting:"正在启动",stopped:"ROS已停止",resetting:"正在恢复调试",idle:"等待操作",preparing:"准备中 · 尚未进入保持",running:"阻抗运行中",stopping:"正在停止与核验",finished:"已结束 · 失能已确认",cancelled:"启动已取消 · 未发送控制命令",unconfirmed:"结束状态未确认",error:"启动失败"};
+async function api(path,body){
+ const r=await fetch(path,{method:body===undefined?"GET":"POST",headers:{"X-Panel-Token":TOKEN,"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
+ const data=await r.json();if(!r.ok)throw Error(r.status===404&&path.startsWith("/kinematics/")?"运动学接口尚未加载，请在本轮结束后重新打开电脑端面板服务。":data.error);return data;
+}
+function params(){
+ const c=ROS?{k:[Number($("k_psi").value),Number($("k_beta").value)],b:[Number($("b_psi").value),Number($("b_beta").value)],tau:[Number($("tau104").value),Number($("tau105").value)]}:Object.fromEntries(keys.map(k=>[k,Number($(k).value)]));
+ const p=$("pose_psi").value.trim(),b=$("pose_beta").value.trim();
+ if(p!==""||b!==""){if(p===""||b==="")throw Error("ψ、β需同时填写");c.pose_deg=[Number(p),Number(b)];c.move_s=Number($("move_s").value);}
+ const ap=$("amp_psi").value.trim(),ab=$("amp_beta").value.trim();
+ if(ap!==""||ab!==""){if(ap===""||ab==="")throw Error("两轴幅度需同时填写，不运动的轴填0");c.amp_deg=[Number(ap),Number(ab)];c.period_s=[Number($("period_psi").value),Number($("period_beta").value)];}
+ if(!ROS){
+  const wave=$("wave").value.trim();
+  if(wave==="正弦")c.wave="sine";
+  else if(wave!=="分段五次")throw Error("ψ 波形请填写分段五次或正弦");
+ }
+ return c;
+}
+function setParams(c){
+
+ if(ROS){["k_psi","k_beta","b_psi","b_beta","tau104","tau105"].forEach((k,i)=>$(k).value=[...c.k,...c.b,...c.tau][i]);}
+ else {keys.forEach(k=>$(k).value=c[k]);$("wave").value=c.wave==="sine"?"正弦":"分段五次";}
+ $("pose_psi").value=c.pose_deg?.[0]??"";$("pose_beta").value=c.pose_deg?.[1]??"";$("move_s").value=c.move_s??3;$("amp_psi").value=c.amp_deg?.[0]??"";$("amp_beta").value=c.amp_deg?.[1]??"";$("period_psi").value=c.period_s?.[0]??6;$("period_beta").value=c.period_s?.[1]??6;
+}
+function validate(c){
+ if(ROS){
+  const optional=[...(c&&("pose_deg" in c||"move_s" in c)?["pose_deg","move_s"]:[]),...(c&&("amp_deg" in c||"period_s" in c)?["amp_deg","period_s"]:[])];
+  if(!c||Object.keys(c).sort().join()!==["b","k","tau",...optional].sort().join()||["k","b","tau"].some(k=>!Array.isArray(c[k])||c[k].length!==2||c[k].some(v=>typeof v!=="number"||!Number.isFinite(v))))throw Error("ROS参数需要k、b、tau两轴数组");
+  if(c.k.some(v=>v<=0||v>30)||c.b.some(v=>v<0||v>1)||c.tau.some(v=>v<=0||v>10))throw Error("超出ROS接口范围");
+ }
+ const withPose=c&&("pose_deg" in c||"move_s" in c),withCycle=c&&("amp_deg" in c||"period_s" in c),expected=[...keys,...(!ROS&&c&&"wave" in c?["wave"]:[]),...(withPose?["pose_deg","move_s"]:[]),...(withCycle?["amp_deg","period_s"]:[])];
+ if(!ROS&&(!c||Object.keys(c).sort().join()!=[...expected].sort().join()||keys.some(k=>typeof c[k]!=="number"||!Number.isFinite(c[k]))))throw Error("参数格式不正确");
+ if(withPose&&(!Array.isArray(c.pose_deg)||c.pose_deg.length!==2||c.pose_deg.some(v=>typeof v!=="number"||!Number.isFinite(v))||c.pose_deg[0]<-45||c.pose_deg[0]>45||c.pose_deg[1]<-8||c.pose_deg[1]>45||typeof c.move_s!=="number"||!Number.isFinite(c.move_s)||c.move_s<1||c.move_s>60))throw Error("目标范围：ψ -45～45°，β −8～45°；过渡1～60秒");
+ if(!ROS && "wave" in c && (c.wave!=="sine"||!withCycle||c.amp_deg?.[1]!==0))throw Error("正弦往返时请设置 ψ 幅度、β 幅度 0");
+ if(withCycle){
+  if(["amp_deg","period_s"].some(k=>!Array.isArray(c[k])||c[k].length!==2||c[k].some(v=>typeof v!=="number"||!Number.isFinite(v)))||(Math.abs(c.amp_deg[0])>45||Math.abs(c.amp_deg[1])>53)||!c.amp_deg.some(v=>v!==0)||c.period_s.some(v=>v<1||v>60))throw Error("幅度上限ψ 45°、β 53°，至少一轴非零；完整周期1～60秒");
+  if(withPose){const end=c.pose_deg.map((v,i)=>v+c.amp_deg[i]);if(end[0]<-45||end[0]>45||Math.abs(c.pose_deg[0]-c.amp_deg[0])>45||end[1]<-8||end[1]>45)throw Error("往返端点超出当前模型范围");}
+ }
+ if(!ROS&&(c.k_psi<=0||c.k_beta<=0||c.k_psi>30||c.k_beta>30||c.b_psi<0||c.b_beta<0||c.b_psi>1||c.b_beta>1||c.torque_nm<=0||c.torque_nm>10||c.current_a<=0||c.current_a>6||c.travel_deg<=0||c.travel_deg>90))throw Error("参数超出当前台架范围");
+ return c;
+}
+function controls(){
+ $("state").textContent=(preview?"预览模式 · ":(software?(ROS?"ROS软件 · ":"独立软件 · "):""))+(labels[phase]||phase);$("state").dataset.phase=phase;
+ $("plan").disabled=active();
+ $("connect").disabled=preview||active();
+ $("fields").disabled=active();$("start").disabled=active()||preview||!canStart||phase==="unconfirmed"||(ROS&&!["idle","debug"].includes(phase));
+ $("estop").disabled= !needStop&&!["connecting","preparing","starting","running","stopping","unconfirmed"].includes(phase);
+ $("reset").disabled=false;
+ $("stop").disabled=!["connecting","preparing","starting","running"].includes(phase);
+ $("loadConfig").disabled=active();$("loadResult").disabled=active();
+ $("saveResult").disabled=!result;$("csv").disabled=!rows.length;
+}
+function download(name,text,type="application/json"){
+ const u=URL.createObjectURL(new Blob([text],{type})),a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+}
+function showError(e){$("error").textContent=e.message||String(e);}
+$("form").onsubmit=async e=>{
+ e.preventDefault();$("error").textContent="";
+ try{const c=validate(params());await api("/start",c);leavePlan();rows=[];result=null;ref=null;imported=false;phase="preparing";controls();draw();
+ $("info").textContent="已提交本轮参数，正在读取启动姿态并启动控制。等待进入“阻抗运行中”；连续模式会按填写轨迹自动往返。";}
+ catch(e){showError(e);}
+};
+$("estop").onclick=async()=>{try{await api("/estop",{});phase="stopping";$("info").textContent="软件急停已请求，正在确认双电机失能。";controls();}catch(e){showError(Error("软件急停通信失败，请使用硬件急停："+e.message));}};
+$("reset").onclick=async()=>{
+ leavePlan();phase="idle";resetView=true;canStart=false;rows=[];result=null;ref=null;runId=null;imported=false;
+ $("error").textContent="";$("info").textContent="已返回初始界面，可修改参数；正在刷新后台状态。";
+ $("source").textContent="界面已复位 · 后台停止状态单独核验";controls();draw();
+ try{await api("/reset",{});}catch(e){showError(Error("界面已复位，后台刷新失败："+e.message));}
+};
+$("connect").onclick=async()=>{try{$("error").textContent="";await api("/connect",{});$("info").textContent="正在读取ROS状态；连接不会启动电机。";}catch(e){showError(e);}};
+$("stop").onclick=async()=>{try{await api("/stop",{});phase="stopping";controls();}catch(e){showError(e);}};
+$("saveConfig").onclick=()=>{try{download("ph_exo_parameters.json",JSON.stringify(validate(params()),null,2));}catch(e){showError(e);}};
+$("loadConfig").onchange=async e=>{try{if(active())return;const c=validate(JSON.parse(await e.target.files[0].text()));setParams(c);leavePlan();draw();$("error").textContent="";}catch(e){showError(e);}finally{e.target.value="";}};
+function normalize(r){
+ if(!r||!Array.isArray(r.statuses)||!Array.isArray(r.samples))throw Error("请选择原脚本的 result.json");
+ if(r.panel_samples?.length)return r.panel_samples.map(row=>({...row}));
+ // Legacy statuses lack torque series. Missing values stay missing, not zero.
+ const refs=(r.references||[]).filter(p=>Number.isFinite(p.t)).slice().sort((a,b)=>a.t-b.t);let j=0;
+ const samples=[...r.samples].sort((a,b)=>a.observed_s-b.observed_s),latest={};let i=0;
+ return r.statuses.map(s=>{while(i<samples.length&&samples[i].observed_s<=s.received_s){latest[samples[i].id]=samples[i++];}
+ while(j<refs.length&&refs[j].t<=s.received_s)j++;
+ return {observed_s:s.received_s,q:s.q,dq:s.dq,reference:s.reference??(refs.length?refs[j-1]?.q:r.reference_q_rad),mode:s.mode,
+ reason:s.reason_name,state_valid:s.mode===2,feedback:{...latest}};});
+}
+$("loadResult").onchange=async e=>{try{
+ if(active())return;const file=e.target.files[0];if(file.size>40*1024*1024)throw Error("记录超过40 MB");
+ const r=JSON.parse(await file.text()),newRows=await replayRows(r);
+ if(active())return;leavePlan();
+ rows=newRows;result=r;ref=r.reference_q_rad;imported=true;$("error").textContent="";
+ $("info").textContent=(r.rehearsal?"软件演练记录：":"实机历史记录：")+file.name+"；参数 [Kψ, Kβ, Bψ, Bβ] = "+JSON.stringify(r.gains)+
+ "；失能应答："+JSON.stringify(r.disable_ack||[])+"；退出原因："+(r.error||"正常结束");
+ $("source").textContent="离线记录 · 不代表当前设备状态";controls();draw();
+}catch(e){showError(e);}finally{e.target.value="";}};
+async function replayRows(record){
+ const samples=normalize(record);
+ for(let i=0;i<samples.length;i+=256){
+  const batch=samples.slice(i,i+256),angles=await api("/kinematics/ik",batch.map(r=>r.reference??null));
+  batch.forEach((r,j)=>{r.encoder_ref_deg=angles[j];});
+ }
+ return samples;
+}
+$("saveResult").onclick=()=>download("ph_exo_result.json",JSON.stringify(result,null,2));
+function motorValue(r,kind,mid){
+ if(kind==="torque")return r.motor_target_nm?.[mid];
+ const d=r.feedback?.[mid];
+ if(kind==="speed"){
+  // An explicit null from ROS means invalid, not permission to reinterpret ERPM.
+  if(Object.prototype.hasOwnProperty.call(d||{},"rpm"))return Number.isFinite(d.rpm)?d.rpm:undefined;
+  // Old bench records already contain the actual controller velocity in rad/s.
+  return Number.isFinite(d?.velocity)&&d?.mit_valid===1&&d?.mit_fault_code===0&&
+   Number.isFinite(d?.mit_rx_us)&&r.observed_s-d.mit_rx_us*1e-6>=0&&
+   r.observed_s-d.mit_rx_us*1e-6<=.060?d.velocity*30/Math.PI:undefined;
+ }
+ return d?.mit_position_deg;
+}
+function values(r,kind){
+ if(kind==="q"||kind==="dq")return (r[kind]||[]).map(x=>typeof x==="number"?x*rad:null);
+ if(kind==="torque")return [r.motor_target_nm?.["104"],r.motor_target_nm?.["105"]];
+ return [r.feedback?.["104"]?.mit_iq_a,r.feedback?.["105"]?.mit_iq_a];
+}
+$("csv").onclick=()=>{
+ const t0=rows[0]?.observed_s||0;
+ const lines=["relative_time_s,target104_nm,target105_nm,speed104_rpm,speed105_rpm,position104_deg,position105_deg,current104_a,current105_a,state_valid,psi_ref_deg,psi_fk_deg,beta_ref_deg,beta_fk_deg,ref104_deg,enc104_deg,ref105_deg,enc105_deg,enc104_time_s,enc105_time_s"];
+ for(const r of rows)lines.push([r.observed_s-t0,...["torque","speed","position"].flatMap(k=>["104","105"].map(m=>motorValue(r,k,m)??"")),...values(r,"current").map(v=>v??""),r.state_valid?1:0,...kinIds.flatMap(id=>kinValues(r,id).map(x=>x??"")),...["104","105"].map(mid=>{const t=encoderTime(r,mid);return Number.isFinite(t)?t-t0:"";})].join(","));
+ download("ph_exo_motor_curves.csv",lines.join("\n"),"text/csv;charset=utf-8");
+};
+const kinIds=["psi","beta","enc104","enc105"];
+function encoderTime(r,mid){
+ const d=r.feedback?.[mid];
+ if(!d)return null;
+ return Number.isFinite(d.sample_time_s)?d.sample_time_s:Number.isFinite(d.mit_rx_us)?d.mit_rx_us*1e-6:r.observed_s;
+}
+function kinValues(r,id){
+ const angle=v=>Number.isFinite(v)?v*rad:null;
+ if(id==="psi"||id==="beta"){
+  const i=id==="psi"?0:1;
+  return [angle(r.reference?.[i]),r.state_valid?angle(r.q?.[i]):null];
+ }
+ const mid=id.slice(3),i=mid==="104"?0:1,d=r.feedback?.[mid],t=encoderTime(r,mid);
+ const good=d&&Number.isFinite(t)&&(d.mit_valid===undefined||d.mit_valid===1)&&
+  (d.mit_fault_code===undefined||d.mit_fault_code===0)&&
+  (d.mit_rx_us===undefined||(r.observed_s-d.mit_rx_us*1e-6>=0&&r.observed_s-d.mit_rx_us*1e-6<=.060));
+ return [r.encoder_ref_deg?.[i],good&&Number.isFinite(d.mit_position_deg)?d.mit_position_deg:null];
+}
+function leavePlan(){planTicket++;planRows=null;}
+function selectView(useKin){kinView=useKin;draw();}
+$("viewKin").onclick=()=>selectView(true);
+$("viewMotor").onclick=()=>selectView(false);
+$("tracking").onclick=()=>{leavePlan();draw();};
+$("plan").onclick=async()=>{
+ const ticket=++planTicket;
+ try{
+  const home=["homePsi","homeBeta"].map(id=>{if(!$(id).value.trim())throw Error("请填写预览起点");return Number($(id).value);});
+  const data=await api("/kinematics/preview",{home_deg:home,config:validate(params())});
+  if(ticket!==planTicket||active())return;
+  planRows=data;$("error").textContent="";selectView(true);
+ }catch(e){if(ticket===planTicket){leavePlan();draw();showError(e);}}
+};
+$("form").addEventListener("input",()=>{leavePlan();draw();});
+for(const id of ["homePsi","homeBeta"])$(id).oninput=()=>{leavePlan();draw();};
+function drawChart(id){
+ const mid=id.slice(-3),kind=id.slice(0,-3),svg=$(id),w=Math.max(180,svg.clientWidth||540),h=Math.max(100,svg.clientHeight||170),left=45,right=9,top=12,bottom=22;svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+ const ns="http://www.w3.org/2000/svg";svg.replaceChildren();
+ const el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;svg.appendChild(n);return n;};
+ const kin=kinIds.includes(id),planning=kin&&planRows!==null,source=planning?planRows:rows;
+ const valid=source.filter(r=>Number.isFinite(r.observed_s)),t0=valid[0]?.observed_s||0,last=(valid.at(-1)?.observed_s||t0)-t0,span=Math.max(0,Math.min(120,Number($("range").value)||0)),xmin=span&&!planning?Math.max(0,last-span):0,xmax=Math.max(xmin+.1,last);
+ const data=valid.filter(r=>r.observed_s-t0>=xmin),series=kin?data.map(r=>kinValues(r,id)):data.map(r=>[motorValue(r,kind,mid)]),v=series.flat().filter(Number.isFinite);
+ if(kin){
+  const [target,actual]=series.at(-1)||[];
+  const fmt=x=>Number.isFinite(x)?x.toFixed(2):"—";
+  $("read_"+id).textContent=planning?"终点 "+fmt(target):"目标 "+fmt(target)+"　反馈 "+fmt(actual)+"　误差 "+fmt(Number.isFinite(target)&&Number.isFinite(actual)?target-actual:null);
+ }
+
+ if(!v.length){el("text",{x:w/2,y:h/2,"text-anchor":"middle",fill:"#738898","font-size":13},rows.length?"该记录未包含此项数据":"等待数据");return;}
+ let ymin=Math.min(...v),ymax=Math.max(...v),pad=Math.max((ymax-ymin)*.12,.05);ymin-=pad;ymax+=pad;
+ const X=t=>left+(t-xmin)/(xmax-xmin)*(w-left-right),Y=v=>top+(ymax-v)/(ymax-ymin)*(h-top-bottom);
+ for(let i=0;i<=4;i++){const y=ymin+(ymax-ymin)*i/4;el("line",{x1:left,x2:w-right,y1:Y(y),y2:Y(y),stroke:"#e4ebf0"});el("text",{x:left-7,y:Y(y)+4,"text-anchor":"end",fill:"#60798b","font-size":11},y.toFixed(2));
+ const t=xmin+(xmax-xmin)*i/4;el("text",{x:X(t),y:h-8,"text-anchor":"middle",fill:"#60798b","font-size":11},t.toFixed(1)+"s");}
+ const color=mid==="104"?"#1564ad":"#d77722";
+ for(let line=kin?1:0;line>=0;line--){
+  let path="",previous=null;
+  data.forEach((r,i)=>{
+   const value=series[i][line];
+   const t=(kin&&line===1&&id.startsWith("enc")?encoderTime(r,id.slice(3)):r.observed_s)-t0;
+   if(!Number.isFinite(value)||t<xmin){previous=null;return;}
+   path+=(previous!==null&&t>=previous&&t-previous<.25?"L":"M")+X(t).toFixed(2)+","+Y(value).toFixed(2);
+   previous=t;
+  });
+  if(path)el("path",{d:path,fill:"none",stroke:kin?(line?"#bd6418":"#1467ab"):color,"stroke-width":1.6,"stroke-dasharray":kin&&line===0?"5 3":"none"});
+ }
+}
+
+function draw(){
+ $("viewKin").setAttribute("aria-pressed",kinView);$("viewMotor").setAttribute("aria-pressed",!kinView);
+ $("motorGrid").hidden=kinView;$("motorLegend").hidden=kinView;$("kinTools").hidden=!kinView;$("trackingGrid").hidden=!kinView;
+ $("tracking").hidden=!planRows;
+ $("kinSource").textContent=planRows?"离线规划 · 假定起点 · 蓝色虚线为规划值":"蓝色虚线：参考　橙色实线：反馈　误差＝参考－反馈";
+ (kinView?kinIds:["torque104","torque105","speed104","speed105","position104","position105"]).forEach(drawChart);
+}
+$("range").oninput=draw;
+async function poll(){
+ try{
+ const state=await api("/state?after="+cursor);phase=state.phase;preview=state.preview;software=state.software||state.ros?.sim||false;linkReset=state.link_reset===true;resetView=state.refresh===true;canStart=state.can_start!==false;needStop=state.need_stop===true;
+ if(preview)$("scope").textContent="预览模式：禁止连接Orin和启动电机。";
+ if(state.run_id&&runId!==state.run_id){runId=state.run_id;leavePlan();rows=[];result=null;imported=false;setParams(state.config);}
+ for(const e of state.events){cursor=Math.max(cursor,e.index);
+ if(e.type==="loaded"){result=await api("/result");rows=await replayRows(result);leavePlan();ref=result.reference_q_rad;imported=true;
+ $("info").textContent=(result.rehearsal?"软件演练记录：":"实机历史记录：")+e.name+"；参数 [Kψ, Kβ, Bψ, Bβ] = "+JSON.stringify(result.gains)+"；退出信息："+(result.error||"正常结束");
+ $("source").textContent="离线记录 · 不代表当前设备状态";}
+ if(e.type==="sample"&&!imported&&!resetView){rows.push(e.sample);if(rows.length>2400)rows.shift();ref=e.sample.reference;
+ $("info").textContent="本轮 "+runId+" · "+(labels[phase]||phase)+"；原因："+e.sample.reason+
+ "；ψ / β = "+(e.sample.q||[]).map(v=>(v*rad).toFixed(2)).join(" / ")+"°；当前参考："+(e.sample.reference||[]).map(v=>(v*rad).toFixed(2)).join(" / ")+"°";
+ $("source").textContent=(ROS?(software?"ROS软件状态":"ROS实机状态"):"实时状态")+" · 显示约20 Hz；不会在线修改本轮增益";}
+ if(e.type==="reference"&&!resetView){ref=e.reference_q_rad;$("info").textContent="启动姿态 [ψ, β] = "+ref.map(x=>(x*rad).toFixed(2)).join(" / ")+"°；正在启动控制。";}
+ if(e.type==="finished"&&!resetView){result=await api("/result");
+ $("info").textContent=(e.cancelled_confirmed?"启动已取消，未发送控制命令。可返回调试或重新开始。":(e.disable_confirmed?"两台电机失能已确认。":"失能未确认，请检查现场。"))+" 退出信息："+(e.error||"正常结束")+
+ "\nWindows结果目录："+e.local_directory+"\nOrin原始记录："+e.output;
+ if(result?.panel_samples?.length)rows=await replayRows(result);
+ $("source").textContent="本轮已结束 · 本模式保留最近120秒ROS状态；Windows连接日志保留收到的显示样本";}
+ if(e.type==="ros_state"&&!imported&&!resetView){
+ const s=e.status;$("info").textContent=(labels[s.state]||s.state)+"；原因："+(s.reason||"无")+"；停止确认："+s.stop_ok+"；失能确认："+JSON.stringify(s.disable_ok);
+ $("source").textContent=(s.sim?"软件后端":"实机ROS接口")+" · "+s.backend+" · 状态来自ROS上层节点";
+ }
+ if(e.type==="ros_reset"||e.type==="panel_reset"){$("error").textContent="";rows=[];result=null;ref=null;runId=null;imported=false;$("info").textContent=(e.local||e.type==="panel_reset")?"已返回初始界面，可修改参数。":"ROS已恢复调试；再次点击开始才运行。";if(e.local)$("source").textContent="ROS未连接 · 未发送启动请求";}
+ if(e.type==="ros_done"&&!resetView){result=await api("/result");$("info").textContent="ROS停止状态："+e.status.state+"；停止确认："+e.status.stop_ok+"；记录："+e.local_directory;}
+ if(e.type==="error"&&!resetView)showError(Error(e.message));
+ if(e.type==="connection_lost"&&!resetView)showError(Error(e.message));
+ }
+ if(resetView&&!imported){$("info").textContent=state.notice||"已返回初始状态";$("source").textContent=!ROS?("独立调参 · 实际状态："+(labels[state.actual]||state.actual||"等待操作")):state.recover==="ready"?(state.connected?("ROS状态："+(labels[state.ros?.state]||state.ros?.state||"未知")+" · 再次点击开始才运行"):"ROS未连接 · 可重新连接"):"界面已复位 · ROS实际状态："+(state.ros?.state||"未知");}
+ $("log").textContent=state.logs.join("\n")||"暂无运行信息";
+ controls();if(Date.now()-lastDraw>150){draw();lastDraw=Date.now();}
+ }catch(e){showError(Error("界面连接异常："+e.message+"；若正在运行，请检查现场。"));$("start").disabled=true;$("stop").disabled=false;}
+ setTimeout(poll,250);
+}
+window.addEventListener("pagehide",()=>{
+ if(active())fetch("/stop",{method:"POST",headers:{"X-Panel-Token":TOKEN,"Content-Type":"application/json"},body:"{}",keepalive:true}).catch(()=>{});
+});
+document.querySelectorAll(".ros-limit").forEach(e=>e.style.display=ROS?"":"none");
+document.querySelectorAll(".legacy-limit").forEach(e=>e.style.display=ROS?"none":"");
+$("connect").style.display=ROS?"":"none";
+document.title="PH-EXO · "+(ROS?"ROS系统调参":"独立台架调参");
+$("entry").textContent=ROS?"ROS系统入口":"独立调参入口";
+if(ROS){
+ $("waveRow").hidden=true;
+ $("wave").disabled=true;
+ $("mode").textContent="ROS系统入口 ｜ 手动停止";
+ document.querySelectorAll(".help")[1].textContent="刚度单位 N·m/rad；阻尼单位 N·m·s/rad。0<K≤30，0≤B≤1，每台目标力矩≤10 N·m；软件后端沿用更小的验证范围。电流和位移条件由ROS硬件配置管理。目标与往返参数在开始时一起提交，不在线修改增益或轨迹。连续模式需加载ROS动态参考配置。连接仅读取ROS状态；恢复调试不会自动启动。";
+ $("scope").textContent="连接仅读取状态；开始、急停与返回调试统一调用ROS。电流和位移边界由ROS硬件配置管理。";
+ document.querySelector(".plot-foot").textContent="目标扭矩非实测；速度来自ROS输出轴反馈。显示约20 Hz，不用于5 ms截止期验收。";
+}else {
+ $("mode").textContent="独立调参入口 ｜ 手动停止";
+ $("scope").textContent="不需要上层ROS预先启动。点击开始才启动本轮专用底层控制；无需终端START。";
+}
+controls();draw();poll();
+</script></body></html>

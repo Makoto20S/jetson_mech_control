@@ -17,6 +17,7 @@
   <depend>realtime_tools</depend>
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>mech_exo_state</exec_depend>
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>

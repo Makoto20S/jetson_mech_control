@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "mode": "ordinary_fixed_pose",
+  "stiffness_nm_per_rad": [10.0, 10.0],
+  "damping_nm_s_per_rad": [0.0, 0.0],
+  "motor_torque_cap_nm": [10.0, 10.0],
+  "feedback_current_limit_a": [6.0, 6.0],
+  "relative_travel_limit_deg": [60.0, 60.0],
+  "duration_s": 30.0,
+  "control_period_s": 0.005,
+  "expected_feedback_period_s": 0.020,
+  "reference_policy": "capture_at_start",
+  "require_terminal_start": true
+}

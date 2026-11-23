@@ -29,6 +29,15 @@
         "mech_exo_state"
       ],
       "hardware_auto_start": false
+    },
+    "ref01_native": {
+      "packages_up_to": [
+        "mech_controllers",
+        "mech_simulation",
+        "mech_bringup",
+        "mech_assist_control"
+      ],
+      "hardware_auto_start": false
     }
   },
   "git_policy": {

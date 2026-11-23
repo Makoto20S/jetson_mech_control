@@ -95,6 +95,10 @@ class RobotState:
     alpha_velocity_valid: bool = False
     q_position: list = field(default_factory=lambda: [0.]*2)
     q_valid: bool = False
+    q_velocity: list = field(default_factory=lambda: [0.]*2)
+    q_velocity_valid: bool = False
+    q_velocity_reason: str = ""
+    q_velocity_condition: float = 0.
     q_reason: str = ''
     q_closure_residual_m: float = 0.
     mapping_confirmed: bool = False

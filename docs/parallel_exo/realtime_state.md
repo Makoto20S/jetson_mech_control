@@ -36,7 +36,7 @@ Windows 历史回放使用 verify_state_windows.py --mit-replay <包含两份总
 
 新增`q_position`、`q_valid`、`q_reason`、`q_closure_residual_m`。必须具备有效电机源、已确认映射、收敛且在分支内，才发布有效q；否则q与残差为NaN，原因明确记录。源时间/接收年龄沿用`sources[0]`，header仍是聚合发布时间。失败后保留内部求解种子便于恢复，但不会把旧结果发布为当前有效值。ROS时钟回退重置种子。
 
-IMU是否存在、有效或对齐都不影响q求解；IMU保留独立字段，阻抗输入与步态识别留在上层。此处没有新增IMU解算，也不输出尚未实现的q速度。
+IMU是否存在、有效或对齐都不影响q求解；IMU保留独立字段，阻抗输入与步态识别留在上层。姿态角速度由电机速度经 MuJoCo 闭链雅可比投影得到，字段为 q_velocity、q_velocity_valid、q_velocity_reason、q_velocity_condition；无效时填 NaN。连续阻抗软件闭环见 [运行说明](impedance_simulation.md)。
 
 单独对主动角调用`mj_forward`不会自动求出未知的闭链关节位置；此接口补齐所需的位置约束，不另建几何公式。参考[MuJoCo官方计算接口](https://mujoco.readthedocs.io/en/stable/APIreference/APIfunctions.html)。数值收敛、ROS链路软件测试与实机零位/精度验收分别记录。
 

@@ -403,10 +403,18 @@ hardware_interface::CallbackReturn Ak30System::on_deactivate(
 
 hardware_interface::CallbackReturn Ak30System::on_error(
     const rclcpp_lifecycle::State& previous_state) {
+  if (command_trace_) command_trace_->record("hardware_error_begin");
   raw_values_[3] = 0.0;
   const auto result = CompositeSystem::on_error(previous_state);
+  // Error -> UNCONFIGURED must release the exclusive port as cleanup does.
+  // The runtime is stopped first. No disable/enable packet or disk dump here.
+  if (serial_) serial_->close();
+  if (command_trace_) command_trace_->record("hardware_error_revoked");
   enqueue_summary(FeedbackTelemetryReason::Error);
-  flush_trace();
+  // on_error may run synchronously inside the manager read/write cycle.
+  // Keep the preallocated trace in memory; serialize at cleanup/shutdown or
+  // destruction, never here where disk I/O can mask the originating fault.
+  if (command_trace_) command_trace_->record("hardware_error_end");
   return result;
 }
 

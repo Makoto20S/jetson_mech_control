@@ -1,4 +1,4 @@
-<mujoco model="REF01_dynamics_CAD_candidate">
+<mujoco model="PH-EXO_dynamics_CAD_candidate">
   <compiler angle="radian" autolimits="true" meshdir="assets/ref01_cad_v1" inertiafromgeom="false" />
   <option timestep="0.0005" gravity="0 9.8100000000000005 0" integrator="implicitfast" solver="Newton" iterations="100" tolerance="1e-12" jacobian="dense" />
   <statistic center="-.025 .09 .065" extent=".45" />

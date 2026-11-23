@@ -1,6 +1,6 @@
 # PH-EXO 并联外骨骼控制系统
 
-PH-EXO 是工程名，ROS 对外名称使用 `ph_exo`，统一状态话题为 `/ph_exo/state`。REF-01 是沿用的并联髋关节机构模型编号。
+工程统一称为 **PH-EXO（并联外骨骼控制系统）**，工程介绍、控制器方案、提示词和图表均使用 PH-EXO。ROS 对外标识为 `ph_exo`，统一状态话题为 `/ph_exo/state`。**REF-01 仅为机构模型编号，不作为项目名称**；既有 `ref01` 模型文件、类名和兼容入口保留。
 
 本开发分支统一维护ROS、电机框架、CtrBoard IMU、REF01 MuJoCo模型与动力学接口。
 主入口：[文件架构与Git管理要求](docs/parallel_exo/project_management.md) · [新设备恢复](docs/parallel_exo/restore.md)。
@@ -337,4 +337,4 @@ flowchart TD
 [速度复测记录](docs/validation/2026-10-20-dm4340-speed-retest.md)。
 
 
-EXO-STATE-001：[REF01实时状态接入](docs/parallel_exo/realtime_state.md)提供只读电机/IMU聚合、历史映射候选与明确质量标志；新增`state`构建组合。状态接入不等于ROS–MuJoCo控制闭环或硬件采样新鲜度验收。
+EXO-STATE-001：[PH-EXO 实时状态接入](docs/parallel_exo/realtime_state.md)提供只读电机/IMU聚合、历史映射候选与明确质量标志；新增`state`构建组合。状态接入不等于ROS–MuJoCo控制闭环或硬件采样新鲜度验收。

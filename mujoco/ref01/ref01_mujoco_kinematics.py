@@ -118,7 +118,11 @@ class MuJoCoForwardKinematics:
                 iterations += used
             q = self.data.qpos[self.output].copy()
             tol = self.branch_tolerance_rad
-            if not (-math.pi/4-tol <= q[0] <= math.pi/4+tol and -tol <= q[1] <= math.pi/4+tol):
+            # At beta=-11 deg, the supported REF-01 IK branch has phi=8.726909 deg.
+            # A folded encoder pose can project back into the beta interval.
+            phi = math.pi/2 - (target[0] + target[1])/2
+            if not (phi >= math.radians(8.726909068309409)-tol
+                    and abs(q[0]) <= math.pi/3+tol and math.radians(-11)-tol <= q[1] <= math.pi/4+tol):
                 raise KinematicsError('outside_ref01_branch')
             # Return computed values without angle wrapping or boundary clamping.
             result = ForwardResult(tuple(float(x) for x in q), residual, iterations)
@@ -128,3 +132,25 @@ class MuJoCoForwardKinematics:
         self._seed = self.data.qpos.copy()
         self._last_alpha, self._last_result = target.copy(), result
         return result
+
+    def velocity(self, alpha, alpha_velocity):
+        """Project measured input velocities through the native constraint Jacobian."""
+        self.solve(alpha)
+        speed = np.asarray(alpha_velocity, dtype=float)
+        if speed.shape != (2,) or not np.isfinite(speed).all():
+            raise KinematicsError('expected_two_finite_velocities')
+        self._constraints()
+        jac = self.data.efc_J.reshape(6, self.model.nv)
+        dependent = jac[:, self.dependent]
+        condition = float(np.linalg.cond(dependent))
+        if not np.isfinite(condition) or condition > 1e8:
+            raise KinematicsError('ill_conditioned_velocity_jacobian')
+        try:
+            full = np.zeros(self.model.nv)
+            full[self.active] = speed
+            full[self.dependent] = np.linalg.solve(dependent, -jac[:, self.active] @ speed)
+        except np.linalg.LinAlgError as error:
+            raise KinematicsError('singular_velocity_jacobian') from error
+        if not np.isfinite(full).all():
+            raise KinematicsError('nonfinite_velocity')
+        return full[self.output].copy(), condition
